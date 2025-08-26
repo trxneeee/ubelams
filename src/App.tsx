@@ -15,11 +15,20 @@ import Footer from "./components/Footer";
 import Login from "./pages/Login";
 import "./App.css"; // 👈 for layout styling
 
+
+interface Todo {
+  id: string;
+  description: string;
+  doneBy: string;
+  access:string;
+  status: string;
+}
+
 const API_URL =
   "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
 
 function TodoPanel() {
-  const [todos, setTodos] = useState<any[]>([]);
+const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(false);
  const user = JSON.parse(localStorage.getItem("user") || "{}");
 const fetchTodos = async () => {
@@ -41,15 +50,15 @@ const fetchTodos = async () => {
       const done_by = headers.indexOf("done_by");
       const status = headers.indexOf("status");
 
-      let parsed = rows.slice(1).map((row: any[]) => ({
-        id: row[todo_id],
-        description: row[description],
-        doneBy: row[done_by],
-        status: row[status],
-      }));
+let parsed: Todo[] = rows.slice(1).map((row: any[]) => ({
+  id: row[todo_id],
+  description: row[description],
+  doneBy: row[done_by],
+  status: row[status],
+}));
 
-      // Sort descending by todo_id (newest first)
-      parsed = parsed.sort((a, b) => Number(b.id) - Number(a.id));
+// ✅ Now a & b are typed as Todo
+parsed = parsed.sort((a: Todo, b: Todo) => Number(b.id) - Number(a.id));
 
       setTodos(parsed);
     }
