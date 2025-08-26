@@ -144,7 +144,7 @@ parsed = parsed.sort((a: Todo, b: Todo) => Number(b.id) - Number(a.id));
           marginBottom: "12px",
         }}
       >
-        <h3>Todo</h3>
+        <h3>To-do List</h3>
         <button
           onClick={handleAddTodo}
           style={{
