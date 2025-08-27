@@ -19,8 +19,8 @@ import {
   Stack,
   TablePagination
 } from "@mui/material";
+import { Box, ToggleButtonGroup, ToggleButton } from "@mui/material";
 import Loader from "../components/Loader";
-import { Box } from "@mui/material";
 import Inventory2Icon from "@mui/icons-material/Inventory2";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import AssignmentTurnedInIcon from "@mui/icons-material/AssignmentTurnedIn";
@@ -33,6 +33,7 @@ const API_URL =
 
 interface InventoryItem {
   item_id: string;
+   type: "Consumable" | "Non-Consumable";
   name: string;
   location: string;
   brand_model: string;
@@ -40,11 +41,15 @@ interface InventoryItem {
   borrowed: string;
   barcode: string;
   serial_number: string;
+  calibration: string;
+  calibration_count: number;
 }
 
 
 
 const InventoryPage = () => {
+    const [editing, setEditing] = useState(false);
+
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
@@ -56,16 +61,32 @@ const handleChangePage = (_: unknown, newPage: number) => {
 
   // modal state
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<InventoryItem>({
-    item_id: Date.now().toString(),
-    name: "",
-    location: "",
-    brand_model: "",
-    total_quantity: "",
-    borrowed: "0",
-    barcode: "",
-    serial_number: "",
-  });
+const getPHItemId = () => {
+  const now = new Date();
+  const phTime = new Date(now.getTime() + 8 * 60 * 60 * 1000); // add 8 hours
+  return phTime.getTime().toString(); // convert to timestamp string
+};
+
+const [form, setForm] = useState<InventoryItem>({
+  item_id: getPHItemId(),
+  type: "Non-Consumable",
+  name: "",
+  location: "",
+  brand_model: "",
+  total_quantity: "",
+  borrowed: "0",
+  barcode: "",
+  serial_number: "",
+  calibration: "Without Calibration",
+  calibration_count: 0,
+});
+
+  const handleEditClick = (item: InventoryItem) => {
+  setForm({ ...item }); // fill form with item data
+  setEditing(true);
+  setOpen(true);
+};
+
 
   const fetchInventory = async () => {
     setLoading(true);
@@ -82,6 +103,7 @@ const handleChangePage = (_: unknown, newPage: number) => {
 
         const parsed = rows.slice(1).map((row: any[]) => ({
           item_id: row[idx("item_id")],
+          type: row[idx("type")],
           name: row[idx("name")],
           location: row[idx("location")],
           brand_model: row[idx("brand_model")],
@@ -89,6 +111,8 @@ const handleChangePage = (_: unknown, newPage: number) => {
           borrowed: row[idx("borrowed")],
           barcode: row[idx("barcode")],
           serial_number: row[idx("serial_number")],
+          calibration: row[idx("calibration")],
+          calibration_count: row[idx("calibration_count")],
         }));
 
         setInventory(parsed);
@@ -114,6 +138,7 @@ const handleCreate = async () => {
     setOpen(false);
     setForm({
       item_id: "",
+      type:"Non-Consumable",
       name: "",
       location: "",
       brand_model: "",
@@ -121,6 +146,8 @@ const handleCreate = async () => {
       borrowed: "0",
       barcode: "",
       serial_number: "",
+      calibration: "Without Calibration",
+      calibration_count: 0,
     });
 
     fetchInventory();
@@ -146,24 +173,30 @@ const handleDelete = async (item_id: string) => {
   }
 };
 
-const handleUpdate = async (item: InventoryItem) => {
-  const updatedName = window.prompt("Update Name:", item.name);
-  if (updatedName === null) return; // Cancelled
+const handleUpdateItem = async () => {
   try {
     await axios.get(API_URL, {
       params: {
         sheet: "inventory",
         action: "update",
-        item_id: item.item_id,
-        name: updatedName,
-        location: item.location,
-        brand_model: item.brand_model,
-        total_quantity: item.total_quantity,
-        borrowed: item.borrowed,
-        barcode: item.barcode,
-        serial_number: item.serial_number,
+        ...form, // send the whole form data
       },
     });
+    setOpen(false);
+    setForm({
+      item_id: "",
+      type:"Non-Consumable",
+      name: "",
+      location: "",
+      brand_model: "",
+      total_quantity: "",
+      borrowed: "0",
+      barcode: "",
+      serial_number: "",
+      calibration: "Without Calibration",
+      calibration_count: 0,
+    });
+    setEditing(false);
     fetchInventory();
   } catch (err) {
     console.error("Failed to update item", err);
@@ -293,7 +326,6 @@ const handleUpdate = async (item: InventoryItem) => {
         <TableHead>
           <TableRow>
             <TableCell sx={{ px: { xs: 0.5, sm: 1 } }}> </TableCell>
-            <TableCell>ID</TableCell>
             <TableCell>Name</TableCell>
             <TableCell>Location</TableCell>
             <TableCell>Brand/Model</TableCell>
@@ -322,7 +354,6 @@ const handleUpdate = async (item: InventoryItem) => {
                     }}
                   />
                 </TableCell>
-                <TableCell>{item.item_id}</TableCell>
                 <TableCell>{item.name}</TableCell>
                 <TableCell>{item.location}</TableCell>
                 <TableCell>{item.brand_model}</TableCell>
@@ -335,7 +366,7 @@ const handleUpdate = async (item: InventoryItem) => {
   <Tooltip title="Update">
     <IconButton
       color="primary"
-      onClick={() => handleUpdate(item)}
+       onClick={() => handleEditClick(item)}
       sx={{
         bgcolor: "#e3f2fd",
         "&:hover": { bgcolor: "#90caf9" },
@@ -382,88 +413,166 @@ const handleUpdate = async (item: InventoryItem) => {
 </Container>
 
 
-      {/* Add Item Modal */}
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: "bold", color: "#B71C1C" }}>
-          ➕ Add Inventory Item
-        </DialogTitle>
-<DialogContent dividers>
-  <Stack spacing={2} mt={1}>
-    {/* Removed Item ID field */}
-    <TextField
-      label="Name"
-      value={form.name}
-      onChange={(e) => setForm({ ...form, name: e.target.value })}
-      fullWidth
-      variant="outlined"
-    />
-    <TextField
-      label="Location"
-      value={form.location}
-      onChange={(e) => setForm({ ...form, location: e.target.value })}
-      fullWidth
-      variant="outlined"
-    />
-    <TextField
-      label="Brand/Model"
-      value={form.brand_model}
-      onChange={(e) => setForm({ ...form, brand_model: e.target.value })}
-      fullWidth
-      variant="outlined"
-    />
-    <TextField
-      label="Total Quantity"
-      type="number"
-      value={form.total_quantity}
-      onChange={(e) =>
-        setForm({ ...form, total_quantity: e.target.value })
-      }
-      fullWidth
-      variant="outlined"
-    />
-    <TextField
-      label="Barcode"
-      value={form.barcode}
-      onChange={(e) => setForm({ ...form, barcode: e.target.value })}
-      fullWidth
-      variant="outlined"
-    />
-    <TextField
-      label="Serial Number"
-      value={form.serial_number}
-      onChange={(e) =>
-        setForm({ ...form, serial_number: e.target.value })
-      }
-      fullWidth
-      variant="outlined"
-    />
-  </Stack>
-</DialogContent>
-        <DialogActions sx={{ p: 2 }}>
-          <Button
-            onClick={() => setOpen(false)}
-            sx={{
-              textTransform: "none",
-              color: "#B71C1C",
-              fontWeight: "bold",
-            }}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            onClick={handleCreate}
-            sx={{
-              bgcolor: "#B71C1C",
-              "&:hover": { bgcolor: "#D32F2F" },
-              textTransform: "none",
-              borderRadius: "8px",
-            }}
-          >
-            Save
-          </Button>
-        </DialogActions>
-      </Dialog>
+<Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
+  <DialogTitle sx={{ fontWeight: "bold", color: "#B71C1C" }}>
+   {editing ? "Updating Inventory Item" : "Add Inventory Item"}
+  </DialogTitle>
+
+  <DialogContent dividers>
+    <Stack spacing={2} mt={1}>
+      {/* Item Type Selection */}
+<ToggleButtonGroup
+  value={form.type}
+  exclusive
+  onChange={(_, value) => value && setForm({ ...form, type: value })}
+  fullWidth
+  sx={{ mb: 1 }}
+>
+  <ToggleButton
+    value="Non-Consumable"
+    sx={{
+      flex: 1,
+      "&.Mui-selected": { bgcolor: "#B71C1C", color: "#FFF", "&:hover": { bgcolor: "#D32F2F" } },
+    }}
+  >
+    Non-Consumable
+  </ToggleButton>
+  <ToggleButton
+    value="Consumable"
+    sx={{
+      flex: 1,
+      "&.Mui-selected": { bgcolor: "#B71C1C", color: "#FFF", "&:hover": { bgcolor: "#D32F2F" } },
+    }}
+  >
+    Consumable
+  </ToggleButton>
+</ToggleButtonGroup>
+
+{/* Conditionally show Barcode & Serial Number only if Non-Consumable */}
+{form.type === "Non-Consumable" && (
+<Stack direction="row" spacing={2}>
+  <TextField
+    label="Barcode"
+    value={form.barcode}
+    onChange={(e) => setForm({ ...form, barcode: e.target.value })}
+    fullWidth
+    variant="outlined"
+  />
+  <TextField
+    label="Serial Number"
+    value={form.serial_number}
+    onChange={(e) => setForm({ ...form, serial_number: e.target.value })}
+    fullWidth
+    variant="outlined"
+  />
+</Stack>
+)}
+
+      {/* Name */}
+      <TextField
+        label="Name"
+        value={form.name}
+        onChange={(e) => setForm({ ...form, name: e.target.value })}
+        fullWidth
+        variant="outlined"
+      />
+
+      {/* Brand/Model */}
+      <TextField
+        label="Brand/Model"
+        value={form.brand_model}
+        onChange={(e) => setForm({ ...form, brand_model: e.target.value })}
+        fullWidth
+        variant="outlined"
+      />
+
+      {/* Location & Total Quantity */}
+    <Stack spacing={2} direction="row">
+  <TextField
+    label="Location"
+    value={form.location}
+    onChange={(e) => setForm({ ...form, location: e.target.value })}
+    fullWidth
+    variant="outlined"
+  />
+  <TextField
+    label="Total Quantity"
+    type="number"
+    value={form.total_quantity}
+    onChange={(e) => setForm({ ...form, total_quantity: e.target.value })}
+    fullWidth
+    variant="outlined"
+  />
+</Stack>
+
+      {/* Calibration Toggle */}
+<ToggleButtonGroup
+  value={form.calibration || "Without Calibration"}
+  exclusive
+  onChange={(_, value) => value && setForm({ ...form, calibration: value })}
+  fullWidth
+  sx={{ mt: 1 }}
+>
+  <ToggleButton
+    value="Without Calibration"
+    sx={{
+      flex: 1,
+      "&.Mui-selected": { bgcolor: "#B71C1C", color: "#FFF", "&:hover": { bgcolor: "#D32F2F" } },
+    }}
+  >
+    Without Calibration
+  </ToggleButton>
+  <ToggleButton
+    value="With Calibration"
+    sx={{
+      flex: 1,
+      "&.Mui-selected": { bgcolor: "#B71C1C", color: "#FFF", "&:hover": { bgcolor: "#D32F2F" } },
+    }}
+  >
+    With Calibration
+  </ToggleButton>
+</ToggleButtonGroup>
+
+{/* Conditionally show "How many used to calibrate" field */}
+{form.calibration === "With Calibration" && (
+<TextField
+  label="How many times will it be used to calibrate?"
+  type="number"
+  value={form.calibration_count || 0}
+  onChange={(e) =>
+    setForm({ ...form, calibration_count: Number(e.target.value) })
+  }
+  fullWidth
+  variant="outlined"
+  sx={{ mt: 2 }}
+/>
+)}
+
+    </Stack>
+  </DialogContent>
+
+  <DialogActions sx={{ p: 2 }}>
+    <Button
+      onClick={() => setOpen(false)}
+      sx={{ textTransform: "none", color: "#B71C1C", fontWeight: "bold" }}
+    >
+      Cancel
+    </Button>
+<Button
+  variant="contained"
+  onClick={editing ? handleUpdateItem : handleCreate}
+  sx={{
+    bgcolor: "#B71C1C",
+    "&:hover": { bgcolor: "#D32F2F" },
+    textTransform: "none",
+    borderRadius: "8px",
+  }}
+>
+  {editing ? "Update" : "Save"}
+</Button>
+  </DialogActions>
+</Dialog>
+
     </div>
   );
 };

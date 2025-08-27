@@ -273,7 +273,7 @@ function App() {
           }
         />
         <Route
-          path="/staffs"
+          path="/staff"
           element={
             <AppLayout>
               <StaffPage />
@@ -281,7 +281,7 @@ function App() {
           }
         />
         <Route
-          path="/borrows"
+          path="/borrow"
           element={
             <AppLayout>
               <BorrowPage />
@@ -297,7 +297,7 @@ function App() {
           }
         />
         <Route
-          path="/maintenances"
+          path="/maintenance"
           element={
             <AppLayout>
               <MaintenancePage />
@@ -305,7 +305,7 @@ function App() {
           }
         />
         <Route
-          path="/databases"
+          path="/database"
           element={
             <AppLayout>
               <DatabasePage />
