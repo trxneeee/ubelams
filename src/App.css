@@ -140,4 +140,7 @@ html, body, #root {
   .notification-panel {
     display: none;
   }
+  .calendar-panel{
+    display: none;
+  }
 }

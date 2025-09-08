@@ -1,55 +1,63 @@
 // src/pages/InventoryPage.tsx
-import { useEffect, useState } from "react";
-import axios from "axios";
-import {
-  Container,
-  Card,
-  Typography,
-  Table,
-  TableHead,
-  TableRow,
-  TableCell,
-  TableBody,
-  Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  Stack,
-  TablePagination
-} from "@mui/material";
-import { Box, ToggleButtonGroup, ToggleButton } from "@mui/material";
-import Loader from "../components/Loader";
+import AssignmentTurnedInIcon from "@mui/icons-material/AssignmentTurnedIn";
+import DeleteIcon from "@mui/icons-material/Delete";
+import EditIcon from "@mui/icons-material/Edit";
 import Inventory2Icon from "@mui/icons-material/Inventory2";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
-import AssignmentTurnedInIcon from "@mui/icons-material/AssignmentTurnedIn";
-import EditIcon from "@mui/icons-material/Edit";
-import DeleteIcon from "@mui/icons-material/Delete";
-import { IconButton, Tooltip } from "@mui/material";
+import {
+  Box,
+  Button,
+  Card,
+  Container,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  IconButton,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TablePagination,
+  TableRow,
+  TextField,
+  ToggleButton,
+  ToggleButtonGroup,
+  Tooltip,
+  Typography
+} from "@mui/material";
+import axios from "axios";
+import { useEffect, useState } from "react";
+import Loader from "../components/Loader";
 
 const API_URL =
   "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
 
 interface InventoryItem {
-  item_id: string;
-   type: "Consumable" | "Non-Consumable";
-  name: string;
-  location: string;
+  num: string;
+  equipment_name: string;
+  facility: string;
   brand_model: string;
-  total_quantity: string;
+  first_sem: string;
+  second_sem: string;
+  total_qty: string;
   borrowed: string;
-  barcode: string;
-  serial_number: string;
-  calibration: string;
-  calibration_count: number;
+  yes: string;
+  no: string;
+  location: string;
+  soft_hard: string;
+  e_location: string;
+  bat_type: string;
+  bat_qty: string;
+  bat_total: string;
 }
 
 
 
 const InventoryPage = () => {
     const [editing, setEditing] = useState(false);
-
+const [viewing, setViewing] = useState(false);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
@@ -58,35 +66,84 @@ const rowsPerPage = 10;
 const handleChangePage = (_: unknown, newPage: number) => {
   setPage(newPage);
 };
-
+const [searchQuery, setSearchQuery] = useState("");
   // modal state
   const [open, setOpen] = useState(false);
-const getPHItemId = () => {
-  const now = new Date();
-  const phTime = new Date(now.getTime() + 8 * 60 * 60 * 1000); // add 8 hours
-  return phTime.getTime().toString(); // convert to timestamp string
-};
-
+  const [itemType, setItemType] = useState("Non-Consumable");
+  const [battery, setBattery] = useState("Without Battery");
 const [form, setForm] = useState<InventoryItem>({
-  item_id: getPHItemId(),
-  type: "Non-Consumable",
-  name: "",
-  location: "",
+  num: "",
+  equipment_name: "",
+  facility: "",
   brand_model: "",
-  total_quantity: "",
+  first_sem: "",
+  second_sem: "",
+  total_qty: "1",
   borrowed: "0",
-  barcode: "",
-  serial_number: "",
-  calibration: "Without Calibration",
-  calibration_count: 0,
+  yes: "Yes",
+  no: "",
+  location: "",
+  soft_hard: "N/A",
+  e_location: "",
+  bat_type: "",
+  bat_qty: "",
+  bat_total: "",
 });
 
-  const handleEditClick = (item: InventoryItem) => {
+const handleEditClick = (item: InventoryItem) => {
   setForm({ ...item }); // fill form with item data
   setEditing(true);
+
+  // Check if battery fields are not null or empty
+  if (item.bat_type || item.bat_qty) {
+    setBattery("With Battery");
+  } else {
+    setBattery("Without Battery"); // or whatever default you want
+  }
+
+  setOpen(true);
+};
+const filteredInventory = inventory.filter(
+  (item) =>
+    item.equipment_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    item.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    item.brand_model.toLowerCase().includes(searchQuery.toLowerCase())
+);
+const handleViewClick = (item: InventoryItem) => {
+  setForm({ ...item }); // fill form with item data
+  setViewing(true);
+  setEditing(false);
+  // Check if battery fields are not null or empty
+  if (item.bat_type || item.bat_qty) {
+    setBattery("With Battery");
+  } else {
+    setBattery("Without Battery"); // or whatever default you want
+  }
   setOpen(true);
 };
 
+const resetForm = () => {
+  setEditing(false);
+  setViewing(false);
+  setForm({
+    num: "",
+    equipment_name: "",
+    facility: "",
+    brand_model: "",
+    first_sem: "",
+    second_sem: "",
+    total_qty: "1",
+    borrowed: "0",
+    yes: "Yes",
+    no: "",
+    location: "",
+    soft_hard: "N/A",
+    e_location: "",
+    bat_type: "",
+    bat_qty: "",
+    bat_total: "",
+  });
+};
 
   const fetchInventory = async () => {
     setLoading(true);
@@ -98,23 +155,27 @@ const [form, setForm] = useState<InventoryItem>({
       const result = response.data;
       if (result.success) {
         const rows = result.data;
-        const headers = rows[0];
+        const headers = rows[1];
         const idx = (key: string) => headers.indexOf(key);
 
-        const parsed = rows.slice(1).map((row: any[]) => ({
-          item_id: row[idx("item_id")],
-          type: row[idx("type")],
-          name: row[idx("name")],
-          location: row[idx("location")],
-          brand_model: row[idx("brand_model")],
-          total_quantity: row[idx("total_quantity")],
-          borrowed: row[idx("borrowed")],
-          barcode: row[idx("barcode")],
-          serial_number: row[idx("serial_number")],
-          calibration: row[idx("calibration")],
-          calibration_count: row[idx("calibration_count")],
+        const parsed = rows.slice(2).map((row: any[]) => ({
+          num: row[idx("NO.")],
+          equipment_name: row[idx("EQUIPMENT_NAME")],
+          facility: row[idx("FACILITY")],
+          brand_model: row[idx("BRAND_MODEL")],
+          first_sem: row[idx("FIRST_SEM")],
+          second_sem: row[idx("SECOND_SEM")],
+          total_qty: row[idx("TOTAL_QTY")],
+          borrowed: row[idx("BORROWED")],
+          yes: row[idx("YES")],
+          no: row[idx("NO")],
+          location: row[idx("LOCATION")],
+          soft_hard: row[idx("SOFT_HARD")],
+          e_location: row[idx("E_LOCATION")],
+          bat_type: row[idx("BAT_TYPE")],
+          bat_qty: row[idx("BAT_QTY")],
+          bat_total: row[idx("BAT_TOTAL")]
         }));
-
         setInventory(parsed);
       }
     } catch (err) {
@@ -137,17 +198,22 @@ const handleCreate = async () => {
 
     setOpen(false);
     setForm({
-      item_id: "",
-      type:"Non-Consumable",
-      name: "",
-      location: "",
-      brand_model: "",
-      total_quantity: "",
-      borrowed: "0",
-      barcode: "",
-      serial_number: "",
-      calibration: "Without Calibration",
-      calibration_count: 0,
+      num: "",
+  equipment_name: "",
+  facility: "",
+  brand_model: "",
+  first_sem: "",
+  second_sem: "",
+  total_qty: "1",
+  borrowed: "0",
+  yes: "Yes",
+  no: "",
+  location: "",
+  soft_hard: "N/A",
+  e_location: "",
+  bat_type: "",
+  bat_qty: "",
+  bat_total: "",
     });
 
     fetchInventory();
@@ -157,14 +223,14 @@ const handleCreate = async () => {
 };
 
 // Add these handlers above the return statement
-const handleDelete = async (item_id: string) => {
+const handleDelete = async (num: string) => {
   if (!window.confirm("Are you sure you want to delete this item?")) return;
   try {
     await axios.get(API_URL, {
       params: {
         sheet: "inventory",
         action: "delete",
-        item_id,
+        num,
       },
     });
     fetchInventory();
@@ -184,17 +250,22 @@ const handleUpdateItem = async () => {
     });
     setOpen(false);
     setForm({
-      item_id: "",
-      type:"Non-Consumable",
-      name: "",
-      location: "",
-      brand_model: "",
-      total_quantity: "",
-      borrowed: "0",
-      barcode: "",
-      serial_number: "",
-      calibration: "Without Calibration",
-      calibration_count: 0,
+    num: "",
+  equipment_name: "",
+  facility: "",
+  brand_model: "",
+  first_sem: "",
+  second_sem: "",
+  total_qty: "1",
+  borrowed: "0",
+  yes: "Yes",
+  no: "",
+  location: "",
+  soft_hard: "N/A",
+  e_location: "",
+  bat_type: "",
+  bat_qty: "",
+  bat_total: "",
     });
     setEditing(false);
     fetchInventory();
@@ -213,8 +284,9 @@ const handleUpdateItem = async () => {
 <Container maxWidth="lg" sx={{ mt: 4 }}>
   {/* Fixed summary cards */}
 <Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={2}>
+  {/* Search Bar */}
   {/* Summary Cards */}
-  <Card sx={{ flex: 1, p: 1.5, borderRadius: 2, boxShadow: 2, display: "flex", alignItems: "center", gap: 1.5 }}>
+  <Card sx={{ flex: 1, p: 1.5, borderRadius: 2, display: "flex", alignItems: "center", gap: 1.5 }}>
     <Inventory2Icon sx={{ fontSize: 30, color: "#B71C1C" }} />
     <Box>
       <Typography variant="caption" color="text.secondary">Total Items</Typography>
@@ -222,17 +294,17 @@ const handleUpdateItem = async () => {
     </Box>
   </Card>
 
-  <Card sx={{ flex: 1, p: 1.5, borderRadius: 2, boxShadow: 2, display: "flex", alignItems: "center", gap: 1.5 }}>
+  <Card sx={{ flex: 1, p: 1.5, borderRadius: 2, display: "flex", alignItems: "center", gap: 1.5 }}>
     <WarningAmberIcon sx={{ fontSize: 30, color: "#FF8F00" }} />
     <Box>
       <Typography variant="caption" color="text.secondary">Low Stock</Typography>
       <Typography variant="subtitle1" sx={{ fontWeight: "bold", color: "#FF8F00" }}>
-        {inventory.filter(i => parseInt(i.total_quantity) <= 5).length}
+        {inventory.filter(i => parseInt(i.total_qty) <= 5).length}
       </Typography>
     </Box>
   </Card>
 
-  <Card sx={{ flex: 1, p: 1.5, borderRadius: 2, boxShadow: 2, display: "flex", alignItems: "center", gap: 1.5 }}>
+  <Card sx={{ flex: 1, p: 1.5, borderRadius: 2, display: "flex", alignItems: "center", gap: 1.5 }}>
     <AssignmentTurnedInIcon sx={{ fontSize: 30, color: "#1B5E20" }} />
     <Box>
       <Typography variant="caption" color="text.secondary">Borrowed</Typography>
@@ -246,9 +318,12 @@ const handleUpdateItem = async () => {
   <Stack direction={{ xs: "column", sm: "row" }} spacing={1} mb={0.5}>
     <Button
       variant="contained"
-      onClick={() => setOpen(true)}
+       onClick={() => {
+    setOpen(true);
+    resetForm();
+  }}
       sx={{
-        bgcolor: "#B71C1C",
+        bgcolor: "#f8a41a",
         "&:hover": { bgcolor: "#D32F2F" },
         borderRadius: 1.5,
         textTransform: "none",
@@ -257,7 +332,7 @@ const handleUpdateItem = async () => {
         fontSize: "0.8rem"
       }}
     >
-      ➕ Add Item
+      + Add Item
     </Button>
 
     <Button
@@ -274,8 +349,8 @@ const handleUpdateItem = async () => {
       onClick={async () => {
         if (!window.confirm("Are you sure you want to delete selected items?")) return;
         try {
-          await Promise.all(selectedItems.map(item_id =>
-            axios.get(API_URL, { params: { sheet: "inventory", action: "delete", item_id } })
+          await Promise.all(selectedItems.map(num =>
+            axios.get(API_URL, { params: { sheet: "inventory", action: "delete", num } })
           ));
           setSelectedItems([]);
           fetchInventory();
@@ -288,13 +363,92 @@ const handleUpdateItem = async () => {
     </Button>
   </Stack>
 </Stack>
+<Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={2}>
+     <ToggleButtonGroup
+      value={itemType}
+      exclusive
+      fullWidth
+      sx={{
+        mb: 2,
+        borderRadius: 2,
+        overflow: "hidden", // nice rounded edges
+      }}
+    >
+      <ToggleButton
+        value="non-consumable"
+        selected={itemType === "Non-Consumable"}
+        onClick={() => setItemType("Non-Consumable")}
+        sx={{
+          flex: 1,
+          height: 48,
+          textTransform: "none",
+          fontSize: "0.9rem",
+          fontWeight: "bold",
+          "&.Mui-selected": {
+            bgcolor: "#d32f2f",
+            color: "#fff",
+            "&:hover": { bgcolor: "#d32f2f" },
+          },
+        }}
+      >
+        Non-Consumable
+      </ToggleButton>
 
+      <ToggleButton
+        value="consumable"
+        selected={itemType === "Consumable"}
+        onClick={() => setItemType("Consumable")}
+        sx={{
+          flex: 1,
+          height: 48,
+          textTransform: "none",
+          fontSize: "0.9rem",
+          fontWeight: "bold",
+          "&.Mui-selected": {
+            bgcolor: "#d32f2f",
+            color: "#fff",
+            "&:hover": { bgcolor: "#b71c1c" },
+          },
+        }}
+      >
+        Consumable
+      </ToggleButton>
+    </ToggleButtonGroup>
+  </Stack>
+<Box sx={{ mb: 2, display: "flex", justifyContent: "flex-end" }}>
+  <TextField
+     placeholder="Search equipment, location, brand/model..."
+  value={searchQuery}
+  onChange={(e) => {
+    setSearchQuery(e.target.value);
+    setPage(0); // ✅ reset to first page on new search
+  }}
+    variant="outlined"
+    size="small"
+    sx={{
+      width: '100%',
+      bgcolor: "#fff",
+      borderRadius: 3,
+      "& .MuiOutlinedInput-root": {
+        borderRadius: 3,
+        "& fieldset": {
+      borderRadius: 3,
+        },
+        "&:hover fieldset": {
+          borderColor: "#D32F2F",
+        },
+        "&.Mui-focused fieldset": {
+          borderColor: "#B71C1C",
+        },
+      },
+    }}
+  />
+</Box>
   {/* Scrollable table card */}
 <Card
   sx={{
     p: { xs: 1.5, sm: 3 },
     borderRadius: 3,
-    boxShadow: 4,
     backgroundColor: "#fff",
     height: "100%",
     minHeight:'60vh',
@@ -331,38 +485,52 @@ const handleUpdateItem = async () => {
             <TableCell>Brand/Model</TableCell>
             <TableCell>Quantity</TableCell>
             <TableCell>Borrowed</TableCell>
-            <TableCell>Barcode</TableCell>
-            <TableCell>Serial #</TableCell>
-            <TableCell>Action</TableCell>
+            <TableCell>Facility</TableCell>
+            <TableCell>Status</TableCell>
+            <TableCell align="center">Action</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
-          {inventory
+          {filteredInventory
             .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
             .map((item) => (
-              <TableRow key={item.item_id}>
+              <TableRow key={item.num}>
                 <TableCell sx={{ px: { xs: 0.5, sm: 1 } }}>
                   <input
                     type="checkbox"
-                    checked={selectedItems.includes(item.item_id)}
+                    checked={selectedItems.includes(item.num)}
                     onChange={(e) => {
                       if (e.target.checked) {
-                        setSelectedItems([...selectedItems, item.item_id]);
+                        setSelectedItems([...selectedItems, item.num]);
                       } else {
-                        setSelectedItems(selectedItems.filter((id) => id !== item.item_id));
+                        setSelectedItems(selectedItems.filter((id) => id !== item.num));
                       }
                     }}
                   />
                 </TableCell>
-                <TableCell>{item.name}</TableCell>
+                <TableCell>{item.equipment_name}</TableCell>
                 <TableCell>{item.location}</TableCell>
                 <TableCell>{item.brand_model}</TableCell>
-                <TableCell>{item.total_quantity}</TableCell>
-                <TableCell>{item.borrowed}</TableCell>
-                <TableCell>{item.barcode}</TableCell>
-                <TableCell>{item.serial_number}</TableCell>
+                <TableCell align="center">{item.total_qty}</TableCell>
+                <TableCell align="center">{item.borrowed}</TableCell>
+                <TableCell>{item.facility}</TableCell>
+                <TableCell>{item.yes || item.no}</TableCell>
                 <TableCell>
                   <Stack direction="row" spacing={1}>
+                    <Tooltip title="View">
+  <IconButton
+    color="default"
+    onClick={() => handleViewClick(item)}
+   sx={{
+        bgcolor: "#ffebee",
+        "&:hover": { bgcolor: "#484848ff", color: "#fff" },
+        p: 1,
+      }}
+  >
+    <Inventory2Icon fontSize="small" />
+  </IconButton>
+</Tooltip>
+
   <Tooltip title="Update">
     <IconButton
       color="primary"
@@ -380,7 +548,7 @@ const handleUpdateItem = async () => {
   <Tooltip title="Delete">
     <IconButton
       color="error"
-      onClick={() => handleDelete(item.item_id)}
+      onClick={() => handleDelete(item.num)}
       sx={{
         bgcolor: "#ffebee",
         "&:hover": { bgcolor: "#f44336", color: "#fff" },
@@ -398,180 +566,473 @@ const handleUpdateItem = async () => {
       </Table>
 
       {/* Pagination */}
-      <TablePagination
-        component="div"
-        count={inventory.length}
-        page={page}
-        onPageChange={handleChangePage}
-        rowsPerPage={rowsPerPage}
-        rowsPerPageOptions={[10]}
-      />
+<TablePagination
+  component="div"
+  count={filteredInventory.length}   // ✅ use filtered length
+  page={page}
+  onPageChange={handleChangePage}
+  rowsPerPage={rowsPerPage}
+  rowsPerPageOptions={[10]}          // fixed 10 per page
+/>
+
     </Box>
   )}
 </Card>
 
 </Container>
 
-
-<Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
-  <DialogTitle sx={{ fontWeight: "bold", color: "#B71C1C" }}>
-   {editing ? "Updating Inventory Item" : "Add Inventory Item"}
-  </DialogTitle>
+<Dialog open={open} onClose={() => {
+    setOpen(false);
+    resetForm();
+  }} maxWidth="lg" fullWidth>
+<DialogTitle sx={{ fontWeight: "bold", color: "#B71C1C" }}>
+  {viewing
+    ? "View Inventory Item"
+    : editing
+    ? "Updating Inventory Item"
+    : "Add Inventory Item"}
+</DialogTitle>
 
   <DialogContent dividers>
-    <Stack spacing={2} mt={1}>
-      {/* Item Type Selection */}
-<ToggleButtonGroup
-  value={form.type}
-  exclusive
-  onChange={(_, value) => value && setForm({ ...form, type: value })}
-  fullWidth
-  sx={{ mb: 1 }}
->
-  <ToggleButton
-    value="Non-Consumable"
-    sx={{
-      flex: 1,
-      "&.Mui-selected": { bgcolor: "#B71C1C", color: "#FFF", "&:hover": { bgcolor: "#D32F2F" } },
-    }}
-  >
-    Non-Consumable
-  </ToggleButton>
-  <ToggleButton
-    value="Consumable"
-    sx={{
-      flex: 1,
-      "&.Mui-selected": { bgcolor: "#B71C1C", color: "#FFF", "&:hover": { bgcolor: "#D32F2F" } },
-    }}
-  >
-    Consumable
-  </ToggleButton>
-</ToggleButtonGroup>
+    <Box sx={{ display: "flex", gap: 2 }}>
+      {/* LEFT BOX */}
+      <Box sx={{ flex: 1 }}>
+        <Stack spacing={2}>
+          {/* Item Type Selection */}
+          <Box>
+             <Typography variant="subtitle1" sx={{ fontWeight: "bold", mb: 1 }}>
+              Item Type
+            </Typography>
 
-{/* Conditionally show Barcode & Serial Number only if Non-Consumable */}
-{form.type === "Non-Consumable" && (
-<Stack direction="row" spacing={2}>
-  <TextField
-    label="Barcode"
-    value={form.barcode}
-    onChange={(e) => setForm({ ...form, barcode: e.target.value })}
-    fullWidth
-    variant="outlined"
-  />
-  <TextField
-    label="Serial Number"
-    value={form.serial_number}
-    onChange={(e) => setForm({ ...form, serial_number: e.target.value })}
-    fullWidth
-    variant="outlined"
-  />
-</Stack>
-)}
+          <ToggleButtonGroup
+            value={itemType}
+            exclusive
+            onChange={(_, value) => value && setItemType(value)}
+            fullWidth
+            disabled={viewing}
+          >
+            <ToggleButton
+              value="Non-Consumable"
+              sx={{
+                flex: 1,
+                "&.Mui-selected": {
+                  bgcolor: "#B71C1C",
+                  color: "#FFF",
+                  "&:hover": { bgcolor: "#D32F2F" },
+                },
+              }}
+            >
+              Non-Consumable
+            </ToggleButton>
+            <ToggleButton
+              value="Consumable"
+              sx={{
+                flex: 1,
+                "&.Mui-selected": {
+                  bgcolor: "#B71C1C",
+                  color: "#FFF",
+                  "&:hover": { bgcolor: "#D32F2F" },
+                },
+              }}
+            >
+              Consumable
+            </ToggleButton>
+          </ToggleButtonGroup>
+          </Box>
+          {/* Fields */}
+          <TextField
+            label="Name"
+            value={form.equipment_name}
+            onChange={(e) => setForm({ ...form, equipment_name: e.target.value })}
+            fullWidth
+            disabled={viewing}
+            sx={{
+    mt: 2,
+    "& .MuiInputBase-input.Mui-disabled": {
+      WebkitTextFillColor: "#333", // darker text
+      color: "#333",               // for consistency
+    },
+    "& .MuiOutlinedInput-root.Mui-disabled": {
+      backgroundColor: "#f5f5f5", // optional subtle bg
+    },
+  }}
+          />
+          <TextField
+            label="Brand/Model"
+            value={form.brand_model}
+            onChange={(e) => setForm({ ...form, brand_model: e.target.value })}
+            fullWidth
+            disabled={viewing}
+            sx={{
+    mt: 2,
+    "& .MuiInputBase-input.Mui-disabled": {
+      WebkitTextFillColor: "#333", // darker text
+      color: "#333",               // for consistency
+    },
+    "& .MuiOutlinedInput-root.Mui-disabled": {
+      backgroundColor: "#f5f5f5", // optional subtle bg
+    },
+  }}
+          />
 
-      {/* Name */}
-      <TextField
-        label="Name"
-        value={form.name}
-        onChange={(e) => setForm({ ...form, name: e.target.value })}
-        fullWidth
-        variant="outlined"
-      />
+          <Stack spacing={2} direction="row">
+            <TextField
+              label="Facility"
+              value={form.facility}
+              onChange={(e) => setForm({ ...form, facility: e.target.value })}
+              fullWidth
+              disabled={viewing}
+              sx={{
+    mt: 2,
+    "& .MuiInputBase-input.Mui-disabled": {
+      WebkitTextFillColor: "#333", // darker text
+      color: "#333",               // for consistency
+    },
+    "& .MuiOutlinedInput-root.Mui-disabled": {
+      backgroundColor: "#f5f5f5", // optional subtle bg
+    },
+  }}
+            />
+            <TextField
+              label="Location (Room & Shelf No.)"
+              value={form.location}
+              onChange={(e) => setForm({ ...form, location: e.target.value })}
+              fullWidth
+              disabled={viewing}
+              sx={{
+    mt: 2,
+    "& .MuiInputBase-input.Mui-disabled": {
+      WebkitTextFillColor: "#333", // darker text
+      color: "#333",               // for consistency
+    },
+    "& .MuiOutlinedInput-root.Mui-disabled": {
+      backgroundColor: "#f5f5f5", // optional subtle bg
+    },
+  }}
+            />
+          </Stack>
 
-      {/* Brand/Model */}
-      <TextField
-        label="Brand/Model"
-        value={form.brand_model}
-        onChange={(e) => setForm({ ...form, brand_model: e.target.value })}
-        fullWidth
-        variant="outlined"
-      />
+          <Stack spacing={3} direction="row">
+            <TextField
+              label="First Semester (Quantity)"
+              type="number"
+              value={form.first_sem}
+              onChange={(e) => setForm({ ...form, first_sem: e.target.value })}
+              fullWidth
+              disabled={viewing}
+              sx={{
+    mt: 2,
+    "& .MuiInputBase-input.Mui-disabled": {
+      WebkitTextFillColor: "#333", // darker text
+      color: "#333",               // for consistency
+    },
+    "& .MuiOutlinedInput-root.Mui-disabled": {
+      backgroundColor: "#f5f5f5", // optional subtle bg
+    },
+  }}
+            />
+            <TextField
+              label="Second Semester (Quantity)"
+              type="number"
+              value={form.second_sem}
+              onChange={(e) => setForm({ ...form, second_sem: e.target.value })}
+              fullWidth
+              disabled={viewing}
+              sx={{
+    mt: 2,
+    "& .MuiInputBase-input.Mui-disabled": {
+      WebkitTextFillColor: "#333", // darker text
+      color: "#333",               // for consistency
+    },
+    "& .MuiOutlinedInput-root.Mui-disabled": {
+      backgroundColor: "#f5f5f5", // optional subtle bg
+    },
+  }}
+            />
+            <TextField
+              label="Total Quantity"
+              type="number"
+              value={form.total_qty}
+              onChange={(e) => setForm({ ...form, total_qty: e.target.value })}
+              fullWidth
+              disabled={viewing}
+              sx={{
+    mt: 2,
+    "& .MuiInputBase-input.Mui-disabled": {
+      WebkitTextFillColor: "#333", // darker text
+      color: "#333",               // for consistency
+    },
+    "& .MuiOutlinedInput-root.Mui-disabled": {
+      backgroundColor: "#f5f5f5", // optional subtle bg
+    },
+  }}
+            />
+          </Stack>
+<Box>
+           <Typography variant="subtitle1" sx={{ fontWeight: "bold", mb: 1 }}>
+              Condition
+            </Typography>
+          <ToggleButtonGroup
+            value={form.yes ? "Working" : form.no ? "Not Working" : null}
+            exclusive
+            onChange={(_, value) => {
+              if (value === "Working") {
+                setForm({ ...form, yes: "WORKING", no: "" });
+              } else if (value === "Not Working") {
+                setForm({ ...form, yes: "", no: "NOT WORKING" });
+              }
+            }}
+            fullWidth
+            sx={{ mt: 1 }}
+            disabled={viewing}
+          >
+            <ToggleButton value="Working" sx={{ flex: 1, "&.Mui-selected": { bgcolor: "#B71C1C", color: "#FFF", "&:hover": { bgcolor: "#D32F2F" } } }}>
+              Working
+            </ToggleButton>
+            <ToggleButton value="Not Working" sx={{ flex: 1, "&.Mui-selected": { bgcolor: "#B71C1C", color: "#FFF", "&:hover": { bgcolor: "#D32F2F" } } }}>
+              Not Working
+            </ToggleButton>
+          </ToggleButtonGroup>
+          </Box>
+        </Stack>
+      </Box>
 
-      {/* Location & Total Quantity */}
-    <Stack spacing={2} direction="row">
-  <TextField
-    label="Location"
-    value={form.location}
-    onChange={(e) => setForm({ ...form, location: e.target.value })}
-    fullWidth
-    variant="outlined"
-  />
-  <TextField
-    label="Total Quantity"
-    type="number"
-    value={form.total_quantity}
-    onChange={(e) => setForm({ ...form, total_quantity: e.target.value })}
-    fullWidth
-    variant="outlined"
-  />
-</Stack>
+      {/* Divider between left and right */}
+      <Divider orientation="vertical" flexItem />
 
-      {/* Calibration Toggle */}
-<ToggleButtonGroup
-  value={form.calibration || "Without Calibration"}
-  exclusive
-  onChange={(_, value) => value && setForm({ ...form, calibration: value })}
-  fullWidth
-  sx={{ mt: 1 }}
->
-  <ToggleButton
-    value="Without Calibration"
-    sx={{
-      flex: 1,
-      "&.Mui-selected": { bgcolor: "#B71C1C", color: "#FFF", "&:hover": { bgcolor: "#D32F2F" } },
-    }}
-  >
-    Without Calibration
-  </ToggleButton>
-  <ToggleButton
-    value="With Calibration"
-    sx={{
-      flex: 1,
-      "&.Mui-selected": { bgcolor: "#B71C1C", color: "#FFF", "&:hover": { bgcolor: "#D32F2F" } },
-    }}
-  >
-    With Calibration
-  </ToggleButton>
-</ToggleButtonGroup>
-
-{/* Conditionally show "How many used to calibrate" field */}
-{form.calibration === "With Calibration" && (
+      {/* RIGHT BOX */}
+      <Box sx={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+        
+        <Stack spacing={2}>
+          {/* Battery Information */}
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: "bold", mb: 1 }}>
+              Battery Information
+            </Typography>
+            <ToggleButtonGroup
+              value={battery}
+              exclusive
+              onChange={(_, value) => value && setBattery(value)}
+              fullWidth
+              disabled={viewing}
+            >
+              <ToggleButton
+                value="Without Battery"
+                sx={{
+                  flex: 1,
+                  "&.Mui-selected": {
+                    bgcolor: "#B71C1C",
+                    color: "#FFF",
+                    "&:hover": { bgcolor: "#D32F2F" },
+                  },
+                }}
+              >
+                Without Battery
+              </ToggleButton>
+              <ToggleButton
+                value="With Battery"
+                sx={{
+                  flex: 1,
+                  "&.Mui-selected": {
+                    bgcolor: "#B71C1C",
+                    color: "#FFF",
+                    "&:hover": { bgcolor: "#D32F2F" },
+                  },
+                }}
+              >
+                With Battery
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+ {battery === "With Battery" && (
+            <Stack spacing={2} direction="row">
 <TextField
-  label="How many times will it be used to calibrate?"
-  type="number"
-  value={form.calibration_count || 0}
+  label="Battery Type"
+  value={form.bat_type}
   onChange={(e) =>
-    setForm({ ...form, calibration_count: Number(e.target.value) })
+    setForm({ ...form, bat_type: e.target.value })
   }
   fullWidth
   variant="outlined"
-  sx={{ mt: 2 }}
+  sx={{
+    mt: 2,
+    "& .MuiInputBase-input.Mui-disabled": {
+      WebkitTextFillColor: "#333", // darker text
+      color: "#333",               // for consistency
+    },
+    "& .MuiOutlinedInput-root.Mui-disabled": {
+      backgroundColor: "#f5f5f5", // optional subtle bg
+    },
+  }}
+  disabled={viewing}
 />
+<TextField
+  label="Battery Quantity"
+  type="number"
+  value={form.bat_qty}
+  onChange={(e) =>
+    setForm({ ...form, bat_qty: e.target.value })
+  }
+  fullWidth
+  variant="outlined"
+  sx={{
+    mt: 2,
+    "& .MuiInputBase-input.Mui-disabled": {
+      WebkitTextFillColor: "#333", // darker text
+      color: "#333",               // for consistency
+    },
+    "& .MuiOutlinedInput-root.Mui-disabled": {
+      backgroundColor: "#f5f5f5", // optional subtle bg
+    },
+  }}
+  disabled={viewing}
+/>
+</Stack>
+)}
+          {/* Equipment Manual */}
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: "bold", mb: 1 }}>
+              Equipment Manual
+            </Typography>
+            <ToggleButtonGroup
+              value={form.soft_hard}
+              exclusive
+              onChange={(_, value) => value && setForm({ ...form, soft_hard: value})}
+              fullWidth
+              disabled={viewing}
+            >
+              <ToggleButton
+                value="Soft Copy"
+                sx={{
+                  flex: 1,
+                  "&.Mui-selected": {
+                    bgcolor: "#B71C1C",
+                    color: "#FFF",
+                    "&:hover": { bgcolor: "#D32F2F" },
+                  },
+                }}
+              >
+                Soft Copy
+              </ToggleButton>
+              <ToggleButton
+                value="Hard Copy"
+                sx={{
+                  flex: 1,
+                  "&.Mui-selected": {
+                    bgcolor: "#B71C1C",
+                    color: "#FFF",
+                    "&:hover": { bgcolor: "#D32F2F" },
+                  },
+                }}
+              >
+                Hard Copy
+              </ToggleButton>
+              <ToggleButton
+                value="N/A"
+                sx={{
+                  flex: 1,
+                  "&.Mui-selected": {
+                    bgcolor: "#B71C1C",
+                    color: "#FFF",
+                    "&:hover": { bgcolor: "#D32F2F" },
+                  },
+                }}
+              >
+                None
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+           {form.soft_hard != "N/A" && (
+            <Stack spacing={2} direction="row">
+{viewing && form.soft_hard === "Soft Copy" ? (
+  <Typography
+    component="a"
+    href={form.e_location}
+    target="_blank"
+    rel="noopener noreferrer"
+    sx={{ 
+      mt: 2,
+      display: "block",
+      color: "primary.main",
+      textDecoration: "underline",
+      cursor: "pointer"
+    }}
+  >
+    {form.e_location || "No link provided"}
+  </Typography>
+) : (
+  <TextField
+    label="Description"
+    value={form.e_location}
+    onChange={(e) =>
+      setForm({ ...form, e_location: e.target.value })
+    }
+    fullWidth
+    variant="outlined"
+    sx={{
+    mt: 2,
+    "& .MuiInputBase-input.Mui-disabled": {
+      WebkitTextFillColor: "#333", // darker text
+      color: "#333",               // for consistency
+    },
+    "& .MuiOutlinedInput-root.Mui-disabled": {
+      backgroundColor: "#f5f5f5", // optional subtle bg
+    },
+  }}
+    disabled={viewing}
+  />
 )}
 
-    </Stack>
-  </DialogContent>
+</Stack>
+)}
+        </Stack>
 
-  <DialogActions sx={{ p: 2 }}>
+        {/* Buttons at bottom of right box */}
+       <Stack direction="row" justifyContent="flex-end" spacing={2} sx={{ mt: 2 }}>
+  {viewing ? (
     <Button
-      onClick={() => setOpen(false)}
+      onClick={() => {
+        setOpen(false);
+        setViewing(false);
+        resetForm();
+      }}
       sx={{ textTransform: "none", color: "#B71C1C", fontWeight: "bold" }}
     >
-      Cancel
+      Close
     </Button>
-<Button
-  variant="contained"
-  onClick={editing ? handleUpdateItem : handleCreate}
-  sx={{
-    bgcolor: "#B71C1C",
-    "&:hover": { bgcolor: "#D32F2F" },
-    textTransform: "none",
-    borderRadius: "8px",
-  }}
->
-  {editing ? "Update" : "Save"}
-</Button>
-  </DialogActions>
+  ) : (
+    <>
+      <Button
+        onClick={() => {
+          setOpen(false);
+          resetForm();
+        }}
+        sx={{ textTransform: "none", color: "#B71C1C", fontWeight: "bold" }}
+      >
+        Cancel
+      </Button>
+      <Button
+        variant="contained"
+        onClick={editing ? handleUpdateItem : handleCreate}
+        sx={{
+          bgcolor: "#B71C1C",
+          "&:hover": { bgcolor: "#D32F2F" },
+          textTransform: "none",
+          borderRadius: "8px",
+        }}
+      >
+        {editing ? "Update" : "Save"}
+      </Button>
+    </>
+  )}
+</Stack>
+
+      </Box>
+    </Box>
+  </DialogContent>
 </Dialog>
+
+
 
     </div>
   );

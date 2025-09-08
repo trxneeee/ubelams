@@ -3,6 +3,7 @@ import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import "./Login.css"; // 👈 Import CSS
 import logo from "../assets/logo.png";
+import logo2 from "../assets/ublogo.png";
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -86,7 +87,9 @@ export default function Login() {
       <div className="login-card">
         {/* Logo */}
         <div className="logo-wrapper">
+          <img src={logo2} alt="University of Baguio" className="logo" />
           <img src={logo} alt="University of Baguio" className="logo" />
+           
         </div>
 
         <h1 className="title">University of Baguio</h1>

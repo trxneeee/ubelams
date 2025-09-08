@@ -112,3 +112,61 @@
   color: #991b1b;
   font-weight: 600;
 }
+.login-container {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  /* Background image */
+  background: url("../assets/seabackground.jpg") no-repeat center center/cover;
+}
+
+/* Overlay layer */
+.login-container::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5); /* 👈 Adjust opacity & color */
+  z-index: 0;
+}
+
+/* Keep card above overlay */
+.login-card {
+  position: relative;
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.9); /* optional card transparency */
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+.login-container {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  /* Background image */
+  background: url("../assets/seabackground.jpg") no-repeat center center/cover;
+}
+
+/* Overlay keeps the old background color */
+.login-container::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(200, 16, 47, 0.256); /* 👈 UB red with 75% opacity */
+  z-index: 0;
+}
+
+/* Card above overlay */
+.login-card {
+  position: relative;
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.9); /* optional */
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}

@@ -1,239 +1,486 @@
 // src/App.tsx
-import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
+import axios from "axios";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import axios from "axios";
-
-import StaffPage from "./pages/StaffPage";
-import BorrowPage from "./pages/BorrowPage";
-import InventoryPage from "./pages/InventoryPage";
-import MaintenancePage from "./pages/MaintenancePage";
-import HomePage from "./pages/HomePage";
-import DatabasePage from "./pages/DatabasePage";
-import Header from "./components/Header";
-import Footer from "./components/Footer";
-import Login from "./pages/Login";
+import { Route, BrowserRouter as Router, Routes } from "react-router-dom";
 import "./App.css"; // 👈 for layout styling
+import Footer from "./components/Footer";
+import Header from "./components/Header";
+import BorrowPage from "./pages/BorrowPage";
+import DatabasePage from "./pages/DatabasePage";
+import HomePage from "./pages/HomePage";
+import InventoryPage from "./pages/InventoryPage";
+import Login from "./pages/Login";
+import MaintenancePage from "./pages/MaintenancePage";
+import StaffPage from "./pages/StaffPage";
 
 
-interface Todo {
+interface CalendarEvent {
   id: string;
+  title: string;
+  start: string;
+  end: string;
   description: string;
-  doneBy: string;
-  access:string;
-  status: string;
+  location: string;
 }
 
 const API_URL =
   "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
 
-function TodoPanel() {
-const [todos, setTodos] = useState<Todo[]>([]);
+function CalendarPanel() {
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(false);
- const user = JSON.parse(localStorage.getItem("user") || "{}");
-const fetchTodos = async () => {
-  setLoading(true);
-  try {
-    const response = await axios.get(API_URL, {
-      params: {
-        sheet: "todo",
-        action: "read",
-      },
-    });
+  const [filter, setFilter] = useState<"all" | "today" | "week" | "month">(
+    "today"
+  );
+   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
+  const fetchEvents = async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(API_URL, {
+        params: {
+          sheet: "calendar", // 👈 must match your sheet name
+          action: "read",
+        },
+      });
 
-    const result = response.data;
-    if (result.success) {
-      const rows = result.data;
-      const headers = rows[0];
-      const todo_id = headers.indexOf("todo_id");
-      const description = headers.indexOf("description");
-      const done_by = headers.indexOf("done_by");
-      const status = headers.indexOf("status");
+      const result = response.data;
+      if (result.success) {
+        const rows = result.data;
+        const headers = rows[0];
 
-let parsed: Todo[] = rows.slice(1).map((row: any[]) => ({
-  id: row[todo_id],
-  description: row[description],
-  doneBy: row[done_by],
-  status: row[status],
-}));
+        // find column positions dynamically
+        const titleIdx = headers.indexOf("Title");
+        const startIdx = headers.indexOf("Start");
+        const endIdx = headers.indexOf("End");
+        const descIdx = headers.indexOf("Description");
+        const locIdx = headers.indexOf("Location");
 
-// ✅ Now a & b are typed as Todo
-parsed = parsed.sort((a: Todo, b: Todo) => Number(b.id) - Number(a.id));
+        const parsed: CalendarEvent[] = rows.slice(1).map((row: any[], i: number) => ({
+          id: String(i + 1),
+          title: row[titleIdx] || "",
+          start: row[startIdx] || "",
+          end: row[endIdx] || "",
+          description: row[descIdx] || "",
+          location: row[locIdx] || "",
+        }));
 
-      setTodos(parsed);
+        setEvents(parsed);
+      }
+    } catch (err) {
+      console.error("Failed to fetch calendar events", err);
+    } finally {
+      setLoading(false);
     }
-  } catch (err) {
-    console.error("Failed to fetch todos", err);
-  } finally {
-    setLoading(false);
-  }
-};
+  };
+  // ✅ Filtering logic
+  const getFilteredEvents = () => {
+    if (filter === "all") return events;
 
+    const now = new Date();
+    const manilaNow = new Date(
+      now.toLocaleString("en-US", { timeZone: "Asia/Manila" })
+    );
+
+    return events.filter((e) => {
+      const eventStart = new Date(e.start);
+      const eventDate = new Date(
+        eventStart.toLocaleString("en-US", { timeZone: "Asia/Manila" })
+      );
+
+      if (filter === "today") {
+        return (
+          eventDate.getFullYear() === manilaNow.getFullYear() &&
+          eventDate.getMonth() === manilaNow.getMonth() &&
+          eventDate.getDate() === manilaNow.getDate()
+        );
+      }
+
+      if (filter === "week") {
+        const startOfWeek = new Date(manilaNow);
+        startOfWeek.setDate(manilaNow.getDate() - manilaNow.getDay()); // Sunday
+        startOfWeek.setHours(0, 0, 0, 0);
+
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 7); // next Sunday
+
+        return eventDate >= startOfWeek && eventDate < endOfWeek;
+      }
+
+      if (filter === "month") {
+        return (
+          eventDate.getFullYear() === manilaNow.getFullYear() &&
+          eventDate.getMonth() === manilaNow.getMonth()
+        );
+      }
+
+      return true;
+    });
+  };
 
   useEffect(() => {
-    fetchTodos();
+    fetchEvents();
   }, []);
 
-  // ➕ Add new todo
-  const handleAddTodo = async () => {
-    const desc = prompt("Enter todo description:");
-    if (!desc) return;
+  const filteredEvents = getFilteredEvents();
 
-    try {
-      const params = new URLSearchParams({
-        sheet: "todo",
-        action: "create",
-        todo_id: Date.now().toString(),
-        description: desc,
-        done_by: "",
-        status: "pending",
-      });
-
-      await axios.get(`${API_URL}?${params.toString()}`);
-      fetchTodos();
-    } catch (err: any) {
-      console.error("Failed to add todo", err.response?.data || err.message);
-    }
-  };
-
-  // ✔ Mark as Done
-  const handleMarkDone = async (id: string) => {
-    const todo = todos.find((t) => t.id === id);
-    if (!todo) return;
-
-    const confirmDone = window.confirm(`Mark "${todo.description}" as done?`);
-    if (!confirmDone) return;
-
-    try {
-      const doneByName = user.firstname && user.lastname
-        ? `${user.firstname} ${user.lastname}`
-        : "system";
-
-      const params = new URLSearchParams({
-        sheet: "todo",
-        action: "update",
-        todo_id: id,
-        description: todo.description || "",
-        done_by: doneByName,// replace with actual user if needed
-        status: "done",
-      });
-
-      await axios.get(`${API_URL}?${params.toString()}`);
-      fetchTodos();
-    } catch (err: any) {
-      console.error("Failed to mark todo as done", err.response?.data || err.message);
-    }
-  };
-
-  return (
+   return (
     <aside
-      className="todo-panel"
+      className="calendar-panel"
       style={{
         padding: "16px",
-        maxWidth: "400px",
+        maxWidth: "200px",
+        display: "flex",
+        flexDirection: "column",
         background: "#f9f9f9",
         borderRadius: "8px",
         boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
       }}
     >
+      {/* Header */}
       <div
         style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "12px",
+          position: "sticky",
+          top: 0,
+          background: "#f9f9f9",
+          zIndex: 2,
+          paddingBottom: "12px",
         }}
       >
-        <h3>To-do List</h3>
-        <button
-          onClick={handleAddTodo}
-          style={{
-            cursor: "pointer",
-            padding: "4px 12px",
-            borderRadius: "4px",
-            background: "#4caf50",
-            color: "#fff",
-            border: "none",
-          }}
-        >
-          ➕ Add
-        </button>
+        <h3 style={{ marginBottom: "12px", fontSize: "20px" }}>📅 To-Do List</h3>
+        <div>
+          <label>
+            Show:{" "}
+            <select
+              value={filter}
+              onChange={(e) => setFilter(e.target.value as any)}
+              style={{
+                padding: "6px 10px",
+                borderRadius: "6px",
+                border: "1px solid #ccc",
+              }}
+            >
+              <option value="all">All</option>
+              <option value="today">Today</option>
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+            </select>
+          </label>
+        </div>
       </div>
 
-      {loading ? (
-        <p>Loading...</p>
-      ) : (
-        <ul style={{ listStyle: "none", padding: 0 }}>
-          {todos.length > 0 ? (
-            todos.map((t) => (
-<li
-  key={t.id}
-  style={{
-    marginBottom: "12px",
-    padding: "10px",
-    borderRadius: "6px",
-    background: t.status === "done" ? "#d4edda" : "#fff",
-    border: t.status === "done" ? "1px solid #c3e6cb" : "1px solid #ddd",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "stretch", // stretch children vertically
-  }}
->
-  <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-    <span
-      style={{
-        fontWeight: 500,
-      }}
-    >
-      {t.description}
-    </span>
-    <small style={{ color: "#666" }}>
-      {t.doneBy ? `by ${t.doneBy}` : "not done"} ({t.status})
-    </small>
-  </div>
+      {/* Event List */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          paddingRight: "4px",
+          marginBottom: "40px",
+        }}
+      >
+        {loading ? (
+          <p>Loading...</p>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {filteredEvents.length > 0 ? (
+              filteredEvents.map((e) => (
+                <li
+                  key={e.id}
+                  onClick={() => setSelectedEvent(e)}
+                  style={{
+                    marginBottom: "16px",
+                    padding: "14px",
+                    borderRadius: "8px",
+                    background: "#fff",
+                    border: "1px solid #ddd",
+                    boxShadow: "0 2px 6px rgba(0,0,0,0.05)",
+                    wordWrap: "break-word",
+                    overflowWrap: "break-word",
+                    cursor: "pointer",
+                    transition: "background 0.2s",
+                  }}
+                  onMouseEnter={(e) =>
+                    ((e.currentTarget.style.background = "#f0f8ff"))
+                  }
+                  onMouseLeave={(e) =>
+                    ((e.currentTarget.style.background = "#fff"))
+                  }
+                >
+                  <strong style={{ fontSize: "16px" }}>{e.title}</strong>
 
-  {t.status !== "done" && (
-    <button
-      onClick={() => handleMarkDone(t.id)}
-      style={{
-        cursor: "pointer",
-        width: "40px",
-        alignSelf: "stretch", // make button same height as li
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "inherit",
-        color: "#2196f3",
-        border: "1px solid #ddd",
-        borderRadius: 0,
-        padding: 0,
-        fontWeight: "bold",
-        fontSize: "16px",
-        lineHeight: 1,
-        transition: "background 0.2s, color 0.2s",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = "#28a745"; // green on hover
-        e.currentTarget.style.color = "#fff";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "inherit";
-        e.currentTarget.style.color = "#2196f3";
-      }}
-    >
-      ✔
-    </button>
+                  {/* Date */}
+                  <div
+                    style={{
+                      marginTop: "6px",
+                      display: "block",
+                      background: "#007bff",
+                      color: "#fff",
+                      borderRadius: "4px",
+                      padding: "2px 8px",
+                      fontSize: "12px",
+                    }}
+                  >
+                    {new Date(e.start).toLocaleDateString("en-PH", {
+                      timeZone: "Asia/Manila",
+                      year: "numeric",
+                      month: "long",
+                      day: "numeric",
+                    })}
+                  </div>
+
+                  {/* Start & End times */}
+                  <div
+                    style={{
+                      marginTop: "8px",
+                      padding: "4px 8px",
+                      background: "#e6f7ff",
+                      borderRadius: "4px",
+                      color: "#0056b3",
+                      fontSize: "14px",
+                    }}
+                  >
+                    <strong>Start:</strong>{" "}
+                    {new Date(e.start).toLocaleTimeString("en-PH", {
+                      timeZone: "Asia/Manila",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: "4px",
+                      padding: "4px 8px",
+                      background: "#e8f9f0",
+                      borderRadius: "4px",
+                      color: "#137333",
+                      fontSize: "14px",
+                    }}
+                  >
+                    <strong>End:</strong>{" "}
+                    {new Date(e.end).toLocaleTimeString("en-PH", {
+                      timeZone: "Asia/Manila",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </div>
+                </li>
+              ))
+            ) : (
+              <li style={{ color: "#888", textAlign: "center" }}>
+                No events found
+              </li>
+            )}
+          </ul>
+        )}
+      </div>
+
+      {/* Modal for Event Details */}
+      <Modal isOpen={!!selectedEvent} onClose={() => setSelectedEvent(null)}>
+  {selectedEvent && (
+    <div>
+      {/* Title */}
+      <h2
+        style={{
+          marginBottom: "12px",
+          fontSize: "20px",
+          fontWeight: "600",
+          borderBottom: "1px solid #ddd",
+          paddingBottom: "8px",
+        }}
+      >
+        {selectedEvent.title}
+      </h2>
+
+      {/* Date */}
+      <div style={{ marginBottom: "10px" }}>
+        <strong>Date:</strong>{" "}
+        {new Date(selectedEvent.start).toLocaleDateString("en-PH", {
+          timeZone: "Asia/Manila",
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        })}
+      </div>
+
+      {/* Start Time */}
+      <div style={{ marginBottom: "6px" }}>
+        <strong>Start Time:</strong>{" "}
+        {new Date(selectedEvent.start).toLocaleTimeString("en-PH", {
+          timeZone: "Asia/Manila",
+          hour: "numeric",
+          minute: "2-digit",
+        })}
+      </div>
+
+      {/* End Time */}
+      <div style={{ marginBottom: "12px" }}>
+        <strong>End Time:</strong>{" "}
+        {new Date(selectedEvent.end).toLocaleTimeString("en-PH", {
+          timeZone: "Asia/Manila",
+          hour: "numeric",
+          minute: "2-digit",
+        })}
+      </div>
+
+      {/* Description */}
+      {selectedEvent.description && (
+        <div
+          style={{
+            marginBottom: "12px",
+            padding: "10px",
+            background: "#f5f5f5",
+            borderRadius: "6px",
+            fontSize: "14px",
+            lineHeight: "1.5",
+          }}
+        >
+          <strong>Description:</strong>
+          <p style={{ margin: "6px 0 0 0" }}>{selectedEvent.description}</p>
+        </div>
+      )}
+
+      {/* Location */}
+      {selectedEvent.location && (
+        <div style={{ marginBottom: "6px" }}>
+          <strong>Location:</strong> {selectedEvent.location}
+        </div>
+      )}
+    </div>
   )}
-</li>
+</Modal>
 
+    </aside>
+  );
+}
 
+function NotificationPanel() {
+  const notifications = [
+    { id: 1, text: "New request submitted", type: "info" },
+    { id: 2, text: "Inventory low: Oscilloscope", type: "warning" },
+    { id: 3, text: "Maintenance scheduled", type: "success" },
+    { id: 4, text: "Database updated successfully", type: "success" },
+    { id: 5, text: "Pending staff approval", type: "info" },
+  ];
+
+  return (
+    <aside
+      className="notification-panel"
+      style={{
+        padding: "16px",
+        maxWidth: "250px", // 👈 similar width to calendar
+        display: "flex",
+        flexDirection: "column",
+        background: "#f9f9f9",
+        borderRadius: "8px",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+      }}
+    >
+      {/* Sticky Header */}
+      <div
+        style={{
+          position: "sticky",
+          top: 0,
+          background: "#f9f9f9",
+          zIndex: 2,
+          paddingBottom: "12px",
+        }}
+      >
+        <h3 style={{ marginBottom: "12px", fontSize: "20px" }}>🔔 Notifications</h3>
+      </div>
+
+      {/* Scrollable Notification List */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          paddingRight: "4px",
+          marginBottom: "40px",
+        }}
+      >
+        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          {notifications.length > 0 ? (
+            notifications.map((n) => (
+              <li
+                key={n.id}
+                style={{
+                  marginBottom: "16px",
+                  padding: "14px",
+                  borderRadius: "8px",
+                  background: "#fff",
+                  border: "1px solid #ddd",
+                  boxShadow: "0 2px 6px rgba(0,0,0,0.05)",
+                  fontSize: "14px",
+                  color:
+                    n.type === "warning"
+                      ? "#b36b00"
+                      : n.type === "success"
+                      ? "#137333"
+                      : "#0056b3",
+                }}
+              >
+                {n.text}
+              </li>
             ))
           ) : (
-            <li style={{ color: "#888", textAlign: "center" }}>No todos found</li>
+            <li style={{ color: "#888", textAlign: "center" }}>No notifications</li>
           )}
         </ul>
-      )}
+      </div>
     </aside>
+  );
+}
+interface ModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}
+
+function Modal({ isOpen, onClose, children }: ModalProps) {
+  if (!isOpen) return null;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        width: "100vw",
+        height: "100vh",
+        backgroundColor: "rgba(0,0,0,0.5)",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        zIndex: 1000,
+      }}
+    >
+      <div
+        style={{
+          background: "#fff",
+          padding: "24px",
+          borderRadius: "10px",
+          maxWidth: "500px",
+          width: "90%",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+        }}
+      >
+        {children}
+        <button
+          onClick={onClose}
+          style={{
+            marginTop: "20px",
+            padding: "8px 14px",
+            border: "none",
+            borderRadius: "6px",
+            background: "#007bff",
+            color: "#fff",
+            cursor: "pointer",
+          }}
+        >
+          Close
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -243,16 +490,9 @@ function AppLayout({ children }: { children: ReactNode }) {
       <Header />
       <div className="app-layout">
         {/* Left: Todo Panel (dynamic now) */}
-        <TodoPanel />
+        <CalendarPanel />
         <main className="main-content">{children}</main>
-        <aside className="notification-panel">
-          <h3>Notifications</h3>
-          <ul>
-            <li>New request submitted</li>
-            <li>Inventory low: Oscilloscope</li>
-            <li>Maintenance scheduled</li>
-          </ul>
-        </aside>
+        <NotificationPanel />
       </div>
       <Footer />
     </>
