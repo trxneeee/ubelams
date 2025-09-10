@@ -46,6 +46,7 @@ interface BorrowRecord {
   item?: string; // CSV
   quantity?: string; // CSV
   status?: string;
+  date_borrowed?:string;
 }
 
 interface BorrowItem {
@@ -77,6 +78,7 @@ export default function BorrowPage() {
 
   // Request form
   const [requestForm, setRequestForm] = useState({
+    borrow_id: "",
     course: "",
     group_number: "",
     group_leader: "",
@@ -85,6 +87,7 @@ export default function BorrowPage() {
     subject: "",
     schedule: "",
     status: "Pending",
+    date_borrowed:"",
   });
 
   const [search, setSearch] = useState("");
@@ -121,6 +124,7 @@ export default function BorrowPage() {
         item: row[idx("item")] ?? "",
         quantity: row[idx("quantity")] ?? "",
         status: row[idx("status")] ?? "",
+        date_borrowed: row[idx("date_borrowed")] ?? "",
       })) as BorrowRecord[];
 
       setRecords(mapped);
@@ -237,6 +241,7 @@ export default function BorrowPage() {
 // View Borrow: open dialog and populate the stepper with data
 const handleViewBorrow = (record: BorrowRecord) => {
   setRequestForm({
+    borrow_id: record.borrow_id || "",
     course: record.course || "",
     group_number: record.group_number || "",
     group_leader: record.group_leader || "",
@@ -245,6 +250,7 @@ const handleViewBorrow = (record: BorrowRecord) => {
     subject: record.subject || "",
     schedule: record.schedule || "",
     status: record.status || "Pending",
+    date_borrowed: record.date_borrowed || "",
   });
 
   const itemsArr = (record.item?.split(",") || []).map((itm, idx) => ({
@@ -261,6 +267,7 @@ const handleViewBorrow = (record: BorrowRecord) => {
 // Update Borrow: similar to New Borrow but populate stepper for editing
 const handleUpdateBorrow = (record: BorrowRecord) => {
   setRequestForm({
+    borrow_id: record.borrow_id || "",
     course: record.course || "",
     group_number: record.group_number || "",
     group_leader: record.group_leader || "",
@@ -269,6 +276,7 @@ const handleUpdateBorrow = (record: BorrowRecord) => {
     subject: record.subject || "",
     schedule: record.schedule || "",
     status: record.status || "Pending",
+    date_borrowed: record.date_borrowed || "",
   });
 
   const itemsArr = (record.item?.split(",") || []).map((itm, idx) => ({
@@ -306,6 +314,7 @@ const handleDeleteBorrow = async (borrowId: string) => {
     setOpen(false);
     setActiveStep(0);
     setRequestForm({
+      borrow_id: "",
       course: "",
       group_number: "",
       group_leader: "",
@@ -314,39 +323,43 @@ const handleDeleteBorrow = async (borrowId: string) => {
       subject: "",
       schedule: "",
       status: "Pending",
+      date_borrowed: "",
     });
     setSelectedItems([]);
     setError(null);
   };
 
   // save borrow
-  const handleConfirmBorrow = async () => {
-    if (selectedItems.length === 0) return;
-    setSaving(true);
-    try {
-      const itemStr = selectedItems.map((s) => `(${s.name})`).join(",");
-      const qtyStr = selectedItems.map((s) => `(${s.qty})`).join(",");
+const handleConfirmBorrow = async () => {
+  if (selectedItems.length === 0) return;
+  setSaving(true);
+  try {
+    const itemStr = selectedItems.map((s) => `(${s.name})`).join(",");
+    const qtyStr = selectedItems.map((s) => `(${s.qty})`).join(",");
 
-      await axios.get(WEB_APP_URL, {
-        params: {
-          action: "create",
-          sheet: "borrow",
-          ...requestForm,
-          item: itemStr,
-          quantity: qtyStr,
-        },
-      });
+    const action = requestForm.borrow_id ? "update" : "create";
 
-      await fetchRecords();
-      await fetchItems();
-      resetDialog();
-    } catch (err) {
-      console.error("create borrow error:", err);
-      setError("Failed to save borrow record.");
-    } finally {
-      setSaving(false);
-    }
-  };
+    await axios.get(WEB_APP_URL, {
+      params: {
+        action,
+        sheet: "borrow",
+        ...requestForm,
+        item: itemStr,
+        quantity: qtyStr,
+      },
+    });
+
+    await fetchRecords();
+    await fetchItems();
+    resetDialog();
+  } catch (err) {
+    console.error(`${requestForm.borrow_id ? "update" : "create"} borrow error:`, err);
+    setError("Failed to save borrow record.");
+  } finally {
+    setSaving(false);
+  }
+};
+
 
   // summary calc
   const totalRequestedCount = records.reduce((acc, r) => {
@@ -419,6 +432,7 @@ const handleDeleteBorrow = async (borrowId: string) => {
             <Table size="small">
               <TableHead>
                 <TableRow sx={{ bgcolor: "#f5f5f5" }}>
+                  <TableCell>Date</TableCell>
                   <TableCell>Course</TableCell>
                   <TableCell>Group</TableCell>
                   <TableCell>Leader</TableCell>
@@ -431,6 +445,19 @@ const handleDeleteBorrow = async (borrowId: string) => {
               <TableBody>
                 {records.map((r) => (
                   <TableRow key={`${r.borrow_id}-${r.item}`} hover>
+                    <TableCell>
+  {r.date_borrowed
+    ? new Date(r.date_borrowed).toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      })
+    : "-"}
+</TableCell>
+
                     <TableCell>{r.course}</TableCell>
                     <TableCell>{r.group_number}</TableCell>
                     <TableCell>
@@ -476,301 +503,292 @@ const handleDeleteBorrow = async (borrowId: string) => {
       </Card>
 
       {/* Dialog (Stepper Form) */}
-      <Dialog open={open} onClose={resetDialog} fullWidth maxWidth="md">
-        <DialogTitle sx={{ color: "#B71C1C", fontWeight: 700 }}>
-          <Stack
-            direction="row"
-            justifyContent="space-between"
-            alignItems="center"
+<Dialog open={open} onClose={resetDialog} fullWidth maxWidth="md">
+  <DialogTitle sx={{ color: "#B71C1C", fontWeight: 700 }}>
+    <Stack direction="row" justifyContent="space-between" alignItems="center">
+      <Typography variant="h6">
+        {requestForm.borrow_id ? "Update Borrow Request" : "New Borrow Request"}
+      </Typography>
+      <Stack direction="row" alignItems="center" spacing={1}>
+        <EventIcon color="error" />
+        <Typography variant="caption" color="text.secondary">
+          Step {activeStep + 1} of {steps.length}
+        </Typography>
+      </Stack>
+    </Stack>
+  </DialogTitle>
+
+  <DialogContent>
+    <Box mb={2}>
+      <Stepper
+        activeStep={activeStep}
+        sx={{
+          "& .MuiStepLabel-root .Mui-active": { color: "#B71C1C" },
+          "& .MuiStepLabel-root .Mui-completed": { color: "#4CAF50" },
+          "& .MuiStepConnector-root .Mui-active .MuiStepConnector-line": { borderColor: "#B71C1C" },
+          "& .MuiStepConnector-root .Mui-completed .MuiStepConnector-line": { borderColor: "#4CAF50" },
+        }}
+      >
+        {steps.map((label) => (
+          <Step key={label}>
+            <StepLabel>{label}</StepLabel>
+          </Step>
+        ))}
+      </Stepper>
+    </Box>
+
+    {/* Step 1: Borrower Info */}
+    {activeStep === 0 && (
+      <Stack spacing={2}>
+        <TextField
+          label="Course"
+          value={requestForm.course}
+          onChange={(e) => setRequestForm({ ...requestForm, course: e.target.value })}
+          fullWidth
+        />
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+          <TextField
+            label="Group Number"
+            value={requestForm.group_number}
+            onChange={(e) => setRequestForm({ ...requestForm, group_number: e.target.value })}
+            fullWidth
+          />
+          <TextField
+            label="Group Leader"
+            value={requestForm.group_leader}
+            onChange={(e) => setRequestForm({ ...requestForm, group_leader: e.target.value })}
+            fullWidth
+          />
+        </Stack>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+          <TextField
+            label="Leader ID"
+            value={requestForm.group_leader_id}
+            onChange={(e) => setRequestForm({ ...requestForm, group_leader_id: e.target.value })}
+            fullWidth
+          />
+          <TextField
+            label="Instructor"
+            value={requestForm.instructor}
+            onChange={(e) => setRequestForm({ ...requestForm, instructor: e.target.value })}
+            fullWidth
+          />
+        </Stack>
+        <TextField
+          label="Subject"
+          value={requestForm.subject}
+          onChange={(e) => setRequestForm({ ...requestForm, subject: e.target.value })}
+          fullWidth
+        />
+        <TextField
+          label="Schedule"
+          value={requestForm.schedule}
+          onChange={(e) => setRequestForm({ ...requestForm, schedule: e.target.value })}
+          fullWidth
+        />
+
+        {/* Status: only editable if updating */}
+        {requestForm.borrow_id && (
+          <TextField
+            select
+            label="Status"
+            value={requestForm.status}
+            onChange={(e) => setRequestForm({ ...requestForm, status: e.target.value })}
+            fullWidth
+            SelectProps={{ native: true }}
           >
-            <Typography variant="h6">New Borrow Request</Typography>
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <EventIcon color="error" />
-              <Typography variant="caption" color="text.secondary">
-                Step {activeStep + 1} of {steps.length}
-              </Typography>
-            </Stack>
-          </Stack>
-        </DialogTitle>
+            <option value="Pending">Pending</option>
+            <option value="Returned">Returned</option>
+          </TextField>
+        )}
 
-        <DialogContent>
-          <Box mb={2}>
-<Stepper
-  activeStep={activeStep}
-  sx={{
-    "& .MuiStepLabel-root .Mui-active": {
-      color: "#B71C1C", // active step label color
-    },
-    "& .MuiStepLabel-root .Mui-completed": {
-      color: "#4CAF50", // completed step label color
-    },
-    "& .MuiStepConnector-root .Mui-active": {
-      "& .MuiStepConnector-line": {
-        borderColor: "#B71C1C", // active connector line
-      },
-    },
-    "& .MuiStepConnector-root .Mui-completed": {
-      "& .MuiStepConnector-line": {
-        borderColor: "#4CAF50", // completed connector line
-      },
-    },
-  }}
->
-  {steps.map((label) => (
-    <Step key={label}>
-      <StepLabel>{label}</StepLabel>
-    </Step>
-  ))}
-</Stepper>
+        {/* Date Borrowed */}
+        <TextField
+          label="Date Borrowed"
+          type="datetime-local"
+          value={requestForm.date_borrowed}
+          onChange={(e) => setRequestForm({ ...requestForm, date_borrowed: e.target.value })}
+          fullWidth
+          InputLabelProps={{ shrink: true }}
+        />
+      </Stack>
+    )}
 
-          </Box>
+    {/* Step 2: Select Items */}
+    {activeStep === 1 && (
+      <Stack spacing={2}>
+        <Stack direction="row" spacing={2}>
+          <TextField
+            placeholder="Search item..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            fullWidth
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon color="action" />
+                </InputAdornment>
+              ),
+            }}
+          />
+          <Button variant="outlined" onClick={() => setSearch("")}>
+            Clear
+          </Button>
+        </Stack>
 
-          {/* Step 1 */}
-          {activeStep === 0 && (
-            <Stack spacing={2}>
-              <TextField
-                label="Course"
-                value={requestForm.course}
-                onChange={(e) =>
-                  setRequestForm({ ...requestForm, course: e.target.value })
-                }
-                fullWidth
-              />
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-                <TextField
-                  label="Group Number"
-                  value={requestForm.group_number}
-                  onChange={(e) =>
-                    setRequestForm({ ...requestForm, group_number: e.target.value })
-                  }
-                  fullWidth
-                />
-                <TextField
-                  label="Group Leader"
-                  value={requestForm.group_leader}
-                  onChange={(e) =>
-                    setRequestForm({ ...requestForm, group_leader: e.target.value })
-                  }
-                  fullWidth
-                />
-              </Stack>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-                <TextField
-                  label="Leader ID"
-                  value={requestForm.group_leader_id}
-                  onChange={(e) =>
-                    setRequestForm({
-                      ...requestForm,
-                      group_leader_id: e.target.value,
-                    })
-                  }
-                  fullWidth
-                />
-                <TextField
-                  label="Instructor"
-                  value={requestForm.instructor}
-                  onChange={(e) =>
-                    setRequestForm({ ...requestForm, instructor: e.target.value })
-                  }
-                  fullWidth
-                />
-              </Stack>
-              <TextField
-                label="Subject"
-                value={requestForm.subject}
-                onChange={(e) =>
-                  setRequestForm({ ...requestForm, subject: e.target.value })
-                }
-                fullWidth
-              />
-              <TextField
-                label="Schedule"
-                value={requestForm.schedule}
-                onChange={(e) =>
-                  setRequestForm({ ...requestForm, schedule: e.target.value })
-                }
-                fullWidth
-              />
-            </Stack>
-          )}
-
-          {/* Step 2 */}
-          {activeStep === 1 && (
-            <Stack spacing={2}>
-              <Stack direction="row" spacing={2}>
-                <TextField
-                  placeholder="Search item..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  fullWidth
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <SearchIcon color="action" />
-                      </InputAdornment>
-                    ),
-                  }}
-                />
-                <Button variant="outlined" onClick={() => setSearch("")}>
-                  Clear
-                </Button>
-              </Stack>
-
-              {itemsLoading ? (
-                <LinearProgress />
-              ) : (
-                <Paper variant="outlined">
-                  <Box sx={{ width: "100%", overflowX: "auto" }}>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow sx={{ bgcolor: "#f5f5f5" }}>
-                        <TableCell>Item</TableCell>
-                        <TableCell>Brand</TableCell>
-                        <TableCell>Location</TableCell>
-                        <TableCell>Available</TableCell>
-                        <TableCell align="center">Quantity</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {filteredItems.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={5} align="center">
-                            No items found
+        {itemsLoading ? (
+          <LinearProgress />
+        ) : (
+          <Paper variant="outlined">
+            <Box sx={{ width: "100%", overflowX: "auto" }}>
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ bgcolor: "#f5f5f5" }}>
+                    <TableCell>Item</TableCell>
+                    <TableCell>Brand</TableCell>
+                    <TableCell>Location</TableCell>
+                    <TableCell>Available</TableCell>
+                    <TableCell align="center">Quantity</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {filteredItems.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} align="center">
+                        No items found
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredItems.map((it) => {
+                      const sel = selectedItems.find((s) => s.num === it.num);
+                      return (
+                        <TableRow key={it.num} hover>
+                          <TableCell>{it.equipment_name}</TableCell>
+                          <TableCell>{it.brand_model}</TableCell>
+                          <TableCell>{it.location}</TableCell>
+                          <TableCell>{it.available}</TableCell>
+                          <TableCell align="center">
+                            <Stack direction="row" alignItems="center" justifyContent="center" spacing={1}>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                onClick={() => updateItemQty(it.num, -1, it.available, it.equipment_name)}
+                                disabled={!sel}
+                              >
+                                –
+                              </Button>
+                              <Typography sx={{ minWidth: 28, textAlign: "center" }}>{sel?.qty ?? 0}</Typography>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                onClick={() => updateItemQty(it.num, +1, it.available, it.equipment_name)}
+                                disabled={it.available <= 0}
+                              >
+                                +
+                              </Button>
+                            </Stack>
                           </TableCell>
                         </TableRow>
-                      ) : (
-                        filteredItems.map((it) => {
-                          const sel = selectedItems.find((s) => s.num === it.num);
-                          return (
-                            <TableRow key={it.num} hover>
-                              <TableCell>{it.equipment_name}</TableCell>
-                              <TableCell>{it.brand_model}</TableCell>
-                              <TableCell>{it.location}</TableCell>
-                              <TableCell>{it.available}</TableCell>
-                              <TableCell align="center">
-                                <Stack
-                                  direction="row"
-                                  alignItems="center"
-                                  justifyContent="center"
-                                  spacing={1}
-                                >
-                                  <Button
-                                    size="small"
-                                    variant="outlined"
-                                    onClick={() =>
-                                      updateItemQty(
-                                        it.num,
-                                        -1,
-                                        it.available,
-                                        it.equipment_name
-                                      )
-                                    }
-                                    disabled={!sel}
-                                  >
-                                    –
-                                  </Button>
-                                  <Typography sx={{ minWidth: 28, textAlign: "center" }}>
-                                    {sel?.qty ?? 0}
-                                  </Typography>
-                                  <Button
-                                    size="small"
-                                    variant="outlined"
-                                    onClick={() =>
-                                      updateItemQty(
-                                        it.num,
-                                        +1,
-                                        it.available,
-                                        it.equipment_name
-                                      )
-                                    }
-                                    disabled={it.available <= 0}
-                                  >
-                                    +
-                                  </Button>
-                                </Stack>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })
-                      )}
-                    </TableBody>
-                  </Table>
-                  </Box>
-                </Paper>
-              )}
-            </Stack>
-          )}
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </Box>
+          </Paper>
+        )}
+      </Stack>
+    )}
 
-          {/* Step 3 */}
-          {activeStep === 2 && (
-            <Stack spacing={2}>
-              <Card sx={{ p: 2 }}>
-                <Typography fontWeight={700}>
-                  {requestForm.course} — {requestForm.subject}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Group {requestForm.group_number} • Leader: {requestForm.group_leader} (
-                  {requestForm.group_leader_id})
-                </Typography>
-                <Typography variant="caption" color="text.secondary" display="block">
-                  Instructor: {requestForm.instructor}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" display="block">
-                  Schedule: {requestForm.schedule}
-                </Typography>
-              </Card>
+    {/* Step 3: Confirmation */}
+{/* Step 3: Confirmation */}
+{activeStep === 2 && (
+  <Stack spacing={2}>
+    <Card sx={{ p: 2 }}>
+      <Typography fontWeight={700}>
+        {requestForm.course} — {requestForm.subject}
+      </Typography>
+      <Typography variant="body2" color="text.secondary">
+        Group {requestForm.group_number} • Leader: {requestForm.group_leader} ({requestForm.group_leader_id})
+      </Typography>
+      <Typography variant="caption" color="text.secondary" display="block">
+        Instructor: {requestForm.instructor}
+      </Typography>
+      <Typography variant="caption" color="text.secondary" display="block">
+        Schedule: {requestForm.schedule}
+      </Typography>
+<Typography variant="caption" color="text.secondary" display="block">
+  Date Borrowed: {requestForm.date_borrowed 
+    ? new Date(requestForm.date_borrowed).toLocaleString()
+    : "-"}
+</Typography>
 
-              <Card sx={{ p: 2 }}>
-                <Typography fontWeight={700} mb={1}>
-                  Selected Items
-                </Typography>
-                {selectedItems.length === 0 ? (
-                  <Typography color="text.secondary">No items selected</Typography>
-                ) : (
-                  selectedItems.map((s) => (
-                    <Box key={s.num} mb={1}>
-                      <Typography>{s.name}</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Qty: {s.qty}
-                      </Typography>
-                    </Box>
-                  ))
-                )}
-              </Card>
-            </Stack>
-          )}
+    </Card>
 
-          {error && (
-            <Typography color="error" mt={2}>
-              {error}
+    <Card sx={{ p: 2 }}>
+      <Typography fontWeight={700} mb={1}>
+        Selected Items
+      </Typography>
+      {selectedItems.length === 0 ? (
+        <Typography color="text.secondary">No items selected</Typography>
+      ) : (
+        selectedItems.map((s) => (
+          <Box key={s.num} mb={1}>
+            <Typography>{s.name}</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Qty: {s.qty}
             </Typography>
-          )}
+          </Box>
+        ))
+      )}
+    </Card>
 
-          <Stack direction="row" justifyContent="space-between" mt={3}>
-            <Button disabled={activeStep === 0} onClick={handleBack}>
-              Back
-            </Button>
-            {activeStep < steps.length - 1 ? (
-              <Button
-                variant="contained"
-                sx={{ bgcolor: "#B71C1C", "&:hover": { bgcolor: "#D32F2F" } }}
-                onClick={handleNext}
-              >
-                Next
-              </Button>
-            ) : (
-              <Button
-                variant="contained"
-                sx={{ bgcolor: "#B71C1C", "&:hover": { bgcolor: "#D32F2F" } }}
-                onClick={handleConfirmBorrow}
-                disabled={saving}
-              >
-                {saving ? "Saving..." : "Confirm Request"}
-              </Button>
-            )}
-          </Stack>
-        </DialogContent>
-      </Dialog>
+    {/* Status Selection */}
+    {requestForm.borrow_id && (
+      <TextField
+        select
+        label="Status"
+        value={requestForm.status}
+        onChange={(e) => setRequestForm({ ...requestForm, status: e.target.value })}
+        fullWidth
+        SelectProps={{ native: true }}
+      >
+        <option value="Pending">Pending</option>
+        <option value="Returned">Returned</option>
+      </TextField>
+    )}
+  </Stack>
+)}
+
+
+    {error && <Typography color="error" mt={2}>{error}</Typography>}
+
+    <Stack direction="row" justifyContent="space-between" mt={3}>
+      <Button disabled={activeStep === 0} onClick={handleBack}>
+        Back
+      </Button>
+      {activeStep < steps.length - 1 ? (
+        <Button
+          variant="contained"
+          sx={{ bgcolor: "#B71C1C", "&:hover": { bgcolor: "#D32F2F" } }}
+          onClick={handleNext}
+        >
+          Next
+        </Button>
+      ) : (
+        <Button
+          variant="contained"
+          sx={{ bgcolor: "#B71C1C", "&:hover": { bgcolor: "#D32F2F" } }}
+          onClick={handleConfirmBorrow}
+          disabled={saving}
+        >
+          {saving ? "Saving..." : requestForm.borrow_id ? "Update" : "Confirm"}
+        </Button>
+      )}
+    </Stack>
+  </DialogContent>
+</Dialog>
+
     </Container>
   );
 }
