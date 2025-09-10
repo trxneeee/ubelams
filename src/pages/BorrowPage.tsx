@@ -1,179 +1,773 @@
 // src/pages/BorrowPage.tsx
-import { useEffect, useState } from "react";
-import axios from "axios";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import EventIcon from "@mui/icons-material/Event";
+import PersonIcon from "@mui/icons-material/Person";
+import SearchIcon from "@mui/icons-material/Search";
 import {
-  Container,
+  Avatar,
+  Box,
+  Button,
   Card,
-  Typography,
+  CardContent,
+  Container,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  InputAdornment,
+  LinearProgress,
+  Paper,
+  Stack,
+  Step,
+  StepLabel,
+  Stepper,
   Table,
+  TableBody,
+  TableCell,
   TableHead,
   TableRow,
-  TableCell,
-  TableBody,
-  Button,
-  Dialog,
-  DialogTitle,
-  DialogContent,
   TextField,
-  Stack,
+  Typography
 } from "@mui/material";
+import axios from "axios";
+import { useEffect, useMemo, useState } from "react";
 
 const WEB_APP_URL =
   "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
 
 interface BorrowRecord {
-  borrow_id: string;
-  item: string;
-  quantity: string;
-  borrower_email: string;
-  dateBorrowed: string;
-  returnDate: string;
-  status: string;
+  borrow_id?: string;
+  course?: string;
+  group_number?: string;
+  group_leader?: string;
+  group_leader_id?: string;
+  instructor?: string;
+  subject?: string;
+  schedule?: string;
+  item?: string; // CSV
+  quantity?: string; // CSV
+  status?: string;
+}
+
+interface BorrowItem {
+  num: string;
+  equipment_name: string;
+  total_qty: number;
+  borrowed: number;
+  available: number;
+  brand_model?: string;
+  location?: string;
 }
 
 export default function BorrowPage() {
+  // records & inventory
   const [records, setRecords] = useState<BorrowRecord[]>([]);
+  const [recordsLoading, setRecordsLoading] = useState(false);
+  const [items, setItems] = useState<BorrowItem[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
+
+  // selected items
+  const [selectedItems, setSelectedItems] = useState<
+    { num: string; name: string; qty: number; available: number }[]
+  >([]);
+
+  // dialog + stepper
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState<BorrowRecord>  ({
-    borrow_id: "",
-    item: "",
-    quantity: "",
-    borrower_email: "",
-    dateBorrowed: "",
-    returnDate: "",
-    status: "",
+  const [activeStep, setActiveStep] = useState(0);
+  const steps = ["Borrower Info", "Select Item(s)", "Confirmation"];
+
+  // Request form
+  const [requestForm, setRequestForm] = useState({
+    course: "",
+    group_number: "",
+    group_leader: "",
+    group_leader_id: "",
+    instructor: "",
+    subject: "",
+    schedule: "",
+    status: "Pending",
   });
 
-  // Fetch records
+  const [search, setSearch] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // fetch borrow records
   const fetchRecords = async () => {
+    setRecordsLoading(true);
     try {
-      const res = await axios.get(WEB_APP_URL, { params: { action: "read", sheet: "borrow" } });
-      // skip headers row
-      const rows = res.data.data.slice(1).map((row: string[]) => ({
-        borrow_id: row[0],
-        item: row[1],
-        quantity: row[2],
-        borrower_email: row[3],
-        dateBorrowed: row[4],
-        returnDate: row[5],
-        status: row[6],
-      }));
-      setRecords(rows);
+      const res = await axios.get(WEB_APP_URL, {
+        params: { action: "read", sheet: "borrow" },
+      });
+      const raw = res.data?.data;
+      if (!raw || raw.length <= 1) {
+        setRecords([]);
+        return;
+      }
+
+      const headerRow = (raw[0] || []).map((h: any) =>
+        String(h || "").trim().toLowerCase().replace(/\s+/g, "_")
+      );
+      const idx = (key: string) => headerRow.indexOf(key);
+
+      const mapped = raw.slice(1).map((row: any[]) => ({
+        borrow_id: row[idx("borrow_id")] ?? row[0] ?? "",
+        course: row[idx("course")] ?? "",
+        group_number: row[idx("group_number")] ?? "",
+        group_leader: row[idx("group_leader")] ?? "",
+        group_leader_id: row[idx("group_leader_id")] ?? "",
+        instructor: row[idx("instructor")] ?? "",
+        subject: row[idx("subject")] ?? "",
+        schedule: row[idx("schedule")] ?? "",
+        item: row[idx("item")] ?? "",
+        quantity: row[idx("quantity")] ?? "",
+        status: row[idx("status")] ?? "",
+      })) as BorrowRecord[];
+
+      setRecords(mapped);
     } catch (err) {
-      console.error(err);
+      console.error("fetchRecords error:", err);
+    } finally {
+      setRecordsLoading(false);
     }
   };
 
-  // Create record
-  const handleCreate = async () => {
+  // fetch inventory
+  const fetchItems = async () => {
+    setItemsLoading(true);
     try {
-      await axios.get(WEB_APP_URL, {
-        params: {
-          action: "create",
-          sheet: "borrow",
-          item: form.item,
-          quantity: form.quantity,
-          borrower_email: form.borrower_email,
-          dateBorrowed: form.dateBorrowed,
-          returnDate: form.returnDate,
-          status: form.status,
-        },
+      const res = await axios.get(WEB_APP_URL, {
+        params: { action: "read", sheet: "nc_inventory" },
       });
-      setOpen(false);
-      fetchRecords();
+      const raw = res.data?.data;
+      if (!raw || raw.length <= 2) {
+        setItems([]);
+        return;
+      }
+
+      const headers = raw[1];
+      const idx = (key: string) => headers.indexOf(key);
+
+      const parsed = raw.slice(2).map((row: any[]) => {
+        const totalQty = parseInt(row[idx("TOTAL_QTY")] ?? "0") || 0;
+        const borrowed = parseInt(row[idx("BORROWED")] ?? "0") || 0;
+        return {
+          num: String(row[idx("NO.")] ?? row[0] ?? ""),
+          equipment_name: String(row[idx("EQUIPMENT_NAME")] ?? row[1] ?? ""),
+          total_qty: totalQty,
+          borrowed,
+          available: Math.max(0, totalQty - borrowed),
+          brand_model: String(row[idx("BRAND_MODEL")] ?? ""),
+          location: String(row[idx("LOCATION")] ?? ""),
+        } as BorrowItem;
+      });
+
+      setItems(parsed);
     } catch (err) {
-      console.error(err);
+      console.error("fetchItems error:", err);
+    } finally {
+      setItemsLoading(false);
     }
   };
 
   useEffect(() => {
     fetchRecords();
+    fetchItems();
   }, []);
 
-  return (
-    <Container>
-      <Card sx={{ p: 2 }}>
-        <Stack direction="row" justifyContent="space-between" mb={2}>
-          <Typography variant="h6">Borrow Records</Typography>
-          <Button variant="contained" onClick={() => setOpen(true)}>
-            New Borrow
-          </Button>
-        </Stack>
+  // filter items
+  const filteredItems = useMemo(
+    () =>
+      items.filter(
+        (it) =>
+          it.equipment_name.toLowerCase().includes(search.toLowerCase()) ||
+          (it.brand_model ?? "").toLowerCase().includes(search.toLowerCase()) ||
+          (it.location ?? "").toLowerCase().includes(search.toLowerCase())
+      ),
+    [items, search]
+  );
 
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Item</TableCell>
-              <TableCell>Quantity</TableCell>
-              <TableCell>Borrower</TableCell>
-              <TableCell>Date Borrowed</TableCell>
-              <TableCell>Return Date</TableCell>
-              <TableCell>Status</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {records.map((row, idx) => (
-              <TableRow key={idx}>
-                <TableCell>{row.item}</TableCell>
-                <TableCell>{row.quantity}</TableCell>
-                <TableCell>{row.borrower_email}</TableCell>
-                <TableCell>{row.dateBorrowed}</TableCell>
-                <TableCell>{row.returnDate}</TableCell>
-                <TableCell>{row.status}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+  // update item qty
+  const updateItemQty = (
+    num: string,
+    delta: number,
+    available: number,
+    name: string
+  ) => {
+    setSelectedItems((prev) => {
+      const existing = prev.find((i) => i.num === num);
+      if (!existing) {
+        if (delta > 0) return [...prev, { num, name, qty: 1, available }];
+        return prev;
+      }
+      const newQty = Math.max(0, Math.min(existing.qty + delta, available));
+      if (newQty === 0) {
+        return prev.filter((i) => i.num !== num);
+      }
+      return prev.map((i) => (i.num === num ? { ...i, qty: newQty } : i));
+    });
+  };
+
+  // stepper nav
+  const handleNext = () => {
+    if (activeStep === 0) {
+      const req = requestForm;
+      if (
+        !req.course ||
+        !req.group_number ||
+        !req.group_leader ||
+        !req.group_leader_id ||
+        !req.instructor ||
+        !req.subject ||
+        !req.schedule
+      ) {
+        setError("Please complete all required fields on Step 1.");
+        return;
+      }
+      setError(null);
+      setActiveStep(1);
+    } else if (activeStep === 1) {
+      if (selectedItems.length === 0) {
+        setError("Please select at least one item.");
+        return;
+      }
+      setError(null);
+      setActiveStep(2);
+    }
+  };
+// View Borrow: open dialog and populate the stepper with data
+const handleViewBorrow = (record: BorrowRecord) => {
+  setRequestForm({
+    course: record.course || "",
+    group_number: record.group_number || "",
+    group_leader: record.group_leader || "",
+    group_leader_id: record.group_leader_id || "",
+    instructor: record.instructor || "",
+    subject: record.subject || "",
+    schedule: record.schedule || "",
+    status: record.status || "Pending",
+  });
+
+  const itemsArr = (record.item?.split(",") || []).map((itm, idx) => ({
+    num: `view-${idx}`,
+    name: itm.replace(/[()]/g, "").trim(),
+    qty: parseInt((record.quantity?.split(",")[idx] || "0").replace(/[()]/g, "")) || 0,
+    available: 0,
+  }));
+  setSelectedItems(itemsArr);
+  setActiveStep(2); // jump to summary
+  setOpen(true);
+};
+
+// Update Borrow: similar to New Borrow but populate stepper for editing
+const handleUpdateBorrow = (record: BorrowRecord) => {
+  setRequestForm({
+    course: record.course || "",
+    group_number: record.group_number || "",
+    group_leader: record.group_leader || "",
+    group_leader_id: record.group_leader_id || "",
+    instructor: record.instructor || "",
+    subject: record.subject || "",
+    schedule: record.schedule || "",
+    status: record.status || "Pending",
+  });
+
+  const itemsArr = (record.item?.split(",") || []).map((itm, idx) => ({
+    num: `edit-${idx}`,
+    name: itm.replace(/[()]/g, "").trim(),
+    qty: parseInt((record.quantity?.split(",")[idx] || "0").replace(/[()]/g, "")) || 0,
+    available: 999, // allow editing
+  }));
+
+  setSelectedItems(itemsArr);
+  setActiveStep(1); // jump to item selection
+  setOpen(true);
+};
+
+// Delete Borrow
+const handleDeleteBorrow = async (borrowId: string) => {
+  if (!confirm("Are you sure you want to delete this borrow request?")) return;
+  try {
+    await axios.get(WEB_APP_URL, {
+      params: { action: "delete", sheet: "borrow", borrow_id: borrowId },
+    });
+    await fetchRecords();
+  } catch (err) {
+    console.error("deleteBorrow error:", err);
+    alert("Failed to delete the record.");
+  }
+};
+
+  const handleBack = () => {
+    setError(null);
+    setActiveStep((s) => Math.max(0, s - 1));
+  };
+
+  const resetDialog = () => {
+    setOpen(false);
+    setActiveStep(0);
+    setRequestForm({
+      course: "",
+      group_number: "",
+      group_leader: "",
+      group_leader_id: "",
+      instructor: "",
+      subject: "",
+      schedule: "",
+      status: "Pending",
+    });
+    setSelectedItems([]);
+    setError(null);
+  };
+
+  // save borrow
+  const handleConfirmBorrow = async () => {
+    if (selectedItems.length === 0) return;
+    setSaving(true);
+    try {
+      const itemStr = selectedItems.map((s) => `(${s.name})`).join(",");
+      const qtyStr = selectedItems.map((s) => `(${s.qty})`).join(",");
+
+      await axios.get(WEB_APP_URL, {
+        params: {
+          action: "create",
+          sheet: "borrow",
+          ...requestForm,
+          item: itemStr,
+          quantity: qtyStr,
+        },
+      });
+
+      await fetchRecords();
+      await fetchItems();
+      resetDialog();
+    } catch (err) {
+      console.error("create borrow error:", err);
+      setError("Failed to save borrow record.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // summary calc
+  const totalRequestedCount = records.reduce((acc, r) => {
+    if (!r.quantity) return acc;
+    const sum = String(r.quantity)
+      .split(",")
+      .map((s) => Number(s.replace(/[()]/g, "").trim() || 0))
+      .reduce((a, b) => a + b, 0);
+    return acc + sum;
+  }, 0);
+
+  return (
+    <Container sx={{ py: 4 }}>
+      {/* Summary cards */}
+      <Stack direction={{ xs: "column", md: "row" }} spacing={3} mb={3}>
+        <Card sx={{ flex: 1, p: 2, borderRadius: 3 }}>
+          <Box display="flex" alignItems="center" gap={2}>
+            <Avatar sx={{ bgcolor: "#B71C1C" }}>
+              <PersonIcon />
+            </Avatar>
+            <Box>
+              <Typography variant="subtitle2">Borrow</Typography>
+              <Typography variant="h6" fontWeight={700}>
+                {records.length}
+              </Typography>
+            </Box>
+          </Box>
+        </Card>
+
+        <Card sx={{ flex: 1, p: 2, borderRadius: 3 }}>
+          <Box display="flex" alignItems="center" gap={2}>
+            <Avatar sx={{ bgcolor: "success.main" }}>
+              <CheckCircleIcon />
+            </Avatar>
+            <Box>
+              <Typography variant="subtitle2">Total Items Borrowed</Typography>
+              <Typography variant="h6" fontWeight={700}>
+                {totalRequestedCount}
+              </Typography>
+            </Box>
+          </Box>
+        </Card>
+      </Stack>
+
+      {/* Borrow Requests Table */}
+      <Card sx={{ borderRadius: 3, p: 2 }}>
+        <CardContent>
+          <Stack
+            direction="row"
+            justifyContent="space-between"
+            alignItems="center"
+            mb={2}
+          >
+            <Typography variant="h6">Borrow Records</Typography>
+            <Button
+              variant="contained"
+              sx={{ bgcolor: "#B71C1C", "&:hover": { bgcolor: "#D32F2F" } }}
+              onClick={() => setOpen(true)}
+            >
+             + New Borrow
+            </Button>
+          </Stack>
+
+          {recordsLoading ? (
+            <LinearProgress />
+          ) : records.length === 0 ? (
+            <Typography color="text.secondary">No records yet.</Typography>
+          ) : (
+             <Box sx={{ width: "100%", overflowX: "auto" }}>
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ bgcolor: "#f5f5f5" }}>
+                  <TableCell>Course</TableCell>
+                  <TableCell>Group</TableCell>
+                  <TableCell>Leader</TableCell>
+                  <TableCell>Instructor</TableCell>
+                  <TableCell>Schedule</TableCell>
+                  <TableCell>Status</TableCell>
+                   <TableCell>Action</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {records.map((r) => (
+                  <TableRow key={`${r.borrow_id}-${r.item}`} hover>
+                    <TableCell>{r.course}</TableCell>
+                    <TableCell>{r.group_number}</TableCell>
+                    <TableCell>
+                      {r.group_leader} ({r.group_leader_id})
+                    </TableCell>
+                    <TableCell>{r.instructor}</TableCell>
+                    <TableCell>{r.schedule}</TableCell>
+                    <TableCell>{r.status}</TableCell>
+                    <TableCell>
+  <Stack direction="row" spacing={1}>
+    <Button
+      size="small"
+      variant="outlined"
+      onClick={() => handleViewBorrow(r)}
+    >
+      View
+    </Button>
+    <Button
+      size="small"
+      variant="contained"
+      color="primary"
+      onClick={() => handleUpdateBorrow(r)}
+    >
+      Update
+    </Button>
+    <Button
+      size="small"
+      variant="contained"
+      color="error"
+      onClick={() => handleDeleteBorrow(r.borrow_id!)}
+    >
+      Delete
+    </Button>
+  </Stack>
+</TableCell>
+
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table></Box>
+          )}
+        </CardContent>
       </Card>
 
-      {/* Dialog */}
-      <Dialog open={open} onClose={() => setOpen(false)}>
-        <DialogTitle>New Borrow</DialogTitle>
+      {/* Dialog (Stepper Form) */}
+      <Dialog open={open} onClose={resetDialog} fullWidth maxWidth="md">
+        <DialogTitle sx={{ color: "#B71C1C", fontWeight: 700 }}>
+          <Stack
+            direction="row"
+            justifyContent="space-between"
+            alignItems="center"
+          >
+            <Typography variant="h6">New Borrow Request</Typography>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <EventIcon color="error" />
+              <Typography variant="caption" color="text.secondary">
+                Step {activeStep + 1} of {steps.length}
+              </Typography>
+            </Stack>
+          </Stack>
+        </DialogTitle>
+
         <DialogContent>
-          <Stack spacing={2} mt={1}>
-            <TextField
-              label="Item"
-              value={form.item}
-              onChange={(e) => setForm({ ...form, item: e.target.value })}
-            />
-            <TextField
-              label="Quantity"
-              value={form.quantity}
-              onChange={(e) => setForm({ ...form, quantity: e.target.value })}
-            />
-            <TextField
-              label="Borrower Email"
-              value={form.borrower_email}
-              onChange={(e) =>
-                setForm({ ...form, borrower_email: e.target.value })
-              }
-            />
-            <TextField
-              label="Date Borrowed"
-              type="date"
-              InputLabelProps={{ shrink: true }}
-              value={form.dateBorrowed}
-              onChange={(e) =>
-                setForm({ ...form, dateBorrowed: e.target.value })
-              }
-            />
-            <TextField
-              label="Return Date"
-              type="date"
-              InputLabelProps={{ shrink: true }}
-              value={form.returnDate}
-              onChange={(e) =>
-                setForm({ ...form, returnDate: e.target.value })
-              }
-            />
-            <TextField
-              label="Status"
-              value={form.status}
-              onChange={(e) => setForm({ ...form, status: e.target.value })}
-            />
-            <Button variant="contained" onClick={handleCreate}>
-              Save
+          <Box mb={2}>
+<Stepper
+  activeStep={activeStep}
+  sx={{
+    "& .MuiStepLabel-root .Mui-active": {
+      color: "#B71C1C", // active step label color
+    },
+    "& .MuiStepLabel-root .Mui-completed": {
+      color: "#4CAF50", // completed step label color
+    },
+    "& .MuiStepConnector-root .Mui-active": {
+      "& .MuiStepConnector-line": {
+        borderColor: "#B71C1C", // active connector line
+      },
+    },
+    "& .MuiStepConnector-root .Mui-completed": {
+      "& .MuiStepConnector-line": {
+        borderColor: "#4CAF50", // completed connector line
+      },
+    },
+  }}
+>
+  {steps.map((label) => (
+    <Step key={label}>
+      <StepLabel>{label}</StepLabel>
+    </Step>
+  ))}
+</Stepper>
+
+          </Box>
+
+          {/* Step 1 */}
+          {activeStep === 0 && (
+            <Stack spacing={2}>
+              <TextField
+                label="Course"
+                value={requestForm.course}
+                onChange={(e) =>
+                  setRequestForm({ ...requestForm, course: e.target.value })
+                }
+                fullWidth
+              />
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                <TextField
+                  label="Group Number"
+                  value={requestForm.group_number}
+                  onChange={(e) =>
+                    setRequestForm({ ...requestForm, group_number: e.target.value })
+                  }
+                  fullWidth
+                />
+                <TextField
+                  label="Group Leader"
+                  value={requestForm.group_leader}
+                  onChange={(e) =>
+                    setRequestForm({ ...requestForm, group_leader: e.target.value })
+                  }
+                  fullWidth
+                />
+              </Stack>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                <TextField
+                  label="Leader ID"
+                  value={requestForm.group_leader_id}
+                  onChange={(e) =>
+                    setRequestForm({
+                      ...requestForm,
+                      group_leader_id: e.target.value,
+                    })
+                  }
+                  fullWidth
+                />
+                <TextField
+                  label="Instructor"
+                  value={requestForm.instructor}
+                  onChange={(e) =>
+                    setRequestForm({ ...requestForm, instructor: e.target.value })
+                  }
+                  fullWidth
+                />
+              </Stack>
+              <TextField
+                label="Subject"
+                value={requestForm.subject}
+                onChange={(e) =>
+                  setRequestForm({ ...requestForm, subject: e.target.value })
+                }
+                fullWidth
+              />
+              <TextField
+                label="Schedule"
+                value={requestForm.schedule}
+                onChange={(e) =>
+                  setRequestForm({ ...requestForm, schedule: e.target.value })
+                }
+                fullWidth
+              />
+            </Stack>
+          )}
+
+          {/* Step 2 */}
+          {activeStep === 1 && (
+            <Stack spacing={2}>
+              <Stack direction="row" spacing={2}>
+                <TextField
+                  placeholder="Search item..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  fullWidth
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <SearchIcon color="action" />
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+                <Button variant="outlined" onClick={() => setSearch("")}>
+                  Clear
+                </Button>
+              </Stack>
+
+              {itemsLoading ? (
+                <LinearProgress />
+              ) : (
+                <Paper variant="outlined">
+                  <Box sx={{ width: "100%", overflowX: "auto" }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: "#f5f5f5" }}>
+                        <TableCell>Item</TableCell>
+                        <TableCell>Brand</TableCell>
+                        <TableCell>Location</TableCell>
+                        <TableCell>Available</TableCell>
+                        <TableCell align="center">Quantity</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {filteredItems.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} align="center">
+                            No items found
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredItems.map((it) => {
+                          const sel = selectedItems.find((s) => s.num === it.num);
+                          return (
+                            <TableRow key={it.num} hover>
+                              <TableCell>{it.equipment_name}</TableCell>
+                              <TableCell>{it.brand_model}</TableCell>
+                              <TableCell>{it.location}</TableCell>
+                              <TableCell>{it.available}</TableCell>
+                              <TableCell align="center">
+                                <Stack
+                                  direction="row"
+                                  alignItems="center"
+                                  justifyContent="center"
+                                  spacing={1}
+                                >
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() =>
+                                      updateItemQty(
+                                        it.num,
+                                        -1,
+                                        it.available,
+                                        it.equipment_name
+                                      )
+                                    }
+                                    disabled={!sel}
+                                  >
+                                    –
+                                  </Button>
+                                  <Typography sx={{ minWidth: 28, textAlign: "center" }}>
+                                    {sel?.qty ?? 0}
+                                  </Typography>
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() =>
+                                      updateItemQty(
+                                        it.num,
+                                        +1,
+                                        it.available,
+                                        it.equipment_name
+                                      )
+                                    }
+                                    disabled={it.available <= 0}
+                                  >
+                                    +
+                                  </Button>
+                                </Stack>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
+                  </Box>
+                </Paper>
+              )}
+            </Stack>
+          )}
+
+          {/* Step 3 */}
+          {activeStep === 2 && (
+            <Stack spacing={2}>
+              <Card sx={{ p: 2 }}>
+                <Typography fontWeight={700}>
+                  {requestForm.course} — {requestForm.subject}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Group {requestForm.group_number} • Leader: {requestForm.group_leader} (
+                  {requestForm.group_leader_id})
+                </Typography>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Instructor: {requestForm.instructor}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Schedule: {requestForm.schedule}
+                </Typography>
+              </Card>
+
+              <Card sx={{ p: 2 }}>
+                <Typography fontWeight={700} mb={1}>
+                  Selected Items
+                </Typography>
+                {selectedItems.length === 0 ? (
+                  <Typography color="text.secondary">No items selected</Typography>
+                ) : (
+                  selectedItems.map((s) => (
+                    <Box key={s.num} mb={1}>
+                      <Typography>{s.name}</Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Qty: {s.qty}
+                      </Typography>
+                    </Box>
+                  ))
+                )}
+              </Card>
+            </Stack>
+          )}
+
+          {error && (
+            <Typography color="error" mt={2}>
+              {error}
+            </Typography>
+          )}
+
+          <Stack direction="row" justifyContent="space-between" mt={3}>
+            <Button disabled={activeStep === 0} onClick={handleBack}>
+              Back
             </Button>
+            {activeStep < steps.length - 1 ? (
+              <Button
+                variant="contained"
+                sx={{ bgcolor: "#B71C1C", "&:hover": { bgcolor: "#D32F2F" } }}
+                onClick={handleNext}
+              >
+                Next
+              </Button>
+            ) : (
+              <Button
+                variant="contained"
+                sx={{ bgcolor: "#B71C1C", "&:hover": { bgcolor: "#D32F2F" } }}
+                onClick={handleConfirmBorrow}
+                disabled={saving}
+              >
+                {saving ? "Saving..." : "Confirm Request"}
+              </Button>
+            )}
           </Stack>
         </DialogContent>
       </Dialog>
