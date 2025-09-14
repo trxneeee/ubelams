@@ -36,15 +36,14 @@ const API_URL =
 
 interface InventoryItem {
   num: string;
+  identifier_type: string;
+  identifiers: string[]; 
+  statuses: string[];    // array for per-quantity identifiers
   equipment_name: string;
   facility: string;
   brand_model: string;
-  first_sem: string;
-  second_sem: string;
   total_qty: string;
   borrowed: string;
-  yes: string;
-  no: string;
   location: string;
   soft_hard: string;
   e_location: string;
@@ -88,15 +87,14 @@ const [searchQuery, setSearchQuery] = useState("");
   const [battery, setBattery] = useState("Without Battery");
 const [form, setForm] = useState<InventoryItem>({
   num: "",
+  identifier_type: "None", // default option
+  identifiers: [],       
+  statuses: [],                 // ✅ added for per-quantity identifiers
   equipment_name: "",
   facility: "",
   brand_model: "",
-  first_sem: "",
-  second_sem: "",
   total_qty: "1",
   borrowed: "0",
-  yes: "Yes",
-  no: "",
   location: "",
   soft_hard: "N/A",
   e_location: "",
@@ -104,6 +102,8 @@ const [form, setForm] = useState<InventoryItem>({
   bat_qty: "",
   bat_total: "",
 });
+
+
 const [form2, setForm2] = useState<CInventoryItem>({
   num: "",
   location: "",
@@ -118,17 +118,16 @@ const [form2, setForm2] = useState<CInventoryItem>({
   issuance_no: "",
 });
 
-const initialFormNC = {
+const initialFormNC: InventoryItem = {
   num: "",
+  identifier_type: "Control Number",
+  identifiers: [],
+  statuses: [], // ✅ add this
   equipment_name: "",
   facility: "",
   brand_model: "",
-  first_sem: "",
-  second_sem: "",
   total_qty: "1",
   borrowed: "0",
-  yes: "Yes",
-  no: "",
   location: "",
   soft_hard: "N/A",
   e_location: "",
@@ -136,6 +135,7 @@ const initialFormNC = {
   bat_qty: "",
   bat_total: "",
 };
+
 
 const initialFormC = {
   num: "",
@@ -185,18 +185,20 @@ const fieldStyle = {
   },
 };
 
-const filteredInventory = inventory.filter(
-  (item) =>
-    item.equipment_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.brand_model.toLowerCase().includes(searchQuery.toLowerCase())
+const filteredInventory = inventory.filter((item) =>
+  [item.equipment_name, item.location, item.brand_model]
+    .some((field) =>
+      String(field || "").toLowerCase().includes(searchQuery.toLowerCase())
+    )
 );
-const filteredCInventory = cinventory.filter(
-  (item) =>
-    item.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    item.remarks.toLowerCase().includes(searchQuery.toLowerCase())
+
+const filteredCInventory = cinventory.filter((item) =>
+  [item.description, item.location, item.remarks]
+    .some((field) =>
+      String(field || "").toLowerCase().includes(searchQuery.toLowerCase())
+    )
 );
+
 
 const handleViewClick = (item: InventoryItem | CInventoryItem) => {
   if (itemType === "Non-Consumable") {
@@ -229,6 +231,18 @@ const resetForm = () => {
 
 };
 
+useEffect(() => {
+  const qty = Number(form.total_qty) || 0;
+
+  // Fill statuses with "working" by default
+  const newStatuses = Array.from({ length: qty }, (_, i) => 
+    form.statuses?.[i] || "working"
+  );
+
+  setForm((prev) => ({ ...prev, statuses: newStatuses }));
+}, [form.total_qty]);
+
+
 // 🔹 Replace your useEffect + fetchInventory logic with this:
 
 const fetchInventory = async () => {
@@ -246,24 +260,43 @@ const fetchInventory = async () => {
       const idx = (key: string) => headers.indexOf(key);
 
       if (itemType === "Non-Consumable") {
-        const parsed: InventoryItem[] = rows.slice(2).map((row: any[]) => ({
-          num: row[idx("NO.")],
-          equipment_name: row[idx("EQUIPMENT_NAME")],
-          facility: row[idx("FACILITY")],
-          brand_model: row[idx("BRAND_MODEL")],
-          first_sem: row[idx("FIRST_SEM")],
-          second_sem: row[idx("SECOND_SEM")],
-          total_qty: row[idx("TOTAL_QTY")],
-          borrowed: row[idx("BORROWED")],
-          yes: row[idx("YES")],
-          no: row[idx("NO")],
-          location: row[idx("LOCATION")],
-          soft_hard: row[idx("SOFT_HARD")],
-          e_location: row[idx("E_LOCATION")],
-          bat_type: row[idx("BAT_TYPE")],
-          bat_qty: row[idx("BAT_QTY")],
-          bat_total: row[idx("BAT_TOTAL")],
-        }));
+        const parsed: InventoryItem[] = rows.slice(2).map((row: any[]) => {
+          // === Identifiers ===
+          const identifiersRaw = row[idx("IDENTIFIER_NUMBER")] || "";
+          const identifiers = identifiersRaw
+            ? String(identifiersRaw)
+                .split(",")
+                .map((id: string) =>
+                  id.trim().replace(/^\{|\}$/g, "") // remove { }
+                )
+            : [];
+
+          // === Statuses ===
+          const statusesRaw = row[idx("STATUS")] || "";
+          const statuses = statusesRaw
+            ? String(statusesRaw)
+                .split(",")
+                .map((s: string) => s.trim().toLowerCase()) // "working" / "not working"
+            : [];
+
+          return {
+            num: row[idx("NO.")],
+            equipment_name: row[idx("EQUIPMENT_NAME")],
+            facility: row[idx("FACILITY")],
+            brand_model: row[idx("BRAND_MODEL")],
+            total_qty: row[idx("TOTAL_QTY")],
+            borrowed: row[idx("BORROWED")],
+            identifier_type: row[idx("IDENTIFIER_TYPE")],
+            identifiers,
+            statuses, // ✅ new field
+            location: row[idx("LOCATION")],
+            soft_hard: row[idx("SOFT_HARD")],
+            e_location: row[idx("E_LOCATION")],
+            bat_type: row[idx("BAT_TYPE")],
+            bat_qty: row[idx("BAT_QTY")],
+            bat_total: row[idx("BAT_TOTAL")],
+          };
+        });
         setInventory(parsed);
       } else {
         const parsed: CInventoryItem[] = rows.slice(2).map((row: any[]) => ({
@@ -272,7 +305,7 @@ const fetchInventory = async () => {
           description: row[idx("DESCRIPTION")],
           quantity_opened: row[idx("QUANTITY_OPENED")],
           quantity_unopened: row[idx("QUANTITY_UNOPENED")],
-          quantity_on_order:  row[idx("QUANTITY_ON_ORDER")],
+          quantity_on_order: row[idx("QUANTITY_ON_ORDER")],
           remarks: row[idx("REMARKS")],
           experiment: row[idx("EXPERIMENT")],
           subject: row[idx("SUBJECT")],
@@ -289,6 +322,7 @@ const fetchInventory = async () => {
   }
 };
 
+
 // 🔹 Make sure it re-fetches whenever `itemType` changes
 useEffect(() => {
   fetchInventory();
@@ -296,40 +330,68 @@ useEffect(() => {
 
 const handleCreate = async () => {
   try {
-    await axios.get(API_URL, {
-      params: {
-        sheet: itemType === "Non-Consumable" ? "nc_inventory" : "c_inventory",
-        action: "create",
-        ...(itemType === "Non-Consumable" ? form : form2),
-      },
-    });
-
-    setOpen(false);
-
     if (itemType === "Non-Consumable") {
+      const totalQty = Number(form.total_qty) || 0;
+
+      // ✅ keep only identifiers up to total_qty
+      const identifiers = form.identifiers
+        .slice(0, totalQty)
+        .map(id => `{${id}}`)
+        .join(",");
+
+      await axios.get(API_URL, {
+        params: {
+          sheet: "nc_inventory",
+          action: "create",
+          ...form,
+          identifiers,
+          statuses: form.statuses.join(","),
+        },
+      });
+
       setForm(initialFormNC);
       fetchInventory();
     } else {
+      await axios.get(API_URL, {
+        params: {
+          sheet: "c_inventory",
+          action: "create",
+          ...form2,
+        },
+      });
+
       setForm2(initialFormC);
       fetchInventory();
     }
+
+    setOpen(false);
   } catch (err) {
     console.error("Failed to create item", err);
   }
 };
 
+
 // Add these handlers above the return statement
-const handleDelete = async (num: string) => {
-  if (!window.confirm("Are you sure you want to delete this item?")) return;
+const handleDelete = async (item: any) => {
+  const sheet = itemType === "Non-Consumable" ? "nc_inventory" : "c_inventory";
+  const name =
+    itemType === "Non-Consumable"
+      ? item.equipment_name
+      : item.description;
+
+  if (
+    !window.confirm(
+      `Are you sure you want to delete "${name}"`
+    )
+  )
+    return;
 
   try {
-    const sheet = itemType === "Non-Consumable" ? "nc_inventory" : "c_inventory";
-
     await axios.get(API_URL, {
       params: {
         sheet,
         action: "delete",
-        num,
+        num: item.num, // still need num to identify row
       },
     });
 
@@ -339,14 +401,23 @@ const handleDelete = async (num: string) => {
   }
 };
 
+
 const handleUpdateItem = async () => {
   try {
     if (itemType === "Non-Consumable") {
+      // ✅ adjust identifiers based on total_qty
+      const totalQty = Number(form.total_qty) || 0;
+      const trimmedIdentifiers = form.identifiers
+        .slice(0, totalQty) // cut off extras if qty decreased
+        .map(id => `{${id}}`);
+
       await axios.get(API_URL, {
         params: {
           sheet: "nc_inventory",
           action: "update",
-          ...form, // send NC form data
+          ...form,
+          identifiers: trimmedIdentifiers.join(", "),
+          statuses: form.statuses.join(","),
         },
       });
 
@@ -357,7 +428,7 @@ const handleUpdateItem = async () => {
         params: {
           sheet: "c_inventory",
           action: "update",
-          ...form2, // send C form data
+          ...form2,
         },
       });
 
@@ -371,6 +442,7 @@ const handleUpdateItem = async () => {
     console.error("Failed to update item", err);
   }
 };
+
 
 
 
@@ -446,29 +518,51 @@ const handleUpdateItem = async () => {
   }}
   disabled={selectedItems.length === 0}
   onClick={async () => {
-    if (!window.confirm("Are you sure you want to delete selected items?")) return;
+  // Get names of selected items
+  const sheetName = itemType === "Non-Consumable" ? "nc_inventory" : "c_inventory";
 
-    try {
-      const sheetName = itemType === "Non-Consumable" ? "nc_inventory" : "c_inventory";
+  const names = selectedItems
+    .map((num) => {
+      const item =
+  itemType === "Non-Consumable"
+    ? inventory.find((i) => i.num === num)
+    : cinventory.find((i) => i.num === num);
 
-      await Promise.all(
-        selectedItems.map((num) =>
-          axios.get(API_URL, {
-            params: { sheet: sheetName, action: "delete", num },
-          })
-        )
-      );
+return item
+  ? itemType === "Non-Consumable"
+    ? (item as InventoryItem).equipment_name
+    : (item as CInventoryItem).description
+  : null;
 
-      setSelectedItems([]);
-      if (itemType === "Non-Consumable") {
-        fetchInventory();
-      } else {
-        fetchInventory();
-      }
-    } catch (err) {
-      console.error("Failed to delete selected items", err);
-    }
-  }}
+    })
+    .filter(Boolean);
+
+  // Confirmation message with list
+  if (
+    !window.confirm(
+      `Are you sure you want to delete the following items?\n\n${names.join(
+        "\n"
+      )}`
+    )
+  )
+    return;
+
+  try {
+    await Promise.all(
+      selectedItems.map((num) =>
+        axios.get(API_URL, {
+          params: { sheet: sheetName, action: "delete", num },
+        })
+      )
+    );
+
+    setSelectedItems([]);
+    fetchInventory();
+  } catch (err) {
+    console.error("Failed to delete selected items", err);
+  }
+}}
+
 >
   Delete Selected ({selectedItems.length})
 </Button>
@@ -601,7 +695,6 @@ const handleUpdateItem = async () => {
         <TableCell>Quantity</TableCell>
         <TableCell>Borrowed</TableCell>
         <TableCell>Facility</TableCell>
-        <TableCell>Status</TableCell>
         <TableCell align="center">Action</TableCell>
       </>
     ) : (
@@ -642,7 +735,6 @@ const handleUpdateItem = async () => {
                 <TableCell align="center">{item.total_qty}</TableCell>
                 <TableCell align="center">{item.borrowed}</TableCell>
                 <TableCell>{item.facility}</TableCell>
-                <TableCell>{item.yes || item.no}</TableCell>
                 <TableCell>
                   <Stack direction="row" spacing={1}>
                     <Tooltip title="View">
@@ -676,7 +768,7 @@ const handleUpdateItem = async () => {
   <Tooltip title="Delete">
     <IconButton
       color="error"
-      onClick={() => handleDelete(item.num)}
+      onClick={() => handleDelete(item)}
       sx={{
         bgcolor: "#ffebee",
         "&:hover": { bgcolor: "#f44336", color: "#fff" },
@@ -746,7 +838,7 @@ const handleUpdateItem = async () => {
   <Tooltip title="Delete">
     <IconButton
       color="error"
-      onClick={() => handleDelete(item.num)}
+      onClick={() => handleDelete(item)}
       sx={{
         bgcolor: "#ffebee",
         "&:hover": { bgcolor: "#f44336", color: "#fff" },
@@ -789,438 +881,529 @@ const handleUpdateItem = async () => {
     setOpen(false);
     resetForm();
   }} maxWidth="lg" fullWidth>
-<DialogTitle sx={{ fontWeight: "bold", color: "#B71C1C" }}>
-  {viewing
-    ? "View Inventory Item"
-    : editing
-    ? "Updating Inventory Item"
-    : "Add Inventory Item"}
-</DialogTitle>
+<DialogTitle
+  sx={{
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    fontWeight: "bold",
+    color: "#B71C1C",
+  }}
+>
+  {editing ? "Edit Item" : viewing ? "View Item" : "Add Item"}
 
-<DialogContent dividers>
-  {itemType === "Non-Consumable" ? (
-    // ==================================================
-    // NON-CONSUMABLE FORM (your existing code)
-    // ==================================================
-    <Box sx={{ display: "flex", gap: 2 }}>
-      {/* LEFT BOX */}
-      <Box sx={{ flex: 1 }}>
-        <Stack spacing={2}>
-          {/* Item Type Selection */}
-          <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: "bold", mb: 1 }}>
-              Item Type
-            </Typography>
-            <ToggleButtonGroup
-              value={itemType}
-              exclusive
-              onChange={(_, value) => value && setItemType(value)}
-              fullWidth
-              disabled={viewing}
-            >
-              <ToggleButton
-                value="Non-Consumable"
-                sx={{
-                  flex: 1,
-                  "&.Mui-selected": {
-                    bgcolor: "#B71C1C",
-                    color: "#FFF",
-                    "&:hover": { bgcolor: "#D32F2F" },
-                  },
-                }}
-              >
-                Non-Consumable
-              </ToggleButton>
-              <ToggleButton
-                value="Consumable"
-                sx={{
-                  flex: 1,
-                  "&.Mui-selected": {
-                    bgcolor: "#B71C1C",
-                    color: "#FFF",
-                    "&:hover": { bgcolor: "#D32F2F" },
-                  },
-                }}
-              >
-                Consumable
-              </ToggleButton>
-            </ToggleButtonGroup>
-          </Box>
-
-          {/* === Non-Consumable Fields === */}
-          <TextField
-            label="Name"
-            value={form.equipment_name}
-            onChange={(e) =>
-              setForm({ ...form, equipment_name: e.target.value })
-            }
-            fullWidth
-            disabled={viewing}
-            sx={fieldStyle}
-          />
-          <TextField
-            label="Brand/Model"
-            value={form.brand_model}
-            onChange={(e) =>
-              setForm({ ...form, brand_model: e.target.value })
-            }
-            fullWidth
-            disabled={viewing}
-            sx={fieldStyle}
-          />
-
-          <Stack spacing={2} direction="row">
-            <TextField
-              label="Facility"
-              value={form.facility}
-              onChange={(e) => setForm({ ...form, facility: e.target.value })}
-              fullWidth
-              disabled={viewing}
-              sx={fieldStyle}
-            />
-            <TextField
-              label="Location (Room & Shelf No.)"
-              value={form.location}
-              onChange={(e) => setForm({ ...form, location: e.target.value })}
-              fullWidth
-              disabled={viewing}
-              sx={fieldStyle}
-            />
-          </Stack>
-
-          <Stack spacing={3} direction="row">
-            <TextField
-              label="First Semester (Quantity)"
-              type="number"
-              value={form.first_sem}
-              onChange={(e) =>
-                setForm({ ...form, first_sem: e.target.value })
-              }
-              fullWidth
-              disabled={viewing}
-              sx={fieldStyle}
-            />
-            <TextField
-              label="Second Semester (Quantity)"
-              type="number"
-              value={form.second_sem}
-              onChange={(e) =>
-                setForm({ ...form, second_sem: e.target.value })
-              }
-              fullWidth
-              disabled={viewing}
-              sx={fieldStyle}
-            />
-            <TextField
-              label="Total Quantity"
-              type="number"
-              value={form.total_qty}
-              onChange={(e) =>
-                setForm({ ...form, total_qty: e.target.value })
-              }
-              fullWidth
-              disabled={viewing}
-              sx={fieldStyle}
-            />
-          </Stack>
-
-          <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: "bold", mb: 1 }}>
-              Condition
-            </Typography>
-            <ToggleButtonGroup
-              value={form.yes ? "Working" : form.no ? "Not Working" : null}
-              exclusive
-              onChange={(_, value) => {
-                if (value === "Working") {
-                  setForm({ ...form, yes: "WORKING", no: "" });
-                } else if (value === "Not Working") {
-                  setForm({ ...form, yes: "", no: "NOT WORKING" });
-                }
-              }}
-              fullWidth
-              sx={{ mt: 1 }}
-              disabled={viewing}
-            >
-              <ToggleButton
-                value="Working"
-                sx={{
-                  flex: 1,
-                  "&.Mui-selected": {
-                    bgcolor: "#B71C1C",
-                    color: "#FFF",
-                    "&:hover": { bgcolor: "#D32F2F" },
-                  },
-                }}
-              >
-                Working
-              </ToggleButton>
-              <ToggleButton
-                value="Not Working"
-                sx={{
-                  flex: 1,
-                  "&.Mui-selected": {
-                    bgcolor: "#B71C1C",
-                    color: "#FFF",
-                    "&:hover": { bgcolor: "#D32F2F" },
-                  },
-                }}
-              >
-                Not Working
-              </ToggleButton>
-            </ToggleButtonGroup>
-          </Box>
-        </Stack>
-      </Box>
-
-      {/* Divider between left and right */}
-      <Divider orientation="vertical" flexItem />
-
-      {/* RIGHT BOX */}
-      <Box
+  {/* Buttons on the same row */}
+  <Box sx={{ display: "flex", gap: 1 }}>
+    {viewing ? (
+      <Button
+        onClick={() => {
+          setOpen(false);
+          setViewing(false);
+          resetForm();
+        }}
         sx={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "space-between",
+          textTransform: "none",
+          fontWeight: "bold",
+          color: "#B71C1C",
+          "&:hover": { bgcolor: "rgba(183,28,28,0.08)" },
         }}
       >
-        <Stack spacing={2}>
-          {/* Battery Information */}
-          <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: "bold", mb: 1 }}>
-              Battery Information
-            </Typography>
-            <ToggleButtonGroup
-              value={battery}
-              exclusive
-              onChange={(_, value) => value && setBattery(value)}
-              fullWidth
-              disabled={viewing}
-            >
-              <ToggleButton
-                value="Without Battery"
-                sx={{
-                  flex: 1,
-                  "&.Mui-selected": {
-                    bgcolor: "#B71C1C",
-                    color: "#FFF",
-                    "&:hover": { bgcolor: "#D32F2F" },
-                  },
-                }}
-              >
-                Without Battery
-              </ToggleButton>
-              <ToggleButton
-                value="With Battery"
-                sx={{
-                  flex: 1,
-                  "&.Mui-selected": {
-                    bgcolor: "#B71C1C",
-                    color: "#FFF",
-                    "&:hover": { bgcolor: "#D32F2F" },
-                  },
-                }}
-              >
-                With Battery
-              </ToggleButton>
-            </ToggleButtonGroup>
-          </Box>
-
-          {battery === "With Battery" && (
-            <Stack spacing={2} direction="row">
-              <TextField
-                label="Battery Type"
-                value={form.bat_type}
-                onChange={(e) => setForm({ ...form, bat_type: e.target.value })}
-                fullWidth
-                variant="outlined"
-                sx={fieldStyle}
-                disabled={viewing}
-              />
-              <TextField
-                label="Battery Quantity"
-                type="number"
-                value={form.bat_qty}
-                onChange={(e) => setForm({ ...form, bat_qty: e.target.value })}
-                fullWidth
-                variant="outlined"
-                sx={fieldStyle}
-                disabled={viewing}
-              />
-            </Stack>
-          )}
-
-          {/* Equipment Manual */}
-          <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: "bold", mb: 1 }}>
-              Equipment Manual
-            </Typography>
-            <ToggleButtonGroup
-              value={form.soft_hard}
-              exclusive
-              onChange={(_, value) =>
-                value && setForm({ ...form, soft_hard: value })
-              }
-              fullWidth
-              disabled={viewing}
-            >
-              <ToggleButton value="Soft Copy" sx={{
-                  flex: 1,
-                  "&.Mui-selected": {
-                    bgcolor: "#B71C1C",
-                    color: "#FFF",
-                    "&:hover": { bgcolor: "#D32F2F" },
-                  },
-                }}>
-                Soft Copy
-              </ToggleButton>
-              <ToggleButton value="Hard Copy" sx={{
-                  flex: 1,
-                  "&.Mui-selected": {
-                    bgcolor: "#B71C1C",
-                    color: "#FFF",
-                    "&:hover": { bgcolor: "#D32F2F" },
-                  },
-                }}>
-                Hard Copy
-              </ToggleButton>
-              <ToggleButton value="N/A" sx={{
-                  flex: 1,
-                  "&.Mui-selected": {
-                    bgcolor: "#B71C1C",
-                    color: "#FFF",
-                    "&:hover": { bgcolor: "#D32F2F" },
-                  },
-                }}>
-                None
-              </ToggleButton>
-            </ToggleButtonGroup>
-          </Box>
-
-          {form.soft_hard !== "N/A" && (
-            <Stack spacing={2} direction="row">
-              {viewing && form.soft_hard === "Soft Copy" ? (
-                <Typography
-                  component="a"
-                  href={form.e_location}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  sx={{
-                    mt: 2,
-                    display: "block",
-                    color: "primary.main",
-                    textDecoration: "underline",
-                    cursor: "pointer",
-                  }}
-                >
-                  {form.e_location || "No link provided"}
-                </Typography>
-              ) : (
-                <TextField
-                  label="Description"
-                  value={form.e_location}
-                  onChange={(e) =>
-                    setForm({ ...form, e_location: e.target.value })
-                  }
-                  fullWidth
-                  variant="outlined"
-                  sx={fieldStyle}
-                  disabled={viewing}
-                />
-              )}
-            </Stack>
-          )}
-        </Stack>
-
-        {/* Buttons at bottom of right box */}
-        <Stack
-          direction="row"
-          justifyContent="flex-end"
-          spacing={2}
-          sx={{ mt: 2 }}
+        Close
+      </Button>
+    ) : (
+      <>
+        <Button
+          onClick={() => {
+            setOpen(false);
+            resetForm();
+          }}
+          sx={{
+            textTransform: "none",
+            fontWeight: "bold",
+            color: "#B71C1C",
+            "&:hover": { bgcolor: "rgba(183,28,28,0.08)" },
+          }}
         >
-          {viewing ? (
-            <Button
-              onClick={() => {
-                setOpen(false);
-                setViewing(false);
-                resetForm();
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          onClick={editing ? handleUpdateItem : handleCreate}
+          sx={{
+            bgcolor: "#B71C1C",
+            color: "#FFF",
+            fontWeight: "bold",
+            textTransform: "none",
+            borderRadius: "8px",
+            "&:hover": { bgcolor: "#D32F2F" },
+          }}
+        >
+          {editing ? "Update" : "Save"}
+        </Button>
+      </>
+    )}
+  </Box>
+</DialogTitle>
+<DialogContent dividers>
+  {itemType === "Non-Consumable" ? (// ==================================================
+// NON-CONSUMABLE FORM (with Identifier Section)
+// ==================================================
+<Box sx={{ display: "flex", gap: 2 }}>
+  {/* LEFT BOX */}
+  <Box sx={{ flex: 1 }}>
+    <Stack spacing={2}>
+      {/* Item Type Selection */}
+      <Box>
+        <Typography variant="subtitle1" sx={{ fontWeight: "bold", mb: 1 }}>
+          Item Type
+        </Typography>
+        <ToggleButtonGroup
+          value={itemType}
+          exclusive
+          onChange={(_, value) => value && setItemType(value)}
+          fullWidth
+          disabled={viewing}
+        >
+          <ToggleButton
+            value="Non-Consumable"
+            sx={{
+              flex: 1,
+              "&.Mui-selected": {
+                bgcolor: "#B71C1C",
+                color: "#FFF",
+                "&:hover": { bgcolor: "#D32F2F" },
+              },
+            }}
+          >
+            Non-Consumable
+          </ToggleButton>
+          <ToggleButton
+            value="Consumable"
+            sx={{
+              flex: 1,
+              "&.Mui-selected": {
+                bgcolor: "#B71C1C",
+                color: "#FFF",
+                "&:hover": { bgcolor: "#D32F2F" },
+              },
+            }}
+          >
+            Consumable
+          </ToggleButton>
+        </ToggleButtonGroup>
+      </Box>
+
+      {/* === Non-Consumable Fields === */}
+      <TextField
+        label="Name"
+        value={form.equipment_name}
+        onChange={(e) => setForm({ ...form, equipment_name: e.target.value })}
+        fullWidth
+        disabled={viewing}
+        sx={fieldStyle}
+      />
+      <TextField
+        label="Brand/Model"
+        value={form.brand_model}
+        onChange={(e) => setForm({ ...form, brand_model: e.target.value })}
+        fullWidth
+        disabled={viewing}
+        sx={fieldStyle}
+      />
+
+      <Stack spacing={2} direction="row">
+        <TextField
+          label="Facility"
+          value={form.facility}
+          onChange={(e) => setForm({ ...form, facility: e.target.value })}
+          fullWidth
+          disabled={viewing}
+          sx={fieldStyle}
+        />
+        <TextField
+          label="Location (Room & Shelf No.)"
+          value={form.location}
+          onChange={(e) => setForm({ ...form, location: e.target.value })}
+          fullWidth
+          disabled={viewing}
+          sx={fieldStyle}
+        />
+      </Stack>
+
+      <Stack spacing={2} direction="row">
+        <TextField
+          label="Total Quantity"
+          type="number"
+          value={form.total_qty}
+          onChange={(e) =>
+            setForm({ ...form, total_qty: e.target.value})
+          }
+          fullWidth
+          disabled={viewing}
+          sx={fieldStyle}
+        />
+      </Stack>
+      <Box>
+        <Typography variant="subtitle1" sx={{ fontWeight: "bold", mb: 1 }}>
+          Battery Information
+        </Typography>
+        <ToggleButtonGroup
+          value={battery}
+          exclusive
+          onChange={(_, value) => value && setBattery(value)}
+          fullWidth
+          disabled={viewing}
+        >
+          <ToggleButton
+            value="Without Battery"
+            sx={{
+              flex: 1,
+              "&.Mui-selected": {
+                bgcolor: "#B71C1C",
+                color: "#FFF",
+                "&:hover": { bgcolor: "#D32F2F" },
+              },
+            }}
+          >
+            Without Battery
+          </ToggleButton>
+          <ToggleButton
+            value="With Battery"
+            sx={{
+              flex: 1,
+              "&.Mui-selected": {
+                bgcolor: "#B71C1C",
+                color: "#FFF",
+                "&:hover": { bgcolor: "#D32F2F" },
+              },
+            }}
+          >
+            With Battery
+          </ToggleButton>
+        </ToggleButtonGroup>
+      </Box>
+
+      {battery === "With Battery" && (
+        <Stack spacing={2} direction="row">
+          <TextField
+            label="Battery Type"
+            value={form.bat_type}
+            onChange={(e) => setForm({ ...form, bat_type: e.target.value })}
+            fullWidth
+            variant="outlined"
+            sx={fieldStyle}
+            disabled={viewing}
+          />
+          <TextField
+            label="Battery Quantity"
+            type="number"
+            value={form.bat_qty}
+            onChange={(e) => setForm({ ...form, bat_qty: e.target.value })}
+            fullWidth
+            variant="outlined"
+            sx={fieldStyle}
+            disabled={viewing}
+          />
+        </Stack>
+      )}
+
+      {/* Equipment Manual */}
+      <Box>
+        <Typography variant="subtitle1" sx={{ fontWeight: "bold", mb: 1 }}>
+          Equipment Manual
+        </Typography>
+        <ToggleButtonGroup
+          value={form.soft_hard}
+          exclusive
+          onChange={(_, value) => value && setForm({ ...form, soft_hard: value })}
+          fullWidth
+          disabled={viewing}
+        >
+          <ToggleButton value="Soft Copy" sx={{
+              flex: 1,
+              "&.Mui-selected": {
+                bgcolor: "#B71C1C",
+                color: "#FFF",
+                "&:hover": { bgcolor: "#D32F2F" },
+              },
+            }}>
+            Soft Copy
+          </ToggleButton>
+          <ToggleButton value="Hard Copy" sx={{
+              flex: 1,
+              "&.Mui-selected": {
+                bgcolor: "#B71C1C",
+                color: "#FFF",
+                "&:hover": { bgcolor: "#D32F2F" },
+              },
+            }}>
+            Hard Copy
+          </ToggleButton>
+          <ToggleButton value="N/A" sx={{
+              flex: 1,
+              "&.Mui-selected": {
+                bgcolor: "#B71C1C",
+                color: "#FFF",
+                "&:hover": { bgcolor: "#D32F2F" },
+              },
+            }}>
+            None
+          </ToggleButton>
+        </ToggleButtonGroup>
+      </Box>
+
+      {form.soft_hard !== "N/A" && (
+        <Stack spacing={2} direction="row">
+          {viewing && form.soft_hard === "Soft Copy" ? (
+            <Typography
+              component="a"
+              href={form.e_location}
+              target="_blank"
+              rel="noopener noreferrer"
+              sx={{
+                mt: 2,
+                display: "block",
+                color: "primary.main",
+                textDecoration: "underline",
+                cursor: "pointer",
               }}
-              sx={{ textTransform: "none", color: "#B71C1C", fontWeight: "bold" }}
             >
-              Close
-            </Button>
+              {form.e_location || "No link provided"}
+            </Typography>
           ) : (
-            <>
-              <Button
-                onClick={() => {
-                  setOpen(false);
-                  resetForm();
-                }}
-                sx={{ textTransform: "none", color: "#B71C1C", fontWeight: "bold" }}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="contained"
-                onClick={editing ? handleUpdateItem : handleCreate}
-                sx={{
-                  bgcolor: "#B71C1C",
-                  "&:hover": { bgcolor: "#D32F2F" },
-                  textTransform: "none",
-                  borderRadius: "8px",
-                }}
-              >
-                {editing ? "Update" : "Save"}
-              </Button>
-            </>
+            <TextField
+              label="Description"
+              value={form.e_location}
+              onChange={(e) => setForm({ ...form, e_location: e.target.value })}
+              fullWidth
+              variant="outlined"
+              sx={fieldStyle}
+              disabled={viewing}
+            />
           )}
         </Stack>
-      </Box>
-    </Box>
-  ) : (
-    // ==================================================
-    // CONSUMABLE FORM
-    // ==================================================
-    
+      )}
+    </Stack>
+  </Box>
+
+  {/* Divider between left and right */}
+  <Divider orientation="vertical" flexItem />
+
+  {/* RIGHT BOX */}
+  <Box
+    sx={{
+      flex: 1,
+      display: "flex",
+      flexDirection: "column",
+      justifyContent: "space-between",
+    }}
+  >
     <Stack spacing={2}>
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={2}>
-      <ToggleButtonGroup
-              value={itemType}
-              exclusive
-              onChange={(_, value) => value && setItemType(value)}
-              fullWidth
-              disabled={viewing}
-            >
-              <ToggleButton
-                value="Non-Consumable"
-                sx={{
-                  flex: 1,
-                  "&.Mui-selected": {
-                    bgcolor: "#B71C1C",
-                    color: "#FFF",
-                    "&:hover": { bgcolor: "#D32F2F" },
-                  },
-                }}
-              >
-                Non-Consumable
-              </ToggleButton>
-              <ToggleButton
-                value="Consumable"
-                sx={{
-                  flex: 1,
-                  "&.Mui-selected": {
-                    bgcolor: "#B71C1C",
-                    color: "#FFF",
-                    "&:hover": { bgcolor: "#D32F2F" },
-                  },
-                }}
-              >
-                Consumable
-              </ToggleButton>
-            </ToggleButtonGroup>
+      {/* Identifier Section */}
+    <Box>
+  <Typography variant="subtitle1" sx={{ fontWeight: "bold", mb: 1 }}>
+    Identifier
+  </Typography>
+
+  {/* Toggle for type */}
+  <ToggleButtonGroup
+    value={form.identifier_type}
+    exclusive
+    onChange={(_, value) => {
+      if (value) {
+        setForm({
+          ...form,
+          identifier_type: value,
+          identifiers: value === "None" ? [] : form.identifiers, // clear if None
+        });
+      }
+    }}
+    fullWidth
+    disabled={viewing}
+  >
+    <ToggleButton
+      value="Control Number"
+      sx={{
+        flex: 1,
+        "&.Mui-selected": {
+          bgcolor: "#B71C1C",
+          color: "#FFF",
+          "&:hover": { bgcolor: "#D32F2F" },
+        },
+      }}
+    >
+      Control
+    </ToggleButton>
+    <ToggleButton
+      value="Serial Number"
+      sx={{
+        flex: 1,
+        "&.Mui-selected": {
+          bgcolor: "#B71C1C",
+          color: "#FFF",
+          "&:hover": { bgcolor: "#D32F2F" },
+        },
+      }}
+    >
+      Serial
+    </ToggleButton>
+    <ToggleButton
+      value="Inventory Number"
+      sx={{
+        flex: 1,
+        "&.Mui-selected": {
+          bgcolor: "#B71C1C",
+          color: "#FFF",
+          "&:hover": { bgcolor: "#D32F2F" },
+        },
+      }}
+    >
+      Inventory
+    </ToggleButton>
+    <ToggleButton
+      value="None"
+      sx={{
+        flex: 1,
+        "&.Mui-selected": {
+          bgcolor: "#9E9E9E",
+          color: "#FFF",
+          "&:hover": { bgcolor: "#757575" },
+        },
+      }}
+    >
+      None
+    </ToggleButton>
+  </ToggleButtonGroup>
+
+  {/* Input fields for numbers */}
+{form.identifier_type !== "None" && (
+  <Stack spacing={2} sx={{ mt: 2 }}>
+    {/* Header row */}
+    <Stack direction="row" spacing={1} alignItems="center">
+      <Box sx={{ flex: 1, fontWeight: "bold", color: "text.secondary" }}>
+        {form.identifier_type || "Identifier"}
+      </Box>
+      <Box sx={{ width: 80, textAlign: "center", fontWeight: "bold", color: "text.secondary" }}>
+        Status
+      </Box>
+    </Stack>
+
+    {/* Rows */}
+  {Array.from({ length: Number(form.total_qty) || 0 }).map((_, i) => (
+  <Stack key={i} direction="row" spacing={1} alignItems="center">
+    <TextField
+      label={`${form.identifier_type || "Identifier"} ${i + 1}`}
+      value={form.identifiers?.[i] || ""}
+      onChange={(e) => {
+        const newIdentifiers = [...(form.identifiers || [])];
+        newIdentifiers[i] = e.target.value;
+        setForm({ ...form, identifiers: newIdentifiers });
+      }}
+      fullWidth
+      disabled={viewing}
+      sx={fieldStyle}
+    />
+
+    {/* Square status toggle */}
+    <Box
+      onClick={() => {
+        if (viewing) return;
+        const newStatuses = [...(form.statuses || [])];
+        newStatuses[i] =
+          form.statuses?.[i] === "working" ? "not working" : "working";
+        setForm({ ...form, statuses: newStatuses });
+      }}
+      sx={{
+        width: 24,
+        height: 24,
+        borderRadius: 1,
+        bgcolor: form.statuses?.[i] === "not working" ? "red" : "green",
+        cursor: viewing ? "default" : "pointer",
+        border: "2px solid #333",
+        ml: 1,
+      }}
+    />
+
+    {/* Delete button */}
+    {!viewing && (
+      <IconButton
+        onClick={() => {
+          const newIdentifiers = [...(form.identifiers || [])];
+          const newStatuses = [...(form.statuses || [])];
+          newIdentifiers.splice(i, 1); // remove identifier at i
+          newStatuses.splice(i, 1);   // remove status at i
+          setForm({
+            ...form,
+            identifiers: newIdentifiers,
+            statuses: newStatuses,
+            total_qty: newIdentifiers.length.toString(),
+          });
+        }}
+        size="small"
+        sx={{ color: "#B71C1C" }}
+      >
+        <DeleteIcon fontSize="small" />
+      </IconButton>
+    )}
   </Stack>
+))}
+  </Stack>
+)}
+
+</Box>
+    </Stack>
+  </Box>
+</Box>
+) : (
+    // ==================================================
+// NON-CONSUMABLE FORM (cleaned)
+// ==================================================
+<Box sx={{ display: "flex", gap: 2 }}>
+  {/* LEFT BOX */}
+  <Box sx={{ flex: 1 }}>
+    <Stack spacing={2}>
+      {/* Item Type Selection */}
+      <Box>
+        <Typography variant="subtitle1" sx={{ fontWeight: "bold", mb: 1 }}>
+          Item Type
+        </Typography>
+        <ToggleButtonGroup
+          value={itemType}
+          exclusive
+          onChange={(_, value) => value && setItemType(value)}
+          fullWidth
+          disabled={viewing}
+        >
+          <ToggleButton
+            value="Non-Consumable"
+            sx={{
+              flex: 1,
+              "&.Mui-selected": {
+                bgcolor: "#B71C1C",
+                color: "#FFF",
+                "&:hover": { bgcolor: "#D32F2F" },
+              },
+            }}
+          >
+            Non-Consumable
+          </ToggleButton>
+          <ToggleButton
+            value="Consumable"
+            sx={{
+              flex: 1,
+              "&.Mui-selected": {
+                bgcolor: "#B71C1C",
+                color: "#FFF",
+                "&:hover": { bgcolor: "#D32F2F" },
+              },
+            }}
+          >
+            Consumable
+          </ToggleButton>
+        </ToggleButtonGroup>
+      </Box>
+
+      {/* === Non-Consumable Fields === */}
       <TextField
         label="Description"
         value={form2.description}
@@ -1262,29 +1445,64 @@ const handleUpdateItem = async () => {
           disabled={viewing}
           sx={fieldStyle}
         />
-         <TextField
-          label="Quantity (Unopened)"
+        <TextField
+          label="Quantity (On Order)" // ✅ fixed label
           type="number"
           value={form2.quantity_on_order}
           onChange={(e) =>
-            setForm2({ ...form2, quantity_on_order: e.target.value })
+            setForm2({ ...form2, quantity_on_order: e.target.value})
           }
           fullWidth
           disabled={viewing}
           sx={fieldStyle}
         />
       </Stack>
+    </Stack>
+  </Box>
 
+  {/* Divider */}
+  <Divider orientation="vertical" flexItem />
+
+  {/* RIGHT BOX */}
+  <Box
+    sx={{
+      flex: 1,
+      display: "flex",
+      flexDirection: "column",
+      justifyContent: "space-between",
+    }}
+  >
+    <Stack spacing={2}>
       <TextField
-        label="Remarks"
-        value={form2.remarks}
-        onChange={(e) => setForm2({ ...form2, remarks: e.target.value })}
+        label="Date Issued"
+        type="date"
+        value={form2.date_issued}
+        onChange={(e) =>
+          setForm2({ ...form2, date_issued: e.target.value })
+        }
+        fullWidth
+        disabled={viewing}
+        InputLabelProps={{ shrink: true }}
+        sx={fieldStyle}
+      />
+      <TextField
+        label="Issuance No."
+        value={form2.issuance_no}
+        onChange={(e) =>
+          setForm2({ ...form2, issuance_no: e.target.value })
+        }
         fullWidth
         disabled={viewing}
         sx={fieldStyle}
       />
-
-      <Stack spacing={2} direction="row">
+      <TextField
+          label="Remarks"
+          value={form2.remarks}
+          onChange={(e) => setForm2({ ...form2, remarks: e.target.value })}
+          fullWidth
+          disabled={viewing}
+          sx={fieldStyle}
+        />
         <TextField
           label="Experiment"
           value={form2.experiment}
@@ -1301,74 +1519,10 @@ const handleUpdateItem = async () => {
           disabled={viewing}
           sx={fieldStyle}
         />
-      </Stack>
-
-      <Stack spacing={2} direction="row">
-        <TextField
-          label="Date Issued"
-          type="date"
-          value={form2.date_issued}
-          onChange={(e) => setForm2({ ...form2, date_issued: e.target.value })}
-          fullWidth
-          disabled={viewing}
-          InputLabelProps={{ shrink: true }}
-          sx={fieldStyle}
-        />
-        <TextField
-          label="Issuance No."
-          value={form2.issuance_no}
-          onChange={(e) => setForm2({ ...form2, issuance_no: e.target.value })}
-          fullWidth
-          disabled={viewing}
-          sx={fieldStyle}
-        />
-      </Stack>
-
-      {/* Buttons */}
-      <Stack
-        direction="row"
-        justifyContent="flex-end"
-        spacing={2}
-        sx={{ mt: 2 }}
-      >
-        {viewing ? (
-          <Button
-            onClick={() => {
-              setOpen(false);
-              setViewing(false);
-              resetForm();
-            }}
-            sx={{ textTransform: "none", color: "#B71C1C", fontWeight: "bold" }}
-          >
-            Close
-          </Button>
-        ) : (
-          <>
-            <Button
-              onClick={() => {
-                setOpen(false);
-                resetForm();
-              }}
-              sx={{ textTransform: "none", color: "#B71C1C", fontWeight: "bold" }}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="contained"
-              onClick={editing ? handleUpdateItem : handleCreate}
-              sx={{
-                bgcolor: "#B71C1C",
-                "&:hover": { bgcolor: "#D32F2F" },
-                textTransform: "none",
-                borderRadius: "8px",
-              }}
-            >
-              {editing ? "Update" : "Save"}
-            </Button>
-          </>
-        )}
-      </Stack>
     </Stack>
+  </Box>
+</Box>
+
   )}
 </DialogContent>
 
