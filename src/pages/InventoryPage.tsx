@@ -56,10 +56,9 @@ interface InventoryItem {
   bat_total: string;
   yes_or_no: string;
   preventive_or_calibration: string;
-  inhouse_outsoured:string;
+  inhouse_outsourced:string;
   month: string;
 }
-
 interface CInventoryItem {
   num: string;
   location: string;
@@ -123,7 +122,7 @@ const [form, setForm] = useState<InventoryItem>({
   bat_total: "",
   yes_or_no: "NO",
   preventive_or_calibration: "",
-  inhouse_outsoured: "",
+  inhouse_outsourced: "",
   month: ""
 });
 
@@ -161,7 +160,7 @@ const initialFormNC: InventoryItem = {
   bat_total: "",
   yes_or_no: "NO",
   preventive_or_calibration: "",
-  inhouse_outsoured: "",
+  inhouse_outsourced: "",
   month: ""
 };
 
@@ -380,25 +379,42 @@ const handleCreate = async () => {
     if (itemType === "Non-Consumable") {
       const totalQty = Number(form.total_qty) || 0;
 
-      // ✅ keep only identifiers up to total_qty
-      const identifiers = form.identifiers
-        .slice(0, totalQty)
-        .map(id => `{${id}}`)
-        .join(",");
+      // Only keep identifiers up to total_qty
+      const identifiers = form.identifiers.slice(0, totalQty);
 
-      await axios.get(API_URL, {
+      // 1️⃣ Create item in nc_inventory (original logic)
+      const res = await axios.get(API_URL, {
         params: {
           sheet: "nc_inventory",
           action: "create",
           ...form,
-          identifiers,
+          identifiers: identifiers.map(id => `{${id}}`).join(","), // comma-separated
           statuses: form.statuses.join(","),
         },
       });
 
+      const inventoryNum = res.data.data.equipment_num; 
+
+      // 2️⃣ Only create maintenance if month is not empty
+      if (form.month && form.month.trim() !== "") {
+        for (let id of identifiers) {
+          await axios.get(API_URL, {
+            params: {
+              sheet: "maintenance",
+              action: "create",
+              ...form,
+              equipment_num: inventoryNum,
+              identifier_number: id, // send single identifier per row
+              // date_accomplished and accomplished_by left blank
+            },
+          });
+        }
+      }
+
       setForm(initialFormNC);
       fetchInventory();
     } else {
+      // Consumable items
       await axios.get(API_URL, {
         params: {
           sheet: "c_inventory",
@@ -416,6 +432,8 @@ const handleCreate = async () => {
     console.error("Failed to create item", err);
   }
 };
+
+
 
 
 // Add these handlers above the return statement
@@ -1379,7 +1397,22 @@ return item
         <ToggleButton value="CALIBRATION">Calibration</ToggleButton>
         <ToggleButton value="BOTH">Both</ToggleButton>
       </ToggleButtonGroup>
-
+       <Box mt={2}>
+      <ToggleButtonGroup
+        value={form.inhouse_outsourced}
+        exclusive
+        onChange={(_, value) => {
+          if (value) {
+            setForm((prev) => ({ ...prev, inhouse_outsourced: value }));
+          }
+        }}
+        fullWidth
+        disabled={viewing}
+      >
+        <ToggleButton value="IN-HOUSE">IN-HOUSE</ToggleButton>
+        <ToggleButton value="OUTSOURCE">OUTSOURCE</ToggleButton>
+      </ToggleButtonGroup>
+      </Box>
       {/* Month Selection */}
       <Box mt={2}>
         <ToggleButtonGroup
