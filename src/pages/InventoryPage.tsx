@@ -4,6 +4,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import Inventory2Icon from "@mui/icons-material/Inventory2";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import { keyframes } from "@mui/system";
 import {
   Box,
   Button,
@@ -20,6 +21,8 @@ import {
   TableCell,
   TableHead,
   TablePagination,
+  TableContainer,
+  DialogActions,
   TableRow,
   TextField,
   ToggleButton,
@@ -30,6 +33,7 @@ import {
 import axios from "axios";
 import { useEffect, useState } from "react";
 import Loader from "../components/Loader";
+import { useSearchParams } from "react-router-dom";
 
 const API_URL =
   "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
@@ -50,6 +54,10 @@ interface InventoryItem {
   bat_type: string;
   bat_qty: string;
   bat_total: string;
+  yes_or_no: string;
+  preventive_or_calibration: string;
+  inhouse_outsoured:string;
+  month: string;
 }
 
 interface CInventoryItem {
@@ -64,6 +72,7 @@ interface CInventoryItem {
   subject: string;
   date_issued: string;
   issuance_no: string;
+  stock_alert: string;
 }
 
 
@@ -75,11 +84,22 @@ const [viewing, setViewing] = useState(false);
     const [cinventory, setCInventory] = useState<CInventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
+const [lowStockOpen, setLowStockOpen] = useState(false);
+const [lowStockSearch, setLowStockSearch] = useState("");
+const [errors, setErrors] = useState<{ [key: string]: string }>({});
+const [searchParams, setSearchParams] = useSearchParams();
 const [page, setPage] = useState(0);
+const queryType = searchParams.get("stock"); 
 const rowsPerPage = 10;
 const handleChangePage = (_: unknown, newPage: number) => {
   setPage(newPage);
 };
+const blink = keyframes`
+  0% { box-shadow: 0 0 0px #FF8F00; }
+  50% { box-shadow: 0 0 16px #FF8F00; }
+  100% { box-shadow: 0 0 0px #FF8F00; }
+`;
+
 const [searchQuery, setSearchQuery] = useState("");
   // modal state
   const [open, setOpen] = useState(false);
@@ -101,6 +121,10 @@ const [form, setForm] = useState<InventoryItem>({
   bat_type: "",
   bat_qty: "",
   bat_total: "",
+  yes_or_no: "NO",
+  preventive_or_calibration: "",
+  inhouse_outsoured: "",
+  month: ""
 });
 
 
@@ -108,14 +132,15 @@ const [form2, setForm2] = useState<CInventoryItem>({
   num: "",
   location: "",
   description: "",
-  quantity_opened: "",
-  quantity_unopened: "",
-  quantity_on_order: "",
+  quantity_opened: "0",
+  quantity_unopened: "0",
+  quantity_on_order: "0",
   remarks: "",
   experiment: "",
   subject: "",
   date_issued: "",
   issuance_no: "",
+  stock_alert: "5"
 });
 
 const initialFormNC: InventoryItem = {
@@ -134,6 +159,10 @@ const initialFormNC: InventoryItem = {
   bat_type: "",
   bat_qty: "",
   bat_total: "",
+  yes_or_no: "NO",
+  preventive_or_calibration: "",
+  inhouse_outsoured: "",
+  month: ""
 };
 
 
@@ -141,14 +170,15 @@ const initialFormC = {
   num: "",
   description: "",
   location: "",
-  quantity_opened: "",
-  quantity_unopened: "",
-  quantity_on_order: "",
+  quantity_opened: "0",
+  quantity_unopened: "0",
+  quantity_on_order: "0",
   remarks: "",
   experiment: "",
   subject: "",
   date_issued: "",
   issuance_no: "",
+  stock_alert: "5"
 };
 
 const handleEditClick = (item: InventoryItem | CInventoryItem) => {
@@ -199,6 +229,18 @@ const filteredCInventory = cinventory.filter((item) =>
     )
 );
 
+const validateForm = () => {
+  const newErrors: { [key: string]: string } = {};
+
+  if (itemType === "Non-Consumable") {
+    if (!form.equipment_name?.trim()) newErrors.equipment_name = "Name is required";
+  } else {
+    if (!form2.description?.trim()) newErrors.description = "Description is required";
+  }
+
+  setErrors(newErrors);
+  return Object.keys(newErrors).length === 0; // ✅ valid if no errors
+};
 
 const handleViewClick = (item: InventoryItem | CInventoryItem) => {
   if (itemType === "Non-Consumable") {
@@ -295,6 +337,10 @@ const fetchInventory = async () => {
             bat_type: row[idx("BAT_TYPE")],
             bat_qty: row[idx("BAT_QTY")],
             bat_total: row[idx("BAT_TOTAL")],
+            yes_or_no: row[idx("YES_OR_NO")],
+            preventive_or_calibration: row[idx("PREVENTIVE_OR_CALIBRATION")],
+            inhouse_outsourced: row[idx("INHOUSE/OUTSOURCED")],
+            month: row[idx("MONTH")],
           };
         });
         setInventory(parsed);
@@ -311,6 +357,7 @@ const fetchInventory = async () => {
           subject: row[idx("SUBJECT")],
           date_issued: row[idx("DATE_ISSUED")],
           issuance_no: row[idx("ISSUANCE_NO")],
+          stock_alert: row[idx("STOCK_ALERT")],
         }));
         setCInventory(parsed);
       }
@@ -443,7 +490,12 @@ const handleUpdateItem = async () => {
   }
 };
 
-
+useEffect(() => {
+    const queryType = searchParams.get("stock");
+    if (queryType === "Alert") {
+      setItemType("Consumable");
+    }
+  }, [searchParams]);
 
 
   useEffect(() => {
@@ -457,33 +509,91 @@ const handleUpdateItem = async () => {
 <Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={2}>
   {/* Search Bar */}
   {/* Summary Cards */}
-  <Card sx={{ flex: 1, p: 1.5, borderRadius: 2, display: "flex", alignItems: "center", gap: 1.5 }}>
-    <Inventory2Icon sx={{ fontSize: 30, color: "#B71C1C" }} />
-    <Box>
-      <Typography variant="caption" color="text.secondary">Total Items</Typography>
-      <Typography variant="subtitle1" sx={{ fontWeight: "bold", color: "#B71C1C" }}>{inventory.length}</Typography>
-    </Box>
-  </Card>
+<Card sx={{ flex: 1, p: 1.5, borderRadius: 2, display: "flex", alignItems: "center", gap: 1.5 }}>
+  <Inventory2Icon sx={{ fontSize: 30, color: "#B71C1C" }} />
+  <Box>
+    <Typography variant="caption" color="text.secondary">Total Items</Typography>
+    <Typography variant="subtitle1" sx={{ fontWeight: "bold", color: "#B71C1C" }}>
+      {itemType === "Consumable" ? cinventory.length : inventory.length}
+    </Typography>
+  </Box>
+</Card>
 
-  <Card sx={{ flex: 1, p: 1.5, borderRadius: 2, display: "flex", alignItems: "center", gap: 1.5 }}>
-    <WarningAmberIcon sx={{ fontSize: 30, color: "#FF8F00" }} />
-    <Box>
-      <Typography variant="caption" color="text.secondary">Low Stock</Typography>
-      <Typography variant="subtitle1" sx={{ fontWeight: "bold", color: "#FF8F00" }}>
-        {inventory.filter(i => parseInt(i.total_qty) <= 5).length}
-      </Typography>
-    </Box>
-  </Card>
+{itemType === "Consumable" && (
+<Card
+  onClick={() => {
+    setLowStockOpen(true);
 
-  <Card sx={{ flex: 1, p: 1.5, borderRadius: 2, display: "flex", alignItems: "center", gap: 1.5 }}>
+    if (searchParams.get("stock") === "Alert") {
+      searchParams.delete("stock"); // ✅ clear it
+    } else {
+      searchParams.set("stock", "Alert"); // ✅ set it
+    }
+    setSearchParams(searchParams);
+  }}
+  sx={{
+    flex: 1,
+    p: 1.5,
+    borderRadius: 2,
+    display: "flex",
+    alignItems: "center",
+    gap: 1.5,
+    cursor: "pointer",
+    "&:hover": { boxShadow: 4 },
+    animation:
+      queryType === "Alert" ? `${blink} 1.2s infinite ease-in-out` : "none",
+  }}
+>
+  <WarningAmberIcon sx={{ fontSize: 30, color: "#FF8F00" }} />
+  <Box>
+    <Typography variant="caption" color="text.secondary">
+      Low Stock
+    </Typography>
+    <Typography
+      variant="subtitle1"
+      sx={{ fontWeight: "bold", color: "#FF8F00" }}
+    >
+      {cinventory.filter((i) => {
+        const alert = Number(i.stock_alert) || 5;
+        const qtyOpened = Number(i.quantity_opened) || 0;
+        return qtyOpened <= alert;
+      }).length}
+    </Typography>
+  </Box>
+</Card>
+
+
+)}
+
+
+{itemType === "Non-Consumable" && (
+  <Card
+    sx={{
+      flex: 1,
+      p: 1.5,
+      borderRadius: 2,
+      display: "flex",
+      alignItems: "center",
+      gap: 1.5,
+    }}
+  >
     <AssignmentTurnedInIcon sx={{ fontSize: 30, color: "#1B5E20" }} />
     <Box>
-      <Typography variant="caption" color="text.secondary">Borrowed</Typography>
-      <Typography variant="subtitle1" sx={{ fontWeight: "bold", color: "#1B5E20" }}>
-        {inventory.reduce((acc, i) => acc + parseInt(i.borrowed), 0)}
+      <Typography variant="caption" color="text.secondary">
+        Borrowed
+      </Typography>
+      <Typography
+        variant="subtitle1"
+        sx={{ fontWeight: "bold", color: "#1B5E20" }}
+      >
+        {inventory.reduce(
+          (acc, i) => acc + parseInt(i.borrowed || "0", 10),
+          0
+        )}
       </Typography>
     </Box>
   </Card>
+)}
 
   {/* Buttons */}
   <Stack direction={{ xs: "column", sm: "row" }} spacing={1} mb={0.5}>
@@ -928,7 +1038,10 @@ return item
         </Button>
         <Button
           variant="contained"
-          onClick={editing ? handleUpdateItem : handleCreate}
+         onClick={() => {
+    if (!validateForm()) return; // show errors instead of saving
+    editing ? handleUpdateItem() : handleCreate();
+  }}
           sx={{
             bgcolor: "#B71C1C",
             color: "#FFF",
@@ -1001,6 +1114,8 @@ return item
         fullWidth
         disabled={viewing}
         sx={fieldStyle}
+        error={!!errors.equipment_name}
+  helperText={errors.equipment_name}
       />
       <TextField
         label="Brand/Model"
@@ -1200,6 +1315,97 @@ return item
   >
     <Stack spacing={2}>
       {/* Identifier Section */}
+<Box>
+  <Typography variant="subtitle1" sx={{ fontWeight: "bold", mb: 1 }}>
+    Maintenance Information
+  </Typography>
+
+  {/* Yes or No Maintenance */}
+  <ToggleButtonGroup
+    value={form.yes_or_no}
+    exclusive
+    onChange={(_, value) => {
+      if (value) {
+        setForm((prev) => ({ ...prev, yes_or_no: value }));
+      }
+    }}
+    fullWidth
+    disabled={viewing}
+  >
+    <ToggleButton
+      value="NO"
+      sx={{
+        flex: 1,
+        "&.Mui-selected": {
+          bgcolor: "#B71C1C",
+          color: "#FFF",
+          "&:hover": { bgcolor: "#D32F2F" },
+        },
+      }}
+    >
+      Without Maintenance
+    </ToggleButton>
+    <ToggleButton
+      value="YES"
+      sx={{
+        flex: 1,
+        "&.Mui-selected": {
+          bgcolor: "#B71C1C",
+          color: "#FFF",
+          "&:hover": { bgcolor: "#D32F2F" },
+        },
+      }}
+    >
+      With Maintenance
+    </ToggleButton>
+  </ToggleButtonGroup>
+
+  {/* Show only if maintenance = yes */}
+  {form.yes_or_no === "YES" && (
+    <Box mt={2}>
+      {/* Preventive / Calibration / Both */}
+      <ToggleButtonGroup
+        value={form.preventive_or_calibration}
+        exclusive
+        onChange={(_, value) => {
+          if (value) {
+            setForm((prev) => ({ ...prev, preventive_or_calibration: value }));
+          }
+        }}
+        fullWidth
+        disabled={viewing}
+      >
+        <ToggleButton value="PREVENTIVE">Preventive</ToggleButton>
+        <ToggleButton value="CALIBRATION">Calibration</ToggleButton>
+        <ToggleButton value="BOTH">Both</ToggleButton>
+      </ToggleButtonGroup>
+
+      {/* Month Selection */}
+      <Box mt={2}>
+        <ToggleButtonGroup
+        disabled={viewing}
+          value={form.month}
+          exclusive
+          onChange={(_, value) => {
+            if (value) {
+              setForm((prev) => ({ ...prev, month: value }));
+            }
+          }}
+          fullWidth
+        >
+          {[
+            "JAN","FEB","MAR","APR","MAY","JUN",
+            "JUL","AUG","SEP","OCT","NOV","DEC",
+          ].map((m) => (
+            <ToggleButton key={m} value={m} sx={{ flex: 1 }}>
+              {m.toUpperCase()}
+            </ToggleButton>
+          ))}
+        </ToggleButtonGroup>
+      </Box>
+    </Box>
+  )}
+</Box>
     <Box>
   <Typography variant="subtitle1" sx={{ fontWeight: "bold", mb: 1 }}>
     Identifier
@@ -1354,9 +1560,8 @@ return item
     </Stack>
   </Box>
 </Box>
-) : (
-    // ==================================================
-// NON-CONSUMABLE FORM (cleaned)
+) : (// ==================================================
+// NON-CONSUMABLE FORM (cleaned with Stock Alert)
 // ==================================================
 <Box sx={{ display: "flex", gap: 2 }}>
   {/* LEFT BOX */}
@@ -1411,6 +1616,8 @@ return item
         fullWidth
         disabled={viewing}
         sx={fieldStyle}
+        error={!!errors.description}
+  helperText={errors.description}
       />
 
       <TextField
@@ -1422,6 +1629,7 @@ return item
         sx={fieldStyle}
       />
 
+      {/* Quantity Fields */}
       <Stack spacing={2} direction="row">
         <TextField
           label="Quantity (Opened)"
@@ -1446,17 +1654,28 @@ return item
           sx={fieldStyle}
         />
         <TextField
-          label="Quantity (On Order)" // ✅ fixed label
+          label="Quantity (On Order)"
           type="number"
           value={form2.quantity_on_order}
           onChange={(e) =>
-            setForm2({ ...form2, quantity_on_order: e.target.value})
+            setForm2({ ...form2, quantity_on_order: e.target.value })
           }
           fullWidth
           disabled={viewing}
           sx={fieldStyle}
         />
       </Stack>
+
+      {/* Stock Alert */}
+      <TextField
+        label="Stock Alert"
+        type="number"
+        value={form2.stock_alert}
+        onChange={(e) => setForm2({ ...form2, stock_alert: e.target.value })}
+        fullWidth
+        disabled={viewing}
+        sx={{ ...fieldStyle, mt: 1 }}
+      />
     </Stack>
   </Box>
 
@@ -1496,37 +1715,141 @@ return item
         sx={fieldStyle}
       />
       <TextField
-          label="Remarks"
-          value={form2.remarks}
-          onChange={(e) => setForm2({ ...form2, remarks: e.target.value })}
-          fullWidth
-          disabled={viewing}
-          sx={fieldStyle}
-        />
-        <TextField
-          label="Experiment"
-          value={form2.experiment}
-          onChange={(e) => setForm2({ ...form2, experiment: e.target.value })}
-          fullWidth
-          disabled={viewing}
-          sx={fieldStyle}
-        />
-        <TextField
-          label="Subject"
-          value={form2.subject}
-          onChange={(e) => setForm2({ ...form2, subject: e.target.value })}
-          fullWidth
-          disabled={viewing}
-          sx={fieldStyle}
-        />
+        label="Remarks"
+        value={form2.remarks}
+        onChange={(e) => setForm2({ ...form2, remarks: e.target.value })}
+        fullWidth
+        disabled={viewing}
+        sx={fieldStyle}
+      />
+      <TextField
+        label="Experiment"
+        value={form2.experiment}
+        onChange={(e) => setForm2({ ...form2, experiment: e.target.value })}
+        fullWidth
+        disabled={viewing}
+        sx={fieldStyle}
+      />
+      <TextField
+        label="Subject"
+        value={form2.subject}
+        onChange={(e) => setForm2({ ...form2, subject: e.target.value })}
+        fullWidth
+        disabled={viewing}
+        sx={fieldStyle}
+      />
     </Stack>
   </Box>
 </Box>
-
-  )}
+)}
 </DialogContent>
 
 </Dialog>
+<Dialog
+  open={lowStockOpen}
+  onClose={() => setLowStockOpen(false)}
+  fullWidth
+  maxWidth="lg"
+>
+  <DialogTitle sx={{ fontWeight: "bold", color: "#B71C1C" }}>
+    Low Stock Items
+  </DialogTitle>
+
+  <DialogContent>
+    {/* Search Bar */}
+    <TextField
+      placeholder="Search items..."
+      value={lowStockSearch}
+      onChange={(e) => setLowStockSearch(e.target.value)}
+      fullWidth
+      sx={{ mb: 2 }}
+    />
+
+    <TableContainer>
+      <Table>
+        <TableHead>
+          <TableRow>
+            <TableCell><b>Description</b></TableCell>
+            <TableCell align="center"><b>Quantity (Opened)</b></TableCell>
+            <TableCell align="center"><b>Quantity (Unopened)</b></TableCell>
+            <TableCell align="center"><b>Quantity (On-Order)</b></TableCell>
+            <TableCell align="center"><b>Stock Alert</b></TableCell>
+            <TableCell align="center"><b>Actions</b></TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {cinventory
+            .filter(i => {
+              const alert = Number(i.stock_alert) || 5;
+              const qtyOpened = Number(i.quantity_opened) || 0;
+              return qtyOpened <= alert;
+            })
+            .filter(i =>
+              i.description?.toLowerCase().includes(lowStockSearch.toLowerCase()) ||
+              i.location?.toLowerCase().includes(lowStockSearch.toLowerCase())
+            )
+            .map((row, idx) => (
+              <TableRow key={idx}>
+                <TableCell>{row.description}</TableCell>
+                <TableCell align="center">{row.quantity_opened}</TableCell>
+                <TableCell align="center">{row.quantity_unopened}</TableCell>
+                <TableCell align="center">{row.quantity_on_order}</TableCell>
+                <TableCell align="center">{row.stock_alert || 5}</TableCell>
+                <TableCell align="center">
+                  {/* same icons as your main table */}
+    <Tooltip title="View">
+  <IconButton
+    color="default"
+    onClick={() => handleViewClick(row)}
+   sx={{
+        bgcolor: "#ffebee",
+        "&:hover": { bgcolor: "#484848ff", color: "#fff" },
+        p: 1,
+      }}
+  >
+    <Inventory2Icon fontSize="small" />
+  </IconButton>
+</Tooltip>
+                   <Tooltip title="Update">
+    <IconButton
+      color="primary"
+       onClick={() => handleEditClick(row)}
+      sx={{
+        bgcolor: "#e3f2fd",
+        "&:hover": { bgcolor: "#90caf9" },
+        p: 1,
+      }}
+    >
+      <EditIcon fontSize="small" />
+    </IconButton>
+  </Tooltip>
+
+                <Tooltip title="Delete">
+    <IconButton
+      color="error"
+      onClick={() => handleDelete(row)}
+      sx={{
+        bgcolor: "#ffebee",
+        "&:hover": { bgcolor: "#f44336", color: "#fff" },
+        p: 1,
+      }}
+    >
+      <DeleteIcon fontSize="small" />
+    </IconButton>
+  </Tooltip>
+                </TableCell>
+              </TableRow>
+            ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  </DialogContent>
+
+  <DialogActions>
+    <Button onClick={() => setLowStockOpen(false)}>Close</Button>
+  </DialogActions>
+</Dialog>
+
 
 
 

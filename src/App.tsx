@@ -10,11 +10,16 @@ import BorrowPage from "./pages/BorrowPage";
 import DatabasePage from "./pages/DatabasePage";
 import HomePage from "./pages/HomePage";
 import InventoryPage from "./pages/InventoryPage";
+import { useNavigate } from "react-router-dom";
 import Login from "./pages/Login";
 import MaintenancePage from "./pages/MaintenancePage";
 import StaffPage from "./pages/StaffPage";
-
-
+import InfoIcon from "@mui/icons-material/Info";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import Inventory2Icon from "@mui/icons-material/Inventory2";
+import NotificationsIcon from "@mui/icons-material/Notifications";
+import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
 interface CalendarEvent {
   id: string;
   title: string;
@@ -23,6 +28,28 @@ interface CalendarEvent {
   description: string;
   location: string;
 }
+interface Notification {
+  id: number;
+  text: React.ReactNode;
+  type: "info" | "warning" | "success";
+  onClick?: () => void; // optional click handler
+}
+
+interface CInventoryItem {
+  num: string;
+  location: string;
+  description: string;
+  quantity_opened: string;
+  quantity_unopened: string;
+  quantity_on_order: string;
+  remarks: string;
+  experiment: string;
+  subject: string;
+  date_issued: string;
+  issuance_no: string;
+  stock_alert: string;
+}
+
 
 const API_URL =
   "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
@@ -137,37 +164,63 @@ function CalendarPanel() {
         boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
       }}
     >
-      {/* Header */}
-      <div
+<div
+  style={{
+    position: "sticky",
+    top: 0,
+    background: "#f9f9f9",
+    zIndex: 2,
+    padding: "12px 0",
+  }}
+>
+  {/* Calendar Icon */}
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "center",
+      marginBottom: "12px",
+    }}
+  >
+<div
+  style={{
+    position: "sticky",
+    top: 0,
+    color: "#B71C1C", // red icon
+    borderRadius: "5px",
+    width: "100%",
+    height: "40px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 2,
+  }}
+>
+  <CalendarTodayIcon  fontSize="large"/>
+</div>
+  </div>
+
+  {/* Filter Dropdown */}
+  <div style={{ textAlign: "center" }}>
+    <label style={{ fontWeight: 500, fontSize: "14px" }}>
+      Show:{" "}
+      <select
+        value={filter}
+        onChange={(e) => setFilter(e.target.value as any)}
         style={{
-          position: "sticky",
-          top: 0,
-          background: "#f9f9f9",
-          zIndex: 2,
-          paddingBottom: "12px",
+          padding: "6px 10px",
+          borderRadius: "6px",
+          border: "1px solid #ccc",
         }}
       >
-        <h3 style={{ marginBottom: "12px", fontSize: "20px" }}>📅 To-Do List</h3>
-        <div>
-          <label>
-            Show:{" "}
-            <select
-              value={filter}
-              onChange={(e) => setFilter(e.target.value as any)}
-              style={{
-                padding: "6px 10px",
-                borderRadius: "6px",
-                border: "1px solid #ccc",
-              }}
-            >
-              <option value="all">All</option>
-              <option value="today">Today</option>
-              <option value="week">This Week</option>
-              <option value="month">This Month</option>
-            </select>
-          </label>
-        </div>
-      </div>
+        <option value="all">All</option>
+        <option value="today">Today</option>
+        <option value="week">This Week</option>
+        <option value="month">This Month</option>
+      </select>
+    </label>
+  </div>
+</div>
+
 
       {/* Event List */}
       <div
@@ -355,20 +408,99 @@ function CalendarPanel() {
 }
 
 function NotificationPanel() {
-  const notifications = [
-    { id: 1, text: "New request submitted", type: "info" },
-    { id: 2, text: "Inventory low: Oscilloscope", type: "warning" },
-    { id: 3, text: "Maintenance scheduled", type: "success" },
-    { id: 4, text: "Database updated successfully", type: "success" },
-    { id: 5, text: "Pending staff approval", type: "info" },
-  ];
+  const navigate = useNavigate();
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const fetchCInventory = async () => {
+      setLoading(true);
+      try {
+        const response = await axios.get(API_URL, {
+          params: { sheet: "c_inventory", action: "read" },
+        });
+
+        const result = response.data;
+        if (result.success) {
+          const rows = result.data;
+          const headers = rows[1];
+          const idx = (key: string) => headers.indexOf(key);
+
+          const parsed: CInventoryItem[] = rows.slice(2).map((row: any[]) => ({
+            num: row[idx("NO.")],
+            location: row[idx("LOCATION")],
+            description: row[idx("DESCRIPTION")],
+            quantity_opened: row[idx("QUANTITY_OPENED")],
+            quantity_unopened: row[idx("QUANTITY_UNOPENED")],
+            quantity_on_order: row[idx("QUANTITY_ON_ORDER")],
+            remarks: row[idx("REMARKS")],
+            experiment: row[idx("EXPERIMENT")],
+            subject: row[idx("SUBJECT")],
+            date_issued: row[idx("DATE_ISSUED")],
+            issuance_no: row[idx("ISSUANCE_NO")],
+            stock_alert: row[idx("STOCK_ALERT")],
+          }));
+
+          // ✅ Count low stock items
+          const lowStockCount = parsed.filter((item) => {
+            const qtyOpened = parseInt(item.quantity_opened || "0");
+            const alert = parseInt(item.stock_alert || "5");
+            return qtyOpened <= alert;
+          }).length;
+
+          const generated: Notification[] = [
+          ];
+if (lowStockCount > 0) {
+  generated.push({
+    id: 99,
+    text: (
+      <>
+        You have{" "}
+        <span style={{ fontWeight: "bold", color: "red" }}>
+          {lowStockCount + 1} low-stock items
+        </span>
+        . Please restock soon.
+      </>
+    ),
+    type: "warning",
+onClick: () => {
+  navigate("/inventory?stock=Alert");
+}
+  });
+}
+
+
+
+          setNotifications(generated);
+        }
+      } catch (err) {
+        console.error("Failed to fetch inventory", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchCInventory();
+  }, []);
+
+  const getIcon = (type: string) => {
+    switch (type) {
+      case "info":
+        return <InfoIcon sx={{ color: "#0056b3" }} />;
+      case "warning":
+        return <WarningAmberIcon sx={{ color: "#b36b00" }} />;
+      case "success":
+        return <CheckCircleIcon sx={{ color: "#137333" }} />;
+      default:
+        return <Inventory2Icon />;
+    }
+  };
 
   return (
     <aside
-      className="notification-panel"
       style={{
         padding: "16px",
-        maxWidth: "250px", // 👈 similar width to calendar
+        maxWidth: "190px",
         display: "flex",
         flexDirection: "column",
         background: "#f9f9f9",
@@ -377,17 +509,31 @@ function NotificationPanel() {
       }}
     >
       {/* Sticky Header */}
-      <div
-        style={{
-          position: "sticky",
-          top: 0,
-          background: "#f9f9f9",
-          zIndex: 2,
-          paddingBottom: "12px",
-        }}
-      >
-        <h3 style={{ marginBottom: "12px", fontSize: "20px" }}>🔔 Notifications</h3>
-      </div>
+<div
+  style={{
+    position: "sticky",
+    top: 0,
+    background: "#f9f9f9",
+    zIndex: 2,
+    padding: "12px 0",
+    display: "flex",
+    justifyContent: "center",
+  }}
+>
+  <div
+    style={{
+      color: "#B71C1C", // white icon
+      borderRadius: "5%",
+      width: "100%",
+      height: "40px",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+    }}
+  >
+    <NotificationsIcon fontSize="large"/>
+  </div>
+</div>
 
       {/* Scrollable Notification List */}
       <div
@@ -398,38 +544,59 @@ function NotificationPanel() {
           marginBottom: "40px",
         }}
       >
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-          {notifications.length > 0 ? (
-            notifications.map((n) => (
-              <li
-                key={n.id}
-                style={{
-                  marginBottom: "16px",
-                  padding: "14px",
-                  borderRadius: "8px",
-                  background: "#fff",
-                  border: "1px solid #ddd",
-                  boxShadow: "0 2px 6px rgba(0,0,0,0.05)",
-                  fontSize: "14px",
-                  color:
-                    n.type === "warning"
-                      ? "#b36b00"
-                      : n.type === "success"
-                      ? "#137333"
-                      : "#0056b3",
-                }}
-              >
-                {n.text}
+        {loading ? (
+          <p style={{ textAlign: "center" }}>Loading...</p>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            {notifications.length > 0 ? (
+              notifications.map((n) => (
+             <li
+  key={n.id}
+  onClick={n.onClick}
+  style={{
+    marginBottom: "14px",
+    padding: "12px",
+    borderRadius: "8px",
+    background: "#fff",
+    border: "1px solid #eee",
+    boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+    fontSize: "14px",
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    cursor: n.onClick ? "pointer" : "default",
+    transition: "all 0.25s ease", // smooth effect
+  }}
+  onMouseEnter={(e) => {
+    (e.currentTarget as HTMLElement).style.background = "#f5f5f5";
+    (e.currentTarget as HTMLElement).style.boxShadow =
+      "0 4px 12px rgba(0,0,0,0.1)";
+  }}
+  onMouseLeave={(e) => {
+    (e.currentTarget as HTMLElement).style.background = "#fff";
+    (e.currentTarget as HTMLElement).style.boxShadow =
+      "0 2px 4px rgba(0,0,0,0.05)";
+  }}
+>
+  {getIcon(n.type)}
+  <span>{n.text}</span>
+</li>
+
+
+              ))
+            ) : (
+              <li style={{ color: "#888", textAlign: "center" }}> 
+                No notifications 
               </li>
-            ))
-          ) : (
-            <li style={{ color: "#888", textAlign: "center" }}>No notifications</li>
-          )}
-        </ul>
+            )}
+          </ul>
+        )}
       </div>
     </aside>
   );
 }
+
+
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
