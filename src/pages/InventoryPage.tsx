@@ -49,6 +49,9 @@ import SearchIcon from "@mui/icons-material/Search";
 const API_URL =
   "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
 
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const userRole = user?.role || "";
+
 interface InventoryItem {
   num: string;
   identifier_type: string;
@@ -826,6 +829,7 @@ const handleGeneratePDF = () => {
         </Box>
         
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+           {userRole === "Custodian" && (
           <Button
             variant="contained"
             onClick={() => {
@@ -844,7 +848,9 @@ const handleGeneratePDF = () => {
           >
             + Add Item
           </Button>
+           )}
 
+{userRole === "Custodian" && (
           <Button
             variant="outlined"
             color="error"
@@ -889,8 +895,9 @@ const handleGeneratePDF = () => {
             }}
           >
             Delete Selected ({selectedItems.length})
-          </Button>
+          </Button> )}
            {/* Add this AI Button */}
+           {userRole === "Custodian" && (
   <Button
     variant="outlined"
     color="primary"
@@ -910,7 +917,7 @@ const handleGeneratePDF = () => {
     startIcon={<AutoAwesomeIcon />} // You'll need to import this icon
   >
     AI Report
-  </Button>
+  </Button> )}
         </Stack>
       </Stack>
 
@@ -1102,7 +1109,7 @@ const handleGeneratePDF = () => {
     <Inventory2Icon fontSize="small" />
   </IconButton>
 </Tooltip>
-
+{userRole === "Custodian" && (
   <Tooltip title="Update">
     <IconButton
       color="primary"
@@ -1116,6 +1123,9 @@ const handleGeneratePDF = () => {
       <EditIcon fontSize="small" />
     </IconButton>
   </Tooltip>
+)}
+
+{userRole === "Custodian" && (
 
   <Tooltip title="Delete">
     <IconButton
@@ -1130,6 +1140,7 @@ const handleGeneratePDF = () => {
       <DeleteIcon fontSize="small" />
     </IconButton>
   </Tooltip>
+)}
                           </Stack>
                         </TableCell>
                       </TableRow>

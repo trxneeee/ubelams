@@ -11,10 +11,16 @@ import CircularProgress from "@mui/material/CircularProgress";
 import ClearIcon from '@mui/icons-material/Clear';
 // Add this import at the top with other imports
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
+import CloseIcon from '@mui/icons-material/Close';
+import FiberManualRecordIcon from '@mui/icons-material/FiberManualRecord';
 import {
   Box,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
   Button,
   Card,
+  List,
   Checkbox,
   Chip,
   Container,
@@ -54,7 +60,8 @@ import Loader from "../components/Loader";
 
 const WEB_APP_URL =
   "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
-
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const userRole = user?.role || "";
 interface BorrowRecord {
   borrow_id?: string;
   course?: string;
@@ -132,6 +139,9 @@ const [codeValidation, setCodeValidation] = useState({ isValid: false, message: 
   const [open, setOpen] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const steps = ["Borrower Info", "Select Item(s)", "Confirmation"];
+  const [showItemsModal, setShowItemsModal] = useState(false);
+const [modalItems, setModalItems] = useState<string[]>([]);
+const [modalPosition, setModalPosition] = useState({ x: 100, y: 100 });
 
   // Request form
   const [requestForm, setRequestForm] = useState({
@@ -201,25 +211,62 @@ useEffect(() => {
             }));
             setCodeStatus('valid');
             setCodeValidation({ isValid: true, message: 'Valid setup code' });
+            
+            // Show items modal if there are items
+            if (foundSetup[5]) {
+              const items = foundSetup[5].split(';').map(item => item.trim()).filter(item => item);
+              setModalItems(items);
+              setShowItemsModal(true);
+            }
           } else {
             setCodeStatus('invalid');
             setCodeValidation({ isValid: false, message: 'Invalid setup code' });
+            setShowItemsModal(false);
           }
         }
       } catch (error) {
         setCodeStatus('invalid');
         setCodeValidation({ isValid: false, message: 'Error validating code' });
+        setShowItemsModal(false);
         console.error("Error fetching setup data:", error);
       }
     } else {
       setCodeStatus('idle');
       setCodeValidation({ isValid: false, message: '' });
+      setShowItemsModal(false);
     }
   };
 
-  const debounceTimer = setTimeout(fetchSetupData, 500); // Debounce to avoid rapid API calls
+  const debounceTimer = setTimeout(fetchSetupData, 500);
   return () => clearTimeout(debounceTimer);
 }, [setupCode]);
+
+// Add function to close modal
+const handleCloseModal = () => {
+  setShowItemsModal(false);
+};
+
+// Add function to handle modal drag (simplified version)
+const handleMouseDown = (e: React.MouseEvent) => {
+  e.preventDefault();
+  const startX = e.clientX - modalPosition.x;
+  const startY = e.clientY - modalPosition.y;
+
+  const handleMouseMove = (e: MouseEvent) => {
+    setModalPosition({
+      x: e.clientX - startX,
+      y: e.clientY - startY
+    });
+  };
+
+  const handleMouseUp = () => {
+    document.removeEventListener('mousemove', handleMouseMove);
+    document.removeEventListener('mouseup', handleMouseUp);
+  };
+
+  document.addEventListener('mousemove', handleMouseMove);
+  document.addEventListener('mouseup', handleMouseUp);
+};
 
 // Add this function to clear the code
 const handleClearCode = () => {
@@ -1064,41 +1111,47 @@ const handleGeneratePDF = () => {
             + New Borrow
           </Button>
 
-          <Button
-            variant="outlined"
-            color="error"
-            sx={{
-              borderRadius: 2,
-              textTransform: "none",
-              px: 3,
-              fontWeight: "bold",
-            }}
-            disabled={selectedRecordIds.length === 0}
-            onClick={handleDeleteSelected}
-          >
-            Delete Selected ({selectedRecordIds.length})
-          </Button>
+{userRole === "Custodian" && (
+  <Button
+    variant="outlined"
+    color="error"
+    sx={{
+      borderRadius: 2,
+      textTransform: "none",
+      px: 3,
+      fontWeight: "bold",
+    }}
+    disabled={selectedRecordIds.length === 0}
+    onClick={handleDeleteSelected}
+  >
+    Delete Selected ({selectedRecordIds.length})
+  </Button>
+)}
 
-          <Button
-            variant="outlined"
-            color="primary"
-            onClick={() => setAiDialogOpen(true)}
-            sx={{
-              borderRadius: 2,
-              textTransform: "none",
-              px: 3,
-              fontWeight: "bold",
-              borderColor: "#1976d2",
-              color: "#1976d2",
-              "&:hover": {
-                borderColor: "#1565c0",
-                bgcolor: "rgba(25, 118, 210, 0.04)"
-              }
-            }}
-            startIcon={<AutoAwesomeIcon />}
-          >
-            AI Report
-          </Button>
+  {/* AI Report Button - Only show for Custodian */}
+{userRole === "Custodian" && (
+  <Button
+    variant="outlined"
+    color="primary"
+    onClick={() => setAiDialogOpen(true)}
+    sx={{
+      borderRadius: 2,
+      textTransform: "none",
+      px: 3,
+      fontWeight: "bold",
+      borderColor: "#1976d2",
+      color: "#1976d2",
+      "&:hover": {
+        borderColor: "#1565c0",
+        bgcolor: "rgba(25, 118, 210, 0.04)"
+      }
+    }}
+    startIcon={<AutoAwesomeIcon />}
+  >
+    AI Report
+  </Button>
+)}
+
         </Stack>
       </Stack>
 
@@ -1245,19 +1298,21 @@ const handleGeneratePDF = () => {
                               </IconButton>
                             </Tooltip>
 
-                            <Tooltip title="Delete">
-                              <IconButton
-                                color="error"
-                                onClick={() => handleDeleteBorrow(r.borrow_id!)}
-                                sx={{
-                                  bgcolor: "#ffebee",
-                                  "&:hover": { bgcolor: "#f44336", color: "#fff" },
-                                  p: 1,
-                                }}
-                              >
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
+                           {userRole === "Custodian" && (
+  <Tooltip title="Delete">
+    <IconButton
+      color="error"
+      onClick={() => handleDeleteBorrow(r.borrow_id!)}
+      sx={{
+        bgcolor: "#ffebee",
+        "&:hover": { bgcolor: "#f44336", color: "#fff" },
+        p: 1,
+      }}
+    >
+      <DeleteIcon fontSize="small" />
+    </IconButton>
+  </Tooltip>
+)}
                           </Stack>
                         </TableCell>
                       </TableRow>
@@ -1688,7 +1743,90 @@ const handleGeneratePDF = () => {
           </Box>
         </DialogContent>
       </Dialog>
+{/* Movable Items Modal */}
+{showItemsModal && (
+  <Paper
+    elevation={8}
+    sx={{
+      position: 'fixed',
+      left: modalPosition.x,
+      top: modalPosition.y,
+      width: 300,
+      maxHeight: 400,
+      zIndex: 9999,
+      cursor: 'move',
+      overflow: 'hidden',
+      bgcolor: '#fff9c4', // Sticky note yellow background
+      border: '2px solid #ffd54f',
+      borderRadius: 2,
+      boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+    }}
+    onMouseDown={handleMouseDown}
+  >
+    {/* Modal Header */}
+    <Box
+      sx={{
+        bgcolor: '#ffd54f',
+        p: 1,
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        borderBottom: '2px solid #ffb300'
+      }}
+    >
+      <Typography variant="subtitle2" fontWeight="bold" color="#5d4037">
+        📋 Setup Items
+      </Typography>
+      <IconButton size="small" onClick={handleCloseModal} sx={{ color: '#5d4037' }}>
+        <CloseIcon fontSize="small" />
+      </IconButton>
+    </Box>
 
+    {/* Modal Content */}
+    <Box sx={{ p: 2, maxHeight: 350, overflow: 'auto' }}>
+      <Typography variant="body2" color="text.secondary" gutterBottom>
+        Items included in this setup:
+      </Typography>
+      
+      <List dense sx={{ py: 0 }}>
+        {modalItems.map((item, index) => (
+          <ListItem key={index} sx={{ 
+            py: 0.5,
+            borderBottom: index < modalItems.length - 1 ? '1px dashed #ffd54f' : 'none'
+          }}>
+            <ListItemIcon sx={{ minWidth: 32 }}>
+              <FiberManualRecordIcon sx={{ fontSize: 8, color: '#ff6d00' }} />
+            </ListItemIcon>
+            <ListItemText
+              primary={item}
+              primaryTypographyProps={{ variant: 'body2', color: '#5d4037' }}
+            />
+          </ListItem>
+        ))}
+      </List>
+
+      {modalItems.length === 0 && (
+        <Typography variant="body2" color="text.secondary" fontStyle="italic">
+          No items specified for this setup
+        </Typography>
+      )}
+    </Box>
+
+    {/* Modal Footer */}
+    <Box
+      sx={{
+        bgcolor: '#ffecb3',
+        p: 1,
+        textAlign: 'center',
+        borderTop: '2px solid #ffd54f'
+      }}
+    >
+      <Typography variant="caption" color="#5d4037">
+        Drag to move • Click X to close
+      </Typography>
+    </Box>
+  </Paper>
+)}
       {/* Identifier Selection Dialog */}
       <Dialog 
         open={identifierDialogOpen} 

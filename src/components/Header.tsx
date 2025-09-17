@@ -46,24 +46,27 @@ import axios from "axios";
 const Header = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  
+  const [userRoles, setUserRole] = useState("");
   useEffect(() => {
     const storedUser = localStorage.getItem("user");
+     const user = JSON.parse(localStorage.getItem("user") || "{}");
     if (!storedUser) {
       navigate("/");
+    } else{
+      setUserRole(user.role);
     }
   }, [navigate]);
   
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
 
-  const pathToIndex: Record<string, number> = {
-    "/dashboard": 0,
-    "/staff": 1,
-    "/borrow": 2,
-    "/inventory": 3,
-    "/maintenance": 4,
-  };
+const pathToIndex: Record<string, number> = {
+  "/dashboard": 0,
+  ...(userRoles === "Custodian" ? { "/staff": 1 } : {}),
+  "/borrow": userRoles === "Custodian" ? 2 : 1,
+  "/inventory": userRoles === "Custodian" ? 3 : 2,
+  "/maintenance": userRoles === "Custodian" ? 4 : 3,
+};
 
   const [value, setValue] = useState(pathToIndex[location.pathname] || 0);
 
@@ -243,13 +246,13 @@ const handleSecurityUpdate = async () => {
     setDrawerOpen(open);
   };
 
-  const tabIcons = [
-    { to: "/dashboard", label: "Home", icon: <AiOutlineHome size={24} />, active: <AiFillHome size={24} /> },
-    { to: "/staff", label: "Staff", icon: <AiOutlineUser size={24} />, active: <MdPerson size={24} /> },
-    { to: "/borrow", label: "Borrow", icon: <AiOutlineFileSearch size={24} />, active: <MdEditDocument size={24} /> },
-    { to: "/inventory", label: "Inventory", icon: <AiOutlineAppstore size={24} />, active: <AiFillAppstore size={24} /> },
-    { to: "/maintenance", label: "Maintenance", icon: <AiOutlineTool size={24} />, active: <AiFillTool size={24} /> },
-  ];
+const tabIcons = [
+  { to: "/dashboard", label: "Home", icon: <AiOutlineHome size={24} />, active: <AiFillHome size={24} /> },
+  ...(userRoles === "Custodian" ? [{ to: "/staff", label: "Staff", icon: <AiOutlineUser size={24} />, active: <MdPerson size={24} /> }] : []),
+  { to: "/borrow", label: "Borrow", icon: <AiOutlineFileSearch size={24} />, active: <MdEditDocument size={24} /> },
+  { to: "/inventory", label: "Inventory", icon: <AiOutlineAppstore size={24} />, active: <AiFillAppstore size={24} /> },
+  { to: "/maintenance", label: "Maintenance", icon: <AiOutlineTool size={24} />, active: <AiFillTool size={24} /> },
+];
 
   // Get logged in user from localStorage
   const user = JSON.parse(localStorage.getItem("user") || "{}");

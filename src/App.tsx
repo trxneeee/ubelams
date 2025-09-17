@@ -377,21 +377,56 @@ function CalendarPanel() {
       </div>
 
       {/* Description */}
-      {selectedEvent.description && (
-        <div
-          style={{
-            marginBottom: "12px",
-            padding: "10px",
-            background: "#f5f5f5",
-            borderRadius: "6px",
-            fontSize: "14px",
-            lineHeight: "1.5",
-          }}
-        >
-          <strong>Description:</strong>
-          <p style={{ margin: "6px 0 0 0" }}>{selectedEvent.description}</p>
-        </div>
-      )}
+ {selectedEvent.description && (
+  <div
+    style={{
+      marginBottom: "12px",
+      padding: "10px",
+      background: "#f5f5f5",
+      borderRadius: "6px",
+      fontSize: "14px",
+      lineHeight: "1.5",
+    }}
+  >
+    <strong>Description:</strong>
+
+    <div style={{ margin: "6px 0 0 0" }}>
+      {/* Render original HTML */}
+      <div
+        dangerouslySetInnerHTML={{ __html: selectedEvent.description }}
+      />
+
+      {/* Extract CODE: part and show button */}
+      {(() => {
+        // Regex: get text after <b>CODE:</b> until a <br> or end
+        const match = selectedEvent.description.match(
+          /<b>CODE:\s*<\/b>\s*([^<]+)/i
+        );
+        if (!match) return null;
+
+        const code = match[1].trim();
+        return (
+          <button
+            onClick={() => navigator.clipboard.writeText(code)}
+            style={{
+              marginTop: "6px",
+              padding: "4px 8px",
+              background: "#007bff",
+              color: "#fff",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontSize: "12px",
+            }}
+          >
+            Copy Code
+          </button>
+        );
+      })()}
+    </div>
+  </div>
+)}
+
 
       {/* Location */}
       {selectedEvent.location && (

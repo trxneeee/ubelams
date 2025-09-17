@@ -58,7 +58,7 @@ const StaffPage = () => {
     email: "",
     lastname: "",
     firstname: "",
-    password: "",
+    password: "12345678",
     role: "Student Assistant",
   });
   const [user, setUser] = useState<User | null>(null);
@@ -160,6 +160,9 @@ const StaffPage = () => {
     } else {
       const userData = JSON.parse(storedUser);
       setUser(userData);
+      if (userData.role != "Custodian"){
+        navigate("/dashboard"); 
+      }
     }
   }, [navigate]);
 
