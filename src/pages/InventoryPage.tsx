@@ -5,12 +5,14 @@ import EditIcon from "@mui/icons-material/Edit";
 import Inventory2Icon from "@mui/icons-material/Inventory2";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { keyframes } from "@mui/system";
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import {
   Box,
   Button,
   Card,
   Container,
   Dialog,
+  Checkbox,
   DialogContent,
   DialogTitle,
   Divider,
@@ -25,15 +27,23 @@ import {
   DialogActions,
   TableRow,
   TextField,
+  Paper,
   ToggleButton,
   ToggleButtonGroup,
   Tooltip,
-  Typography
+  Typography,
+  Chip,
+  alpha,
+  useTheme,
+  InputAdornment,
+  CircularProgress,
+  Backdrop,
 } from "@mui/material";
 import axios from "axios";
 import { useEffect, useState } from "react";
 import Loader from "../components/Loader";
 import { useSearchParams } from "react-router-dom";
+import SearchIcon from "@mui/icons-material/Search";
 
 const API_URL =
   "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
@@ -59,6 +69,7 @@ interface InventoryItem {
   inhouse_outsourced:string;
   month: string;
 }
+
 interface CInventoryItem {
   num: string;
   location: string;
@@ -74,936 +85,983 @@ interface CInventoryItem {
   stock_alert: string;
 }
 
-
-
 const InventoryPage = () => {
-    const [editing, setEditing] = useState(false);
-const [viewing, setViewing] = useState(false);
+  const theme = useTheme();
+  const [editing, setEditing] = useState(false);
+  const [viewing, setViewing] = useState(false);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
-    const [cinventory, setCInventory] = useState<CInventoryItem[]>([]);
+  const [cinventory, setCInventory] = useState<CInventoryItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
-const [lowStockOpen, setLowStockOpen] = useState(false);
-const [lowStockSearch, setLowStockSearch] = useState("");
-const [errors, setErrors] = useState<{ [key: string]: string }>({});
-const [searchParams, setSearchParams] = useSearchParams();
-const [page, setPage] = useState(0);
-const queryType = searchParams.get("stock"); 
-const rowsPerPage = 10;
-const handleChangePage = (_: unknown, newPage: number) => {
-  setPage(newPage);
-};
-const blink = keyframes`
-  0% { box-shadow: 0 0 0px #FF8F00; }
-  50% { box-shadow: 0 0 16px #FF8F00; }
-  100% { box-shadow: 0 0 0px #FF8F00; }
-`;
+  const [lowStockOpen, setLowStockOpen] = useState(false);
+  const [lowStockSearch, setLowStockSearch] = useState("");
+  const [errors, setErrors] = useState<{ [key: string]: string }>({});
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const queryType = searchParams.get("stock"); 
+  // Add these state variables near your other useState declarations
+const [aiDialogOpen, setAiDialogOpen] = useState(false);
+const [question, setQuestion] = useState("");
+const [loading2, setLoading2] = useState(false);
+const [reportText, setReportText] = useState("");
+const [reportTable, setReportTable] = useState<{ columns: string[]; rows: string[][] } | null>(null);
+  const handleChangePage = (_: unknown, newPage: number) => {
+    setPage(newPage);
+  };
+  
+  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
+  };
+  
+  const blink = keyframes`
+    0% { box-shadow: 0 0 0px ${alpha(theme.palette.warning.main, 0.5)}; }
+    50% { box-shadow: 0 0 16px ${alpha(theme.palette.warning.main, 0.8)}; }
+    100% { box-shadow: 0 0 0px ${alpha(theme.palette.warning.main, 0.5)}; }
+  `;
 
-const [searchQuery, setSearchQuery] = useState("");
-  // modal state
+  const [searchQuery, setSearchQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [itemType, setItemType] = useState("Non-Consumable");
   const [battery, setBattery] = useState("Without Battery");
-const [form, setForm] = useState<InventoryItem>({
-  num: "",
-  identifier_type: "None", // default option
-  identifiers: [],       
-  statuses: [],                 // ✅ added for per-quantity identifiers
-  equipment_name: "",
-  facility: "",
-  brand_model: "",
-  total_qty: "1",
-  borrowed: "0",
-  location: "",
-  soft_hard: "N/A",
-  e_location: "",
-  bat_type: "",
-  bat_qty: "",
-  bat_total: "",
-  yes_or_no: "NO",
-  preventive_or_calibration: "",
-  inhouse_outsourced: "",
-  month: ""
-});
+  
+  const [form, setForm] = useState<InventoryItem>({
+    num: "",
+    identifier_type: "None",
+    identifiers: [],       
+    statuses: [],
+    equipment_name: "",
+    facility: "",
+    brand_model: "",
+    total_qty: "1",
+    borrowed: "0",
+    location: "",
+    soft_hard: "N/A",
+    e_location: "",
+    bat_type: "",
+    bat_qty: "",
+    bat_total: "",
+    yes_or_no: "NO",
+    preventive_or_calibration: "",
+    inhouse_outsourced: "",
+    month: ""
+  });
 
+  const [form2, setForm2] = useState<CInventoryItem>({
+    num: "",
+    location: "",
+    description: "",
+    quantity_opened: "0",
+    quantity_unopened: "0",
+    quantity_on_order: "0",
+    remarks: "",
+    experiment: "",
+    subject: "",
+    date_issued: "",
+    issuance_no: "",
+    stock_alert: "5"
+  });
 
-const [form2, setForm2] = useState<CInventoryItem>({
-  num: "",
-  location: "",
-  description: "",
-  quantity_opened: "0",
-  quantity_unopened: "0",
-  quantity_on_order: "0",
-  remarks: "",
-  experiment: "",
-  subject: "",
-  date_issued: "",
-  issuance_no: "",
-  stock_alert: "5"
-});
+  const initialFormNC: InventoryItem = {
+    num: "",
+    identifier_type: "Control Number",
+    identifiers: [],
+    statuses: [],
+    equipment_name: "",
+    facility: "",
+    brand_model: "",
+    total_qty: "1",
+    borrowed: "0",
+    location: "",
+    soft_hard: "N/A",
+    e_location: "",
+    bat_type: "",
+    bat_qty: "",
+    bat_total: "",
+    yes_or_no: "NO",
+    preventive_or_calibration: "",
+    inhouse_outsourced: "",
+    month: ""
+  };
 
-const initialFormNC: InventoryItem = {
-  num: "",
-  identifier_type: "Control Number",
-  identifiers: [],
-  statuses: [], // ✅ add this
-  equipment_name: "",
-  facility: "",
-  brand_model: "",
-  total_qty: "1",
-  borrowed: "0",
-  location: "",
-  soft_hard: "N/A",
-  e_location: "",
-  bat_type: "",
-  bat_qty: "",
-  bat_total: "",
-  yes_or_no: "NO",
-  preventive_or_calibration: "",
-  inhouse_outsourced: "",
-  month: ""
-};
-
-
-const initialFormC = {
-  num: "",
-  description: "",
-  location: "",
-  quantity_opened: "0",
-  quantity_unopened: "0",
-  quantity_on_order: "0",
-  remarks: "",
-  experiment: "",
-  subject: "",
-  date_issued: "",
-  issuance_no: "",
-  stock_alert: "5"
-};
-
-const handleEditClick = (item: InventoryItem | CInventoryItem) => {
-  if (itemType === "Non-Consumable") {
-    // assert to InventoryItem so setForm accepts it
-    const nc = item as InventoryItem;
-    setForm({ ...nc });
-
-    // Battery check only for NC
-    if (nc.bat_type || nc.bat_qty) {
-      setBattery("With Battery");
-    } else {
-      setBattery("Without Battery");
-    }
-  } else {
-    // assert to CInventoryItem so setForm2 accepts it
-    const c = item as CInventoryItem;
-    setForm2({ ...c });
-  }
-
-  setEditing(true);
-  setViewing(false);
-  setOpen(true);
-};
-
-const fieldStyle = {
-  mt: 2,
-  "& .MuiInputBase-input.Mui-disabled": {
-    WebkitTextFillColor: "#333",
-    color: "#333",
-  },
-  "& .MuiOutlinedInput-root.Mui-disabled": {
-    backgroundColor: "#f5f5f5",
-  },
-};
-
-const filteredInventory = inventory.filter((item) =>
-  [item.equipment_name, item.location, item.brand_model]
-    .some((field) =>
-      String(field || "").toLowerCase().includes(searchQuery.toLowerCase())
-    )
-);
-
-const filteredCInventory = cinventory.filter((item) =>
-  [item.description, item.location, item.remarks]
-    .some((field) =>
-      String(field || "").toLowerCase().includes(searchQuery.toLowerCase())
-    )
-);
-
-const validateForm = () => {
-  const newErrors: { [key: string]: string } = {};
-
-  if (itemType === "Non-Consumable") {
-    if (!form.equipment_name?.trim()) newErrors.equipment_name = "Name is required";
-  } else {
-    if (!form2.description?.trim()) newErrors.description = "Description is required";
-  }
-
-  setErrors(newErrors);
-  return Object.keys(newErrors).length === 0; // ✅ valid if no errors
-};
-
-const handleViewClick = (item: InventoryItem | CInventoryItem) => {
-  if (itemType === "Non-Consumable") {
-    setForm(item as InventoryItem);
-
-    if ((item as InventoryItem).bat_type || (item as InventoryItem).bat_qty) {
-      setBattery("With Battery");
-    } else {
-      setBattery("Without Battery");
-    }
-  } else {
-    setForm2(item as CInventoryItem);
-  }
-
-  setViewing(true);
-  setEditing(false);
-  setOpen(true);
-};
-
-
-
-const resetForm = () => {
-  setEditing(false);
-  setViewing(false);
- if (itemType === "Non-Consumable") {
-  setForm(initialFormNC);
-} else {
-  setForm2(initialFormC);
-}
-
-};
-
-useEffect(() => {
-  const qty = Number(form.total_qty) || 0;
-
-  // Fill statuses with "working" by default
-  const newStatuses = Array.from({ length: qty }, (_, i) => 
-    form.statuses?.[i] || "working"
-  );
-
-  setForm((prev) => ({ ...prev, statuses: newStatuses }));
-}, [form.total_qty]);
-
-
-// 🔹 Replace your useEffect + fetchInventory logic with this:
-
-const fetchInventory = async () => {
-  setLoading(true);
-  try {
-    const sheet = itemType === "Non-Consumable" ? "nc_inventory" : "c_inventory";
-    const response = await axios.get(API_URL, {
-      params: { sheet, action: "read" },
-    });
-
-    const result = response.data;
-    if (result.success) {
-      const rows = result.data;
-      const headers = rows[1];
-      const idx = (key: string) => headers.indexOf(key);
-
-      if (itemType === "Non-Consumable") {
-        const parsed: InventoryItem[] = rows.slice(2).map((row: any[]) => {
-          // === Identifiers ===
-          const identifiersRaw = row[idx("IDENTIFIER_NUMBER")] || "";
-          const identifiers = identifiersRaw
-            ? String(identifiersRaw)
-                .split(",")
-                .map((id: string) =>
-                  id.trim().replace(/^\{|\}$/g, "") // remove { }
-                )
-            : [];
-
-          // === Statuses ===
-          const statusesRaw = row[idx("STATUS")] || "";
-          const statuses = statusesRaw
-            ? String(statusesRaw)
-                .split(",")
-                .map((s: string) => s.trim().toLowerCase()) // "working" / "not working"
-            : [];
-
-          return {
-            num: row[idx("NO.")],
-            equipment_name: row[idx("EQUIPMENT_NAME")],
-            facility: row[idx("FACILITY")],
-            brand_model: row[idx("BRAND_MODEL")],
-            total_qty: row[idx("TOTAL_QTY")],
-            borrowed: row[idx("BORROWED")],
-            identifier_type: row[idx("IDENTIFIER_TYPE")],
-            identifiers,
-            statuses, // ✅ new field
-            location: row[idx("LOCATION")],
-            soft_hard: row[idx("SOFT_HARD")],
-            e_location: row[idx("E_LOCATION")],
-            bat_type: row[idx("BAT_TYPE")],
-            bat_qty: row[idx("BAT_QTY")],
-            bat_total: row[idx("BAT_TOTAL")],
-            yes_or_no: row[idx("YES_OR_NO")],
-            preventive_or_calibration: row[idx("PREVENTIVE_OR_CALIBRATION")],
-            inhouse_outsourced: row[idx("INHOUSE/OUTSOURCED")],
-            month: row[idx("MONTH")],
-          };
-        });
-        setInventory(parsed);
-      } else {
-        const parsed: CInventoryItem[] = rows.slice(2).map((row: any[]) => ({
-          num: row[idx("NO.")],
-          location: row[idx("LOCATION")],
-          description: row[idx("DESCRIPTION")],
-          quantity_opened: row[idx("QUANTITY_OPENED")],
-          quantity_unopened: row[idx("QUANTITY_UNOPENED")],
-          quantity_on_order: row[idx("QUANTITY_ON_ORDER")],
-          remarks: row[idx("REMARKS")],
-          experiment: row[idx("EXPERIMENT")],
-          subject: row[idx("SUBJECT")],
-          date_issued: row[idx("DATE_ISSUED")],
-          issuance_no: row[idx("ISSUANCE_NO")],
-          stock_alert: row[idx("STOCK_ALERT")],
-        }));
-        setCInventory(parsed);
-      }
-    }
-  } catch (err) {
-    console.error("Failed to fetch inventory", err);
-  } finally {
-    setLoading(false);
-  }
-};
-
-
-// 🔹 Make sure it re-fetches whenever `itemType` changes
-useEffect(() => {
-  fetchInventory();
-}, [itemType]);
-
-const handleCreate = async () => {
-  try {
-    if (itemType === "Non-Consumable") {
-      const totalQty = Number(form.total_qty) || 0;
-
-      // Only keep identifiers up to total_qty
-      const identifiers = form.identifiers.slice(0, totalQty);
-
-      // 1️⃣ Create item in nc_inventory (original logic)
-      const res = await axios.get(API_URL, {
-        params: {
-          sheet: "nc_inventory",
-          action: "create",
-          ...form,
-          identifiers: identifiers.map(id => `{${id}}`).join(","), // comma-separated
-          statuses: form.statuses.join(","),
-        },
-      });
-
-      const inventoryNum = res.data.data.equipment_num; 
-
-      // 2️⃣ Only create maintenance if month is not empty
-      if (form.month && form.month.trim() !== "") {
-        for (let id of identifiers) {
-          await axios.get(API_URL, {
-            params: {
-              sheet: "maintenance",
-              action: "create",
-              ...form,
-              equipment_num: inventoryNum,
-              identifier_number: id, // send single identifier per row
-              // date_accomplished and accomplished_by left blank
-            },
-          });
-        }
-      }
-
-      setForm(initialFormNC);
-      fetchInventory();
-    } else {
-      // Consumable items
-      await axios.get(API_URL, {
-        params: {
-          sheet: "c_inventory",
-          action: "create",
-          ...form2,
-        },
-      });
-
-      setForm2(initialFormC);
-      fetchInventory();
-    }
-
-    setOpen(false);
-  } catch (err) {
-    console.error("Failed to create item", err);
-  }
-};
-
-
-
-
-// Add these handlers above the return statement
-const handleDelete = async (item: any) => {
-  const sheet = itemType === "Non-Consumable" ? "nc_inventory" : "c_inventory";
-  const name =
-    itemType === "Non-Consumable"
-      ? item.equipment_name
-      : item.description;
-
-  if (
-    !window.confirm(
-      `Are you sure you want to delete "${name}"`
-    )
-  )
-    return;
+  const initialFormC = {
+    num: "",
+    description: "",
+    location: "",
+    quantity_opened: "0",
+    quantity_unopened: "0",
+    quantity_on_order: "0",
+    remarks: "",
+    experiment: "",
+    subject: "",
+    date_issued: "",
+    issuance_no: "",
+    stock_alert: "5"
+  };
+// Add this function near your other handler functions
+const handleGenerateReport = async () => {
+  setLoading2(true);
+  setReportText("");
+  setReportTable(null);
 
   try {
-    await axios.get(API_URL, {
+    const res = await axios.get(API_URL, {
       params: {
-        sheet,
-        action: "delete",
-        num: item.num, // still need num to identify row
+        sheet: "report", // or whatever sheet you want to query
+        targetSheet: "non_consumable_inventory", // adjust as needed
+        q: question,
       },
     });
 
-    fetchInventory();
+    const json = res.data;
+
+    if (json.success && json.data) {
+      try {
+        const parsed = JSON.parse(json.data);
+        if (parsed.columns && parsed.rows) {
+          setReportTable(parsed);
+        } else {
+          setReportText(json.data);
+        }
+      } catch {
+        setReportText(json.data);
+      }
+    }
   } catch (err) {
-    console.error("Failed to delete item", err);
+    console.error(err);
   }
+
+  setLoading2(false);
 };
 
-
-const handleUpdateItem = async () => {
-  try {
+  const handleEditClick = (item: InventoryItem | CInventoryItem) => {
     if (itemType === "Non-Consumable") {
-      // ✅ adjust identifiers based on total_qty
-      const totalQty = Number(form.total_qty) || 0;
-      const trimmedIdentifiers = form.identifiers
-        .slice(0, totalQty) // cut off extras if qty decreased
-        .map(id => `{${id}}`);
+      const nc = item as InventoryItem;
+      setForm({ ...nc });
 
-      await axios.get(API_URL, {
-        params: {
-          sheet: "nc_inventory",
-          action: "update",
-          ...form,
-          identifiers: trimmedIdentifiers.join(", "),
-          statuses: form.statuses.join(","),
-        },
-      });
-
-      setForm(initialFormNC);
-      fetchInventory();
+      if (nc.bat_type || nc.bat_qty) {
+        setBattery("With Battery");
+      } else {
+        setBattery("Without Battery");
+      }
     } else {
-      await axios.get(API_URL, {
-        params: {
-          sheet: "c_inventory",
-          action: "update",
-          ...form2,
-        },
-      });
-
-      setForm2(initialFormC);
-      fetchInventory();
+      const c = item as CInventoryItem;
+      setForm2({ ...c });
     }
 
-    setOpen(false);
-    setEditing(false);
-  } catch (err) {
-    console.error("Failed to update item", err);
-  }
-};
+    setEditing(true);
+    setViewing(false);
+    setOpen(true);
+  };
 
-useEffect(() => {
+  const fieldStyle = {
+    mt: 2,
+    "& .MuiInputBase-input.Mui-disabled": {
+      WebkitTextFillColor: "#333",
+      color: "#333",
+    },
+    "& .MuiOutlinedInput-root.Mui-disabled": {
+      backgroundColor: "#f5f5f5",
+    },
+  };
+
+  const filteredInventory = inventory.filter((item) =>
+    [item.equipment_name, item.location, item.brand_model]
+      .some((field) =>
+        String(field || "").toLowerCase().includes(searchQuery.toLowerCase())
+      )
+  );
+
+  const filteredCInventory = cinventory.filter((item) =>
+    [item.description, item.location, item.remarks]
+      .some((field) =>
+        String(field || "").toLowerCase().includes(searchQuery.toLowerCase())
+      )
+  );
+
+  const validateForm = () => {
+    const newErrors: { [key: string]: string } = {};
+
+    if (itemType === "Non-Consumable") {
+      if (!form.equipment_name?.trim()) newErrors.equipment_name = "Name is required";
+    } else {
+      if (!form2.description?.trim()) newErrors.description = "Description is required";
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleViewClick = (item: InventoryItem | CInventoryItem) => {
+    if (itemType === "Non-Consumable") {
+      setForm(item as InventoryItem);
+
+      if ((item as InventoryItem).bat_type || (item as InventoryItem).bat_qty) {
+        setBattery("With Battery");
+      } else {
+        setBattery("Without Battery");
+      }
+    } else {
+      setForm2(item as CInventoryItem);
+    }
+
+    setViewing(true);
+    setEditing(false);
+    setOpen(true);
+  };
+
+  const resetForm = () => {
+    setEditing(false);
+    setViewing(false);
+    if (itemType === "Non-Consumable") {
+      setForm(initialFormNC);
+    } else {
+      setForm2(initialFormC);
+    }
+  };
+
+  useEffect(() => {
+    const qty = Number(form.total_qty) || 0;
+    const newStatuses = Array.from({ length: qty }, (_, i) => 
+      form.statuses?.[i] || "working"
+    );
+    setForm((prev) => ({ ...prev, statuses: newStatuses }));
+  }, [form.total_qty]);
+
+  const fetchInventory = async () => {
+    setLoading(true);
+    try {
+      const sheet = itemType === "Non-Consumable" ? "nc_inventory" : "c_inventory";
+      const response = await axios.get(API_URL, {
+        params: { sheet, action: "read" },
+      });
+
+      const result = response.data;
+      if (result.success) {
+        const rows = result.data;
+        const headers = rows[1];
+        const idx = (key: string) => headers.indexOf(key);
+
+        if (itemType === "Non-Consumable") {
+          const parsed: InventoryItem[] = rows.slice(2).map((row: any[]) => {
+            const identifiersRaw = row[idx("IDENTIFIER_NUMBER")] || "";
+            const identifiers = identifiersRaw
+              ? String(identifiersRaw)
+                  .split(",")
+                  .map((id: string) =>
+                    id.trim().replace(/^\{|\}$/g, "")
+                  )
+              : [];
+
+            const statusesRaw = row[idx("STATUS")] || "";
+            const statuses = statusesRaw
+              ? String(statusesRaw)
+                  .split(",")
+                  .map((s: string) => s.trim().toLowerCase())
+              : [];
+
+            return {
+              num: row[idx("NO.")],
+              equipment_name: row[idx("EQUIPMENT_NAME")],
+              facility: row[idx("FACILITY")],
+              brand_model: row[idx("BRAND_MODEL")],
+              total_qty: row[idx("TOTAL_QTY")],
+              borrowed: row[idx("BORROWED")],
+              identifier_type: row[idx("IDENTIFIER_TYPE")],
+              identifiers,
+              statuses,
+              location: row[idx("LOCATION")],
+              soft_hard: row[idx("SOFT_HARD")],
+              e_location: row[idx("E_LOCATION")],
+              bat_type: row[idx("BAT_TYPE")],
+              bat_qty: row[idx("BAT_QTY")],
+              bat_total: row[idx("BAT_TOTAL")],
+              yes_or_no: row[idx("YES_OR_NO")],
+              preventive_or_calibration: row[idx("PREVENTIVE_OR_CALIBRATION")],
+              inhouse_outsourced: row[idx("INHOUSE/OUTSOURCED")],
+              month: row[idx("MONTH")],
+            };
+          });
+          setInventory(parsed);
+        } else {
+          const parsed: CInventoryItem[] = rows.slice(2).map((row: any[]) => ({
+            num: row[idx("NO.")],
+            location: row[idx("LOCATION")],
+            description: row[idx("DESCRIPTION")],
+            quantity_opened: row[idx("QUANTITY_OPENED")],
+            quantity_unopened: row[idx("QUANTITY_UNOPENED")],
+            quantity_on_order: row[idx("QUANTITY_ON_ORDER")],
+            remarks: row[idx("REMARKS")],
+            experiment: row[idx("EXPERIMENT")],
+            subject: row[idx("SUBJECT")],
+            date_issued: row[idx("DATE_ISSUED")],
+            issuance_no: row[idx("ISSUANCE_NO")],
+            stock_alert: row[idx("STOCK_ALERT")],
+          }));
+          setCInventory(parsed);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch inventory", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchInventory();
+  }, [itemType]);
+
+  const handleCreate = async () => {
+    setProcessing(true);
+    try {
+      if (itemType === "Non-Consumable") {
+        const totalQty = Number(form.total_qty) || 0;
+        const identifiers = form.identifiers.slice(0, totalQty);
+
+        const res = await axios.get(API_URL, {
+          params: {
+            sheet: "nc_inventory",
+            action: "create",
+            ...form,
+            identifiers: identifiers.map(id => `{${id}}`).join(","),
+            statuses: form.statuses.join(","),
+          },
+        });
+
+        const inventoryNum = res.data.data.equipment_num; 
+
+        if (form.month && form.month.trim() !== "") {
+          for (let id of identifiers) {
+            await axios.get(API_URL, {
+              params: {
+                sheet: "maintenance",
+                action: "create",
+                ...form,
+                equipment_num: inventoryNum,
+                identifier_number: id,
+              },
+            });
+          }
+        }
+
+        setForm(initialFormNC);
+        fetchInventory();
+      } else {
+        await axios.get(API_URL, {
+          params: {
+            sheet: "c_inventory",
+            action: "create",
+            ...form2,
+          },
+        });
+
+        setForm2(initialFormC);
+        fetchInventory();
+      }
+
+      setOpen(false);
+    } catch (err) {
+      console.error("Failed to create item", err);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleDelete = async (item: any) => {
+    const sheet = itemType === "Non-Consumable" ? "nc_inventory" : "c_inventory";
+    const name =
+      itemType === "Non-Consumable"
+        ? item.equipment_name
+        : item.description;
+
+    if (
+      !window.confirm(
+        `Are you sure you want to delete "${name}"`
+      )
+    )
+      return;
+
+    try {
+      await axios.get(API_URL, {
+        params: {
+          sheet,
+          action: "delete",
+          num: item.num,
+        },
+      });
+
+      fetchInventory();
+    } catch (err) {
+      console.error("Failed to delete item", err);
+    }
+  };
+
+  const handleUpdateItem = async () => {
+    setProcessing(true);
+    try {
+      if (itemType === "Non-Consumable") {
+        const totalQty = Number(form.total_qty) || 0;
+        const trimmedIdentifiers = form.identifiers
+          .slice(0, totalQty)
+          .map(id => `{${id}}`);
+
+        await axios.get(API_URL, {
+          params: {
+            sheet: "nc_inventory",
+            action: "update",
+            ...form,
+            identifiers: trimmedIdentifiers.join(", "),
+            statuses: form.statuses.join(","),
+          },
+        });
+
+        setForm(initialFormNC);
+        fetchInventory();
+      } else {
+        await axios.get(API_URL, {
+          params: {
+            sheet: "c_inventory",
+            action: "update",
+            ...form2,
+          },
+        });
+
+        setForm2(initialFormC);
+        fetchInventory();
+      }
+
+      setOpen(false);
+      setEditing(false);
+    } catch (err) {
+      console.error("Failed to update item", err);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  useEffect(() => {
     const queryType = searchParams.get("stock");
     if (queryType === "Alert") {
       setItemType("Consumable");
     }
   }, [searchParams]);
 
-
   useEffect(() => {
     fetchInventory();
   }, []);
 
   return (
-    <div>
-<Container maxWidth="lg" sx={{ mt: 4 }}>
-  {/* Fixed summary cards */}
-<Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={2}>
-  {/* Search Bar */}
-  {/* Summary Cards */}
-<Card sx={{ flex: 1, p: 1.5, borderRadius: 2, display: "flex", alignItems: "center", gap: 1.5 }}>
-  <Inventory2Icon sx={{ fontSize: 30, color: "#B71C1C" }} />
+    <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
+      <Backdrop
+        sx={{ color: "#fff", zIndex: (theme) => theme.zIndex.drawer + 1 }}
+        open={processing}
+      >
+        <Stack alignItems="center" spacing={2}>
+          <CircularProgress size={60} thickness={4} sx={{ color: theme.palette.primary.main }} />
+          <Typography variant="h6" sx={{ color: "#fff" }}>
+            Processing...
+          </Typography>
+        </Stack>
+      </Backdrop>
+
+      {/* Header */}
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h4" fontWeight="bold" color="#b91c1c" gutterBottom>
+          Inventory Management
+        </Typography>
+        <Typography variant="body1" color="text.secondary">
+          Manage equipment and consumable inventory
+        </Typography>
+      </Box>
+
+      {/* Summary cards */}
+      <Stack direction={{ xs: "column", md: "row" }} spacing={3} mb={4}>
+<Card sx={{ 
+  flex: 1, 
+  p: 3, 
+  borderRadius: 3, 
+  display: "flex", 
+  alignItems: "center", 
+  gap: 2,
+  background: `linear-gradient(135deg, rgba(185,28,28,0.1) 0%, rgba(185,28,28,0.2) 100%)`,
+  boxShadow: "0 4px 20px rgba(0,0,0,0.08)"
+}}>
+  <Box sx={{ 
+    p: 1.5, 
+    borderRadius: "50%", 
+    bgcolor: "rgba(185,28,28,0.1)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center"
+  }}>
+    <Inventory2Icon sx={{ fontSize: 30, color: "#b91c1c" }} />
+  </Box>
   <Box>
-    <Typography variant="caption" color="text.secondary">Total Items</Typography>
-    <Typography variant="subtitle1" sx={{ fontWeight: "bold", color: "#B71C1C" }}>
+    <Typography variant="caption" color="text.secondary" fontWeight="medium">
+      Total Items
+    </Typography>
+    <Typography variant="h4" sx={{ fontWeight: "bold", color: "#b91c1c" }}>
       {itemType === "Consumable" ? cinventory.length : inventory.length}
     </Typography>
   </Box>
 </Card>
 
-{itemType === "Consumable" && (
-<Card
-  onClick={() => {
-    setLowStockOpen(true);
 
-    if (searchParams.get("stock") === "Alert") {
-      searchParams.delete("stock"); // ✅ clear it
-    } else {
-      searchParams.set("stock", "Alert"); // ✅ set it
-    }
-    setSearchParams(searchParams);
-  }}
-  sx={{
-    flex: 1,
-    p: 1.5,
-    borderRadius: 2,
-    display: "flex",
-    alignItems: "center",
-    gap: 1.5,
-    cursor: "pointer",
-    "&:hover": { boxShadow: 4 },
-    animation:
-      queryType === "Alert" ? `${blink} 1.2s infinite ease-in-out` : "none",
-  }}
->
-  <WarningAmberIcon sx={{ fontSize: 30, color: "#FF8F00" }} />
-  <Box>
-    <Typography variant="caption" color="text.secondary">
-      Low Stock
-    </Typography>
-    <Typography
-      variant="subtitle1"
-      sx={{ fontWeight: "bold", color: "#FF8F00" }}
-    >
-      {cinventory.filter((i) => {
-        const alert = Number(i.stock_alert) || 5;
-        const qtyOpened = Number(i.quantity_opened) || 0;
-        return qtyOpened <= alert;
-      }).length}
-    </Typography>
-  </Box>
-</Card>
-
-
-)}
-
-
-{itemType === "Non-Consumable" && (
-  <Card
-    sx={{
-      flex: 1,
-      p: 1.5,
-      borderRadius: 2,
-      display: "flex",
-      alignItems: "center",
-      gap: 1.5,
-    }}
-  >
-    <AssignmentTurnedInIcon sx={{ fontSize: 30, color: "#1B5E20" }} />
-    <Box>
-      <Typography variant="caption" color="text.secondary">
-        Borrowed
-      </Typography>
-      <Typography
-        variant="subtitle1"
-        sx={{ fontWeight: "bold", color: "#1B5E20" }}
-      >
-        {inventory.reduce(
-          (acc, i) => acc + parseInt(i.borrowed || "0", 10),
-          0
+        {itemType === "Consumable" && (
+          <Card
+            onClick={() => {
+              setLowStockOpen(true);
+              if (searchParams.get("stock") === "Alert") {
+                searchParams.delete("stock");
+              } else {
+                searchParams.set("stock", "Alert");
+              }
+              setSearchParams(searchParams);
+            }}
+            sx={{
+              flex: 1,
+              p: 3,
+              borderRadius: 3,
+              display: "flex",
+              alignItems: "center",
+              gap: 2,
+              cursor: "pointer",
+              background: `linear-gradient(135deg, ${alpha(theme.palette.warning.main, 0.1)} 0%, ${alpha(theme.palette.warning.main, 0.2)} 100%)`,
+              boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+              animation: queryType === "Alert" ? `${blink} 1.2s infinite ease-in-out` : "none",
+              "&:hover": { boxShadow: 4 },
+            }}
+          >
+            <Box sx={{ 
+              p: 1.5, 
+              borderRadius: "50%", 
+              bgcolor: alpha(theme.palette.warning.main, 0.1),
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center"
+            }}>
+              <WarningAmberIcon sx={{ fontSize: 30, color: theme.palette.warning.main }} />
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary" fontWeight="medium">
+                Low Stock
+              </Typography>
+              <Typography variant="h4" sx={{ fontWeight: "bold", color: theme.palette.warning.main }}>
+                {cinventory.filter((i) => {
+                  const alert = Number(i.stock_alert) || 5;
+                  const qtyOpened = Number(i.quantity_opened) || 0;
+                  return qtyOpened <= alert;
+                }).length}
+              </Typography>
+            </Box>
+          </Card>
         )}
-      </Typography>
-    </Box>
-  </Card>
-)}
 
-  {/* Buttons */}
-  <Stack direction={{ xs: "column", sm: "row" }} spacing={1} mb={0.5}>
-    <Button
-      variant="contained"
-       onClick={() => {
-    setOpen(true);
-    resetForm();
-  }}
-      sx={{
-        bgcolor: "#f8a41a",
-        "&:hover": { bgcolor: "#D32F2F" },
-        borderRadius: 1.5,
-        textTransform: "none",
-        minWidth: 120,
-        height: 48,
-        fontSize: "0.8rem"
-      }}
-    >
-      + Add Item
-    </Button>
+        {itemType === "Non-Consumable" && (
+          <Card sx={{ 
+            flex: 1, 
+            p: 3, 
+            borderRadius: 3, 
+            display: "flex", 
+            alignItems: "center", 
+            gap: 2,
+            background: `linear-gradient(135deg, ${alpha(theme.palette.success.main, 0.1)} 0%, ${alpha(theme.palette.success.main, 0.2)} 100%)`,
+            boxShadow: "0 4px 20px rgba(0,0,0,0.08)"
+          }}>
+            <Box sx={{ 
+              p: 1.5, 
+              borderRadius: "50%", 
+              bgcolor: alpha(theme.palette.success.main, 0.1),
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center"
+            }}>
+              <AssignmentTurnedInIcon sx={{ fontSize: 30, color: theme.palette.success.main }} />
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary" fontWeight="medium">
+                Borrowed
+              </Typography>
+              <Typography variant="h4" sx={{ fontWeight: "bold", color: theme.palette.success.main }}>
+                {inventory.reduce(
+                  (acc, i) => acc + parseInt(i.borrowed || "0", 10),
+                  0
+                )}
+              </Typography>
+            </Box>
+          </Card>
+        )}
+      </Stack>
 
+      {/* Action Bar */}
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={3} justifyContent="space-between" alignItems="center">
+        <Box sx={{ flex: 1, maxWidth: 400 }}>
+          <TextField
+            placeholder="Search name, description, location, brand/model..."
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setPage(0);
+            }}
+            variant="outlined"
+            size="small"
+            fullWidth
+            sx={{
+              bgcolor: "background.paper",
+              borderRadius: 3,
+              "& .MuiOutlinedInput-root": {
+                borderRadius: 3,
+                "& fieldset": {
+                  borderRadius: 3,
+                },
+                "&:hover fieldset": {
+                  borderColor: "primary.main",
+                },
+                "&.Mui-focused fieldset": {
+                  borderColor: "primary.main",
+                },
+              },
+            }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon color="action" />
+                </InputAdornment>
+              ),
+            }}
+          />
+        </Box>
+        
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+          <Button
+            variant="contained"
+            onClick={() => {
+              setOpen(true);
+              resetForm();
+            }}
+            sx={{
+              bgcolor: "#b91c1c",
+              "&:hover": { bgcolor: "#b91c1c" },
+              borderRadius: 2,
+              textTransform: "none",
+              px: 3,
+              fontWeight: "bold",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
+            }}
+          >
+            + Add Item
+          </Button>
+
+          <Button
+            variant="outlined"
+            color="error"
+            sx={{
+              borderRadius: 2,
+              textTransform: "none",
+              px: 3,
+              fontWeight: "bold",
+            }}
+            disabled={selectedItems.length === 0}
+            onClick={async () => {
+              const sheetName = itemType === "Non-Consumable" ? "nc_inventory" : "c_inventory";
+              const names = selectedItems
+                .map((num) => {
+                  const item = itemType === "Non-Consumable"
+                    ? inventory.find((i) => i.num === num)
+                    : cinventory.find((i) => i.num === num);
+                  return item
+                    ? itemType === "Non-Consumable"
+                      ? (item as InventoryItem).equipment_name
+                      : (item as CInventoryItem).description
+                    : null;
+                })
+                .filter(Boolean);
+
+              if (!window.confirm(`Are you sure you want to delete the following items?\n\n${names.join("\n")}`))
+                return;
+
+              try {
+                await Promise.all(
+                  selectedItems.map((num) =>
+                    axios.get(API_URL, {
+                      params: { sheet: sheetName, action: "delete", num },
+                    })
+                  )
+                );
+                setSelectedItems([]);
+                fetchInventory();
+              } catch (err) {
+                console.error("Failed to delete selected items", err);
+              }
+            }}
+          >
+            Delete Selected ({selectedItems.length})
+          </Button>
+           {/* Add this AI Button */}
   <Button
-  variant="contained"
-  color="error"
-  sx={{
-    borderRadius: 1.5,
-    textTransform: "none",
-    minWidth: 120,
-    height: 48,
-    fontSize: "0.8rem",
-  }}
-  disabled={selectedItems.length === 0}
-  onClick={async () => {
-  // Get names of selected items
-  const sheetName = itemType === "Non-Consumable" ? "nc_inventory" : "c_inventory";
-
-  const names = selectedItems
-    .map((num) => {
-      const item =
-  itemType === "Non-Consumable"
-    ? inventory.find((i) => i.num === num)
-    : cinventory.find((i) => i.num === num);
-
-return item
-  ? itemType === "Non-Consumable"
-    ? (item as InventoryItem).equipment_name
-    : (item as CInventoryItem).description
-  : null;
-
-    })
-    .filter(Boolean);
-
-  // Confirmation message with list
-  if (
-    !window.confirm(
-      `Are you sure you want to delete the following items?\n\n${names.join(
-        "\n"
-      )}`
-    )
-  )
-    return;
-
-  try {
-    await Promise.all(
-      selectedItems.map((num) =>
-        axios.get(API_URL, {
-          params: { sheet: sheetName, action: "delete", num },
-        })
-      )
-    );
-
-    setSelectedItems([]);
-    fetchInventory();
-  } catch (err) {
-    console.error("Failed to delete selected items", err);
-  }
-}}
-
->
-  Delete Selected ({selectedItems.length})
-</Button>
-
-  </Stack>
-</Stack>
-<Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={2}>
-     <ToggleButtonGroup
-      value={itemType}
-      exclusive
-      fullWidth
-      sx={{
-        mb: 2,
-        borderRadius: 2,
-        overflow: "hidden", // nice rounded edges
-      }}
-    >
-      <ToggleButton
-        value="non-consumable"
-        selected={itemType === "Non-Consumable"}
-        onClick={() => setItemType("Non-Consumable")}
-        sx={{
-          flex: 1,
-          height: 48,
-          textTransform: "none",
-          fontSize: "0.9rem",
-          fontWeight: "bold",
-          "&.Mui-selected": {
-            bgcolor: "#d32f2f",
-            color: "#fff",
-            "&:hover": { bgcolor: "#d32f2f" },
-          },
-        }}
-      >
-        Non-Consumable
-      </ToggleButton>
-
-      <ToggleButton
-        value="consumable"
-        selected={itemType === "Consumable"}
-        onClick={() => setItemType("Consumable")}
-        sx={{
-          flex: 1,
-          height: 48,
-          textTransform: "none",
-          fontSize: "0.9rem",
-          fontWeight: "bold",
-          "&.Mui-selected": {
-            bgcolor: "#d32f2f",
-            color: "#fff",
-            "&:hover": { bgcolor: "#b71c1c" },
-          },
-        }}
-      >
-        Consumable
-      </ToggleButton>
-    </ToggleButtonGroup>
-  </Stack>
-<Box sx={{ mb: 2, display: "flex", justifyContent: "flex-end" }}>
-  <TextField
-     placeholder="Search name, description, location, brand/model..."
-  value={searchQuery}
-  onChange={(e) => {
-    setSearchQuery(e.target.value);
-    setPage(0); // ✅ reset to first page on new search
-  }}
     variant="outlined"
-    size="small"
+    color="primary"
+    onClick={() => setAiDialogOpen(true)}
     sx={{
-      width: '100%',
-      bgcolor: "#fff",
-      borderRadius: 3,
-      "& .MuiOutlinedInput-root": {
-        borderRadius: 3,
-        "& fieldset": {
-      borderRadius: 3,
-        },
-        "&:hover fieldset": {
-          borderColor: "#D32F2F",
-        },
-        "&.Mui-focused fieldset": {
-          borderColor: "#B71C1C",
-        },
-      },
-    }}
-  />
-</Box>
-  {/* Scrollable table card */}
-<Card
-  sx={{
-    p: { xs: 1.5, sm: 3 },
-    borderRadius: 3,
-    backgroundColor: "#fff",
-    height: "100%",
-    minHeight:'60vh',
-    marginBottom:10,
-    overflowY: "auto",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: loading ? "center" : "flex-start",
-    alignItems: loading ? "center" : "flex-start",
-  }}
->
-  {loading ? (
-    <Loader />
-  ) : inventory.length === 0 ? (
-    <Typography variant="body2" color="text.secondary">
-      No inventory items found.
-    </Typography>
-  ) : (
-    <Box sx={{ width: "100%", overflowX: "auto" }}>
-      <Table
-        sx={{
-          minWidth: 650,
-          "& th": { bgcolor: "#f4f4f4", fontWeight: "bold", fontSize: { xs: "0.65rem", sm: "0.85rem" } },
-          "& td": { fontSize: { xs: "0.65rem", sm: "0.85rem" } },
-          "& tr:hover": { bgcolor: "#fbe9e7" },
-        }}
-        size="small"
-      >
-<TableHead>
-  <TableRow>
-    <TableCell sx={{ px: { xs: 0.5, sm: 1 } }}> </TableCell>
-
-    {itemType === "Non-Consumable" ? (
-      <>
-        <TableCell>Name</TableCell>
-        <TableCell>Location</TableCell>
-        <TableCell>Brand/Model</TableCell>
-        <TableCell>Quantity</TableCell>
-        <TableCell>Borrowed</TableCell>
-        <TableCell>Facility</TableCell>
-        <TableCell align="center">Action</TableCell>
-      </>
-    ) : (
-      <>
-        <TableCell>Description</TableCell>
-        <TableCell>Location</TableCell>
-        <TableCell>Quantity Opened</TableCell>
-         <TableCell>Quantity Unopened</TableCell>
-           <TableCell>Remarks</TableCell>
-        <TableCell align="center">Action</TableCell>
-      </>
-    )}
-  </TableRow>
-</TableHead>
-
-        {itemType === "Non-Consumable" ? (
-        <TableBody>
-          {filteredInventory
-            .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-            .map((item) => (
-              <TableRow key={item.num}>
-                <TableCell sx={{ px: { xs: 0.5, sm: 1 } }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedItems.includes(item.num)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedItems([...selectedItems, item.num]);
-                      } else {
-                        setSelectedItems(selectedItems.filter((id) => id !== item.num));
-                      }
-                    }}
-                  />
-                </TableCell>
-                <TableCell>{item.equipment_name}</TableCell>
-                <TableCell>{item.location}</TableCell>
-                <TableCell>{item.brand_model}</TableCell>
-                <TableCell align="center">{item.total_qty}</TableCell>
-                <TableCell align="center">{item.borrowed}</TableCell>
-                <TableCell>{item.facility}</TableCell>
-                <TableCell>
-                  <Stack direction="row" spacing={1}>
-                    <Tooltip title="View">
-  <IconButton
-    color="default"
-    onClick={() => handleViewClick(item)}
-   sx={{
-        bgcolor: "#ffebee",
-        "&:hover": { bgcolor: "#484848ff", color: "#fff" },
-        p: 1,
-      }}
-  >
-    <Inventory2Icon fontSize="small" />
-  </IconButton>
-</Tooltip>
-
-  <Tooltip title="Update">
-    <IconButton
-      color="primary"
-       onClick={() => handleEditClick(item)}
-      sx={{
-        bgcolor: "#e3f2fd",
-        "&:hover": { bgcolor: "#90caf9" },
-        p: 1,
-      }}
-    >
-      <EditIcon fontSize="small" />
-    </IconButton>
-  </Tooltip>
-
-  <Tooltip title="Delete">
-    <IconButton
-      color="error"
-      onClick={() => handleDelete(item)}
-      sx={{
-        bgcolor: "#ffebee",
-        "&:hover": { bgcolor: "#f44336", color: "#fff" },
-        p: 1,
-      }}
-    >
-      <DeleteIcon fontSize="small" />
-    </IconButton>
-  </Tooltip>
-</Stack>
-                </TableCell>
-              </TableRow>
-            ))}
-        </TableBody>
-        ):(
- <TableBody>
-    {filteredCInventory.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-      .map((item) => (
-        <TableRow key={item.num}>
-          <TableCell sx={{ px: { xs: 0.5, sm: 1 } }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedItems.includes(item.num)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedItems([...selectedItems, item.num]);
-                      } else {
-                        setSelectedItems(selectedItems.filter((id) => id !== item.num));
-                      }
-                    }}
-                  /></TableCell>
-          <TableCell>{item.description}</TableCell>
-          <TableCell>{item.location}</TableCell>
-          <TableCell align="center">{item.quantity_opened}</TableCell>
-          <TableCell align="center">{item.quantity_unopened}</TableCell>
-          <TableCell align="center">{item.remarks}</TableCell>
-                          <TableCell>
-                  <Stack direction="row" spacing={1}>
-                    <Tooltip title="View">
-  <IconButton
-    color="default"
-    onClick={() => handleViewClick(item)}
-   sx={{
-        bgcolor: "#ffebee",
-        "&:hover": { bgcolor: "#484848ff", color: "#fff" },
-        p: 1,
-      }}
-  >
-    <Inventory2Icon fontSize="small" />
-  </IconButton>
-</Tooltip>
-
-  <Tooltip title="Update">
-    <IconButton
-      color="primary"
-       onClick={() => handleEditClick(item)}
-      sx={{
-        bgcolor: "#e3f2fd",
-        "&:hover": { bgcolor: "#90caf9" },
-        p: 1,
-      }}
-    >
-      <EditIcon fontSize="small" />
-    </IconButton>
-  </Tooltip>
-
-  <Tooltip title="Delete">
-    <IconButton
-      color="error"
-      onClick={() => handleDelete(item)}
-      sx={{
-        bgcolor: "#ffebee",
-        "&:hover": { bgcolor: "#f44336", color: "#fff" },
-        p: 1,
-      }}
-    >
-      <DeleteIcon fontSize="small" />
-    </IconButton>
-  </Tooltip>
-</Stack>
-                </TableCell>
-        </TableRow>
-      ))}
-  </TableBody>
-        )
+      borderRadius: 2,
+      textTransform: "none",
+      px: 3,
+      fontWeight: "bold",
+      borderColor: "#1976d2",
+      color: "#1976d2",
+      "&:hover": {
+        borderColor: "#1565c0",
+        bgcolor: "rgba(25, 118, 210, 0.04)"
       }
-      </Table>
+    }}
+    startIcon={<AutoAwesomeIcon />} // You'll need to import this icon
+  >
+    AI
+  </Button>
+        </Stack>
+      </Stack>
 
-      {/* Pagination */}
-<TablePagination
-  component="div"
-  count={
-    itemType === "Non-Consumable"
-      ? filteredInventory.length
-      : filteredCInventory.length
-  } // ✅ switch count depending on type
-  page={page}
-  onPageChange={handleChangePage}
-  rowsPerPage={rowsPerPage}
-  rowsPerPageOptions={[10]} // fixed 10 per page
-/>
+      {/* Item Type Toggle */}
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={2}>
+        <ToggleButtonGroup
+          value={itemType}
+          exclusive
+          fullWidth
+          sx={{
+            mb: 2,
+            borderRadius: 2,
+            overflow: "hidden",
+          }}
+        >
+          <ToggleButton
+            value="Non-Consumable"
+            selected={itemType === "Non-Consumable"}
+            onClick={() => setItemType("Non-Consumable")}
+            sx={{
+              flex: 1,
+              height: 48,
+              textTransform: "none",
+              fontSize: "0.9rem",
+              fontWeight: "bold",
+              "&.Mui-selected": {
+                bgcolor: "#b91c1c",
+                color: "#fff",
+                "&:hover": { bgcolor: "#b91c1c" },
+              },
+            }}
+          >
+            Non-Consumable
+          </ToggleButton>
 
-    </Box>
-  )}
-</Card>
+          <ToggleButton
+            value="Consumable"
+            selected={itemType === "Consumable"}
+            onClick={() => setItemType("Consumable")}
+            sx={{
+              flex: 1,
+              height: 48,
+              textTransform: "none",
+              fontSize: "0.9rem",
+              fontWeight: "bold",
+              "&.Mui-selected": {
+                bgcolor: "#b91c1c",
+                color: "#fff",
+                "&:hover": { bgcolor: "#b91c1c" },
+              },
+            }}
+          >
+            Consumable
+          </ToggleButton>
+        </ToggleButtonGroup>
+      </Stack>
 
-</Container>
+      {/* Inventory Table */}
+      <Card
+        sx={{
+          p: 3,
+          borderRadius: 3,
+          backgroundColor: "background.paper",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
+          overflow: "hidden",
+        }}
+      >
+        {loading ? (
+          <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 400 }}>
+            <Loader />
+          </Box>
+        ) : (itemType === "Non-Consumable" ? inventory : cinventory).length === 0 ? (
+          <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 400 }}>
+            <Typography variant="body2" color="text.secondary">
+              No inventory items found.
+            </Typography>
+          </Box>
+        ) : (
+          <>
+            <TableContainer sx={{ maxHeight: 600, borderRadius: 2 }}>
+              <Table stickyHeader sx={{ minWidth: 950 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell padding="checkbox" sx={{ bgcolor: "grey.50" }}>
+                      <Checkbox
+                        indeterminate={
+                          selectedItems.length > 0 &&
+                          selectedItems.length < (itemType === "Non-Consumable" ? inventory.length : cinventory.length)
+                        }
+                        checked={
+                          (itemType === "Non-Consumable" ? inventory.length : cinventory.length) > 0 &&
+                          selectedItems.length === (itemType === "Non-Consumable" ? inventory.length : cinventory.length)
+                        }
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedItems((itemType === "Non-Consumable" ? inventory : cinventory).map((item) => item.num));
+                          } else {
+                            setSelectedItems([]);
+                          }
+                        }}
+                        sx={{ color: "#b91c1c" }}
+                      />
+                    </TableCell>
+                    {itemType === "Non-Consumable" ? (
+                      <>
+                        <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Name</TableCell>
+                        <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Location</TableCell>
+                        <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Brand/Model</TableCell>
+                        <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Quantity</TableCell>
+                        <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Borrowed</TableCell>
+                        <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Facility</TableCell>
+                        <TableCell align="center" sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Action</TableCell>
+                      </>
+                    ) : (
+                      <>
+                        <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Description</TableCell>
+                        <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Location</TableCell>
+                        <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Quantity Opened</TableCell>
+                        <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Quantity Unopened</TableCell>
+                        <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Remarks</TableCell>
+                        <TableCell align="center" sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Action</TableCell>
+                      </>
+                    )}
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {(itemType === "Non-Consumable" ? filteredInventory : filteredCInventory)
+                    .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+                    .map((item) => (
+                      <TableRow key={item.num} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            checked={selectedItems.includes(item.num)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedItems((prev) => [...prev, item.num]);
+                              } else {
+                                setSelectedItems((prev) => prev.filter((id) => id !== item.num));
+                              }
+                            }}
+                            sx={{ color: "#b91c1c" }}
+                          />
+                        </TableCell>
+                        {itemType === "Non-Consumable" ? (
+                          <>
+                            <TableCell>
+                              <Typography variant="body2" fontWeight="medium">
+                                {(item as InventoryItem).equipment_name}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>{(item as InventoryItem).location}</TableCell>
+                            <TableCell>{(item as InventoryItem).brand_model}</TableCell>
+                            <TableCell align="center">{(item as InventoryItem).total_qty}</TableCell>
+                            <TableCell align="center">{(item as InventoryItem).borrowed}</TableCell>
+                            <TableCell>{(item as InventoryItem).facility}</TableCell>
+                          </>
+                        ) : (
+                          <>
+                            <TableCell>
+                              <Typography variant="body2" fontWeight="medium">
+                                {(item as CInventoryItem).description}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>{(item as CInventoryItem).location}</TableCell>
+                            <TableCell align="center">
+                              <Chip 
+                                label={(item as CInventoryItem).quantity_opened} 
+                                size="small" 
+                                color={Number((item as CInventoryItem).quantity_opened) <= Number((item as CInventoryItem).stock_alert) ? "error" : "success"}
+                                variant="outlined"
+                              />
+                            </TableCell>
+                            <TableCell align="center">{(item as CInventoryItem).quantity_unopened}</TableCell>
+                            <TableCell>{(item as CInventoryItem).remarks}</TableCell>
+                          </>
+                        )}
+                        <TableCell>
+                          <Stack direction="row" spacing={1} justifyContent="center">
+                              <Tooltip title="View">
+  <IconButton
+    color="default"
+    onClick={() => handleViewClick(item)}
+   sx={{
+        bgcolor: "#ffebee",
+        "&:hover": { bgcolor: "#484848ff", color: "#fff" },
+        p: 1,
+      }}
+  >
+    <Inventory2Icon fontSize="small" />
+  </IconButton>
+</Tooltip>
+
+  <Tooltip title="Update">
+    <IconButton
+      color="primary"
+       onClick={() => handleEditClick(item)}
+      sx={{
+        bgcolor: "#e3f2fd",
+        "&:hover": { bgcolor: "#90caf9" },
+        p: 1,
+      }}
+    >
+      <EditIcon fontSize="small" />
+    </IconButton>
+  </Tooltip>
+
+  <Tooltip title="Delete">
+    <IconButton
+      color="error"
+      onClick={() => handleDelete(item)}
+      sx={{
+        bgcolor: "#ffebee",
+        "&:hover": { bgcolor: "#f44336", color: "#fff" },
+        p: 1,
+      }}
+    >
+      <DeleteIcon fontSize="small" />
+    </IconButton>
+  </Tooltip>
+                          </Stack>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+
+            {/* Pagination */}
+            <TablePagination
+              rowsPerPageOptions={[5, 10, 25]}
+              component="div"
+              count={itemType === "Non-Consumable" ? filteredInventory.length : filteredCInventory.length}
+              rowsPerPage={rowsPerPage}
+              page={page}
+              onPageChange={handleChangePage}
+              onRowsPerPageChange={handleChangeRowsPerPage}
+              sx={{ borderTop: "1px solid", borderColor: "divider" }}
+            />
+          </>
+        )}
+      </Card>
 
 <Dialog open={open} onClose={() => {
     setOpen(false);
@@ -1883,10 +1941,134 @@ return item
   </DialogActions>
 </Dialog>
 
+<Dialog
+  open={aiDialogOpen}
+  onClose={() => setAiDialogOpen(false)}
+  maxWidth="lg"
+  fullWidth
+  PaperProps={{
+    sx: {
+      borderRadius: 3,
+      overflow: 'hidden',
+      boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+    }
+  }}
+  // Make dialog draggable
+  onMouseDown={(e) => {
+    const target = e.target as HTMLElement;
+    if (target.closest('.MuiDialogTitle-root')) {
+      const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
+      if (dialog) {
+        dialog.style.cursor = 'move';
+      }
+    }
+  }}
+  onMouseUp={() => {
+    const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
+    if (dialog) {
+      dialog.style.cursor = '';
+    }
+  }}
+>
+  <DialogTitle 
+    sx={{ 
+      bgcolor: "#b91c1c", 
+      color: "white", 
+      fontWeight: "bold",
+      cursor: 'move',
+      display: 'flex',
+      alignItems: 'center',
+      gap: 1
+    }}
+  >
+    <AutoAwesomeIcon />
+    Ask AI
+  </DialogTitle>
+  
+  <DialogContent sx={{ p: 3, bgcolor: 'background.default' }}>
+    <Stack spacing={3}>
+      <TextField
+        multiline
+        rows={4}
+        placeholder='Ask: e.g. "List all students who borrowed an oscilloscope this month"'
+        value={question}
+        onChange={(e) => setQuestion(e.target.value)}
+        variant="outlined"
+        fullWidth
+        sx={{
+          '& .MuiOutlinedInput-root': {
+            borderRadius: 2,
+            bgcolor: 'white'
+          }
+        }}
+      />
+      
+      <Button
+        variant="contained"
+        onClick={handleGenerateReport}
+        disabled={loading2 || !question.trim()}
+        sx={{
+          bgcolor: "#b91c1c",
+          "&:hover": { bgcolor: "#b91c1c.dark" },
+          borderRadius: 2,
+          py: 1.5,
+          fontWeight: "bold",
+          textTransform: "none"
+        }}
+      >
+        {loading2 ? <CircularProgress size={24} /> : "Ask"}
+      </Button>
 
+      {/* Results */}
+      {reportText && (
+        <Card sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 2 }}>
+          <Typography variant="h6" color="#b91c1c" gutterBottom>
+            AI Answer Preview:
+          </Typography>
+          <Paper variant="outlined" sx={{ p: 2, bgcolor: 'white', borderRadius: 2 }}>
+            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+              {reportText}
+            </Typography>
+          </Paper>
+        </Card>
+      )}
 
+      {reportTable && (
+        <Card sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 2 }}>
+          <Typography variant="h6" color="#b91c1c" gutterBottom>
+            AI Answer (Table):
+          </Typography>
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ bgcolor: 'grey.100' }}>
+                  {reportTable.columns.map((col, idx) => (
+                    <TableCell key={idx} sx={{ fontWeight: 'bold' }}>
+                      {col}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {reportTable.rows.map((row, rIdx) => (
+                  <TableRow key={rIdx} hover>
+                    {row.map((cell, cIdx) => (
+                      <TableCell key={cIdx}>
+                        {cell}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Card>
+      )}
+    </Stack>
+  </DialogContent>
+</Dialog>
 
-    </div>
+    </Container>
   );
 };
 

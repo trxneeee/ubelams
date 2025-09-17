@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import {
   Container,
-  Card,
   Typography,
   Button,
   Dialog,
@@ -15,10 +14,23 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Checkbox,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Box,
+  CircularProgress,
+  Backdrop,
+  Alert,
+  Snackbar,
 } from "@mui/material";
 import Loader from "../components/Loader";
-import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
+import { useNavigate } from "react-router-dom";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 
 const API_URL =
   "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
@@ -31,13 +43,17 @@ interface Staff {
   role: string;
 }
 
+interface User {
+  email: string;
+  // Add other user properties as needed
+}
+
 const StaffPage = () => {
   const [staffs, setStaffs] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
   const [selectedStaffs, setSelectedStaffs] = useState<string[]>([]);
-  const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
   const [form, setForm] = useState<Staff>({
     email: "",
     lastname: "",
@@ -45,6 +61,9 @@ const StaffPage = () => {
     password: "",
     role: "Student Assistant",
   });
+  const [user, setUser] = useState<User | null>(null);
+  const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" as "success" | "error" });
+  const navigate = useNavigate();
 
   const fetchStaffs = async () => {
     setLoading(true);
@@ -64,81 +83,124 @@ const StaffPage = () => {
           password: row[idx("password")],
           role: row[idx("role")],
         }));
-        setStaffs(parsed);
+        
+        // Filter out the current user's account
+        const filteredStaffs = parsed.filter((staff: Staff) => 
+          staff.email !== user?.email
+        );
+        setStaffs(filteredStaffs);
       }
     } catch (err) {
       console.error("Failed to fetch staffs", err);
+      setSnackbar({ open: true, message: "Failed to fetch staff data", severity: "error" });
     } finally {
       setLoading(false);
     }
   };
 
   const handleCreate = async () => {
+    setProcessing(true);
     try {
       await axios.get(API_URL, {
         params: { sheet: "users", action: "create", ...form },
       });
       setOpen(false);
       setForm({ email: "", lastname: "", firstname: "", password: "", role: "Student Assistant" });
+      setSnackbar({ open: true, message: "Staff member added successfully", severity: "success" });
       fetchStaffs();
     } catch (err) {
       console.error("Failed to create staff", err);
-    }
-  };
-
-  const handleUpdate = async () => {
-    if (!selectedStaff) return;
-    try {
-      await axios.get(API_URL, {
-        params: { sheet: "users", action: "update", ...form },
-      });
-      setOpen(false);
-      setForm({ email: "", lastname: "", firstname: "", password: "", role: "Student Assistant" });
-      setEditing(false);
-      setSelectedStaff(null);
-      fetchStaffs();
-    } catch (err) {
-      console.error("Failed to update staff", err);
+      setSnackbar({ open: true, message: "Failed to add staff member", severity: "error" });
+    } finally {
+      setProcessing(false);
     }
   };
 
   const handleDelete = async (email: string) => {
     if (!window.confirm("Are you sure you want to delete this staff?")) return;
+    setProcessing(true);
     try {
       await axios.get(API_URL, {
         params: { sheet: "users", action: "delete", email },
       });
+      setSnackbar({ open: true, message: "Staff member deleted successfully", severity: "success" });
       fetchStaffs();
     } catch (err) {
       console.error("Failed to delete staff", err);
+      setSnackbar({ open: true, message: "Failed to delete staff member", severity: "error" });
+    } finally {
+      setProcessing(false);
     }
   };
 
-  const openEditModal = (staff: Staff) => {
-    setEditing(true);
-    setSelectedStaff(staff);
-    setForm({ ...staff });
-    setOpen(true);
+  const handleBulkDelete = async () => {
+    if (!window.confirm("Are you sure you want to delete selected staff?")) return;
+    setProcessing(true);
+    try {
+      await Promise.all(
+        selectedStaffs.map(email =>
+          axios.get(API_URL, { params: { sheet: "users", action: "delete", email } })
+        )
+      );
+      setSelectedStaffs([]);
+      setSnackbar({ open: true, message: "Selected staff members deleted successfully", severity: "success" });
+      fetchStaffs();
+    } catch (err) {
+      console.error("Failed to delete selected staff", err);
+      setSnackbar({ open: true, message: "Failed to delete selected staff members", severity: "error" });
+    } finally {
+      setProcessing(false);
+    }
   };
 
   useEffect(() => {
-    fetchStaffs();
-  }, []);
+    const storedUser = localStorage.getItem("user");
+    if (!storedUser) {
+      navigate("/"); // redirect to login if not logged in
+    } else {
+      const userData = JSON.parse(storedUser);
+      setUser(userData);
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    if (user) {
+      fetchStaffs();
+    }
+  }, [user]);
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4 }}>
+    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+      <Backdrop
+        sx={{ color: "#fff", zIndex: (theme) => theme.zIndex.drawer + 1 }}
+        open={processing}
+      >
+        <Stack alignItems="center" spacing={2}>
+          <CircularProgress size={60} thickness={4} sx={{ color: "#f8a41a" }} />
+          <Typography variant="h6" sx={{ color: "#fff" }}>
+            Processing...
+          </Typography>
+        </Stack>
+      </Backdrop>
+
       <Stack direction="row" mb={3} spacing={2} alignItems="center">
-        <Typography variant="h5" sx={{ fontWeight: "bold" }}>
+        <Typography variant="h5" sx={{ fontWeight: "bold", color: "#B71C1C" }}>
           Staff Management
         </Typography>
         <Button
           variant="contained"
           onClick={() => {
             setForm({ email: "", lastname: "", firstname: "", password: "", role: "Student Assistant" });
-            setEditing(false);
             setOpen(true);
           }}
-          sx={{ bgcolor: "#f8a41a", "&:hover": { bgcolor: "#D32F2F" }, textTransform: "none" }}
+          sx={{ 
+            bgcolor: "#f8a41a", 
+            "&:hover": { bgcolor: "#e5940e" }, 
+            textTransform: "none",
+            borderRadius: 2,
+            px: 3,
+            fontWeight: "bold"
+          }}
         >
           + Add Staff
         </Button>
@@ -146,19 +208,12 @@ const StaffPage = () => {
           variant="contained"
           color="error"
           disabled={selectedStaffs.length === 0}
-          onClick={async () => {
-            if (!window.confirm("Are you sure you want to delete selected staff?")) return;
-            try {
-              await Promise.all(
-                selectedStaffs.map(email =>
-                  axios.get(API_URL, { params: { sheet: "users", action: "delete", email } })
-                )
-              );
-              setSelectedStaffs([]);
-              fetchStaffs();
-            } catch (err) {
-              console.error("Failed to delete selected staff", err);
-            }
+          onClick={handleBulkDelete}
+          sx={{
+            textTransform: "none",
+            borderRadius: 2,
+            px: 3,
+            fontWeight: "bold"
           }}
         >
           Delete Selected ({selectedStaffs.length})
@@ -168,86 +223,104 @@ const StaffPage = () => {
       {loading ? (
         <Loader />
       ) : (
-        <Stack
-          direction="row"
-          flexWrap="wrap"
-          spacing={2}
-          useFlexGap
+        <TableContainer 
+          component={Paper} 
+          sx={{ 
+            borderRadius: 3, 
+            boxShadow: 3,
+            overflow: "hidden"
+          }}
         >
-          {staffs.map((staff) => (
-            <Card
-              key={staff.email}
-              sx={{
-                width: 250,
-                p: 2,
-                borderRadius: 3,
-                boxShadow: 3,
-                position: "relative",
-              }}
-            >
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <Checkbox
-                  checked={selectedStaffs.includes(staff.email)}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setSelectedStaffs([...selectedStaffs, staff.email]);
-                    } else {
-                      setSelectedStaffs(selectedStaffs.filter((email) => email !== staff.email));
+          <Table>
+            <TableHead>
+              <TableRow sx={{ bgcolor: "#B71C1C" }}>
+                <TableCell padding="checkbox">
+                  <Checkbox
+                    indeterminate={
+                      selectedStaffs.length > 0 && selectedStaffs.length < staffs.length
                     }
-                  }}
-                  size="small"
-                />
-                <Typography variant="subtitle1" fontWeight="bold">
-                  {staff.firstname} {staff.lastname}
-                </Typography>
-              </Stack>
-              <Typography variant="body2" color="text.secondary" mt={1}>
-                {staff.email}
-              </Typography>
-              <Typography
-                variant="caption"
-                sx={{
-                  mt: 0.5,
-                  display: "inline-block",
-                  px: 1,
-                  py: 0.3,
-                  borderRadius: 2,
-                  bgcolor: staff.role === "Custodian" ? "blue.100" : "red.100",
-                }}
-              >
-                {staff.role}
-              </Typography>
-
-              <Stack direction="row" spacing={1} mt={2}>
-                <Button
-                  size="small"
-                  onClick={() => openEditModal(staff)}
-                  startIcon={<EditIcon />}
-                  sx={{ textTransform: "none" }}
-                >
-                  Edit
-                </Button>
-                <Button
-                  size="small"
-                  onClick={() => handleDelete(staff.email)}
-                  startIcon={<DeleteIcon />}
-                  sx={{ textTransform: "none", color: "error.main" }}
-                >
-                  Delete
-                </Button>
-              </Stack>
-            </Card>
-          ))}
-        </Stack>
+                    checked={staffs.length > 0 && selectedStaffs.length === staffs.length}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedStaffs(staffs.map(staff => staff.email));
+                      } else {
+                        setSelectedStaffs([]);
+                      }
+                    }}
+                    sx={{ color: "white", "&.Mui-checked": { color: "white" } }}
+                  />
+                </TableCell>
+                <TableCell sx={{ fontWeight: "bold", color: "white" }}>Name</TableCell>
+                <TableCell sx={{ fontWeight: "bold", color: "white" }}>Email</TableCell>
+                <TableCell sx={{ fontWeight: "bold", color: "white" }}>Role</TableCell>
+                <TableCell sx={{ fontWeight: "bold", color: "white" }}>Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {staffs.map((staff) => (
+                <TableRow key={staff.email} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      checked={selectedStaffs.includes(staff.email)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedStaffs([...selectedStaffs, staff.email]);
+                        } else {
+                          setSelectedStaffs(selectedStaffs.filter((email) => email !== staff.email));
+                        }
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="body1" fontWeight="medium">
+                      {staff.firstname} {staff.lastname}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>{staff.email}</TableCell>
+                  <TableCell>
+                    <Box
+                      component="span"
+                      sx={{
+                        px: 2,
+                        py: 1,
+                        borderRadius: 3,
+                        fontSize: "0.75rem",
+                        fontWeight: "bold",
+                        bgcolor: staff.role === "Custodian" ? "primary.main" : "secondary.main",
+                        color: "white",
+                      }}
+                    >
+                      {staff.role}
+                    </Box>
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      size="small"
+                      onClick={() => handleDelete(staff.email)}
+                      startIcon={<DeleteIcon />}
+                      sx={{ 
+                        textTransform: "none", 
+                        color: "error.main",
+                        fontWeight: "bold"
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
 
-      {/* Dialog */}
-      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ fontWeight: "bold", color: "#B71C1C" }}>
-          {editing ? "Update Staff" : "Add Staff"}
+      {/* Add Staff Dialog */}
+      <Dialog open={open} onClose={() => !processing && setOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: "bold", color: "#B71C1C", bgcolor: "#f5f5f5" }}>
+          Add Staff
         </DialogTitle>
 
-        <DialogContent dividers>
+        <DialogContent dividers sx={{ bgcolor: "#fafafa" }}>
           <Stack spacing={2} mt={1}>
             <TextField
               label="Email"
@@ -255,6 +328,7 @@ const StaffPage = () => {
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               fullWidth
               variant="outlined"
+              disabled={processing}
             />
             <TextField
               label="Lastname"
@@ -262,6 +336,7 @@ const StaffPage = () => {
               onChange={(e) => setForm({ ...form, lastname: e.target.value })}
               fullWidth
               variant="outlined"
+              disabled={processing}
             />
             <TextField
               label="Firstname"
@@ -269,6 +344,7 @@ const StaffPage = () => {
               onChange={(e) => setForm({ ...form, firstname: e.target.value })}
               fullWidth
               variant="outlined"
+              disabled={processing}
             />
             <TextField
               label="Password"
@@ -277,6 +353,7 @@ const StaffPage = () => {
               onChange={(e) => setForm({ ...form, password: e.target.value })}
               fullWidth
               variant="outlined"
+              disabled={processing}
             />
 
             <ToggleButtonGroup
@@ -284,16 +361,33 @@ const StaffPage = () => {
               exclusive
               onChange={(_, value) => value && setForm({ ...form, role: value })}
               fullWidth
+              disabled={processing}
             >
               <ToggleButton
                 value="Student Assistant"
-                sx={{ flex: 1, "&.Mui-selected": { bgcolor: "#B71C1C", color: "#FFF" } }}
+                sx={{ 
+                  flex: 1, 
+                  "&.Mui-selected": { 
+                    bgcolor: "#B71C1C", 
+                    color: "#FFF",
+                    "&:hover": { bgcolor: "#D32F2F" }
+                  },
+                  fontWeight: "bold"
+                }}
               >
                 Student Assistant
               </ToggleButton>
               <ToggleButton
                 value="Custodian"
-                sx={{ flex: 1, "&.Mui-selected": { bgcolor: "#B71C1C", color: "#FFF" } }}
+                sx={{ 
+                  flex: 1, 
+                  "&.Mui-selected": { 
+                    bgcolor: "#B71C1C", 
+                    color: "#FFF",
+                    "&:hover": { bgcolor: "#D32F2F" }
+                  },
+                  fontWeight: "bold"
+                }}
               >
                 Custodian
               </ToggleButton>
@@ -301,27 +395,57 @@ const StaffPage = () => {
           </Stack>
         </DialogContent>
 
-        <DialogActions sx={{ p: 2 }}>
+        <DialogActions sx={{ p: 2, bgcolor: "#f5f5f5" }}>
           <Button
             onClick={() => setOpen(false)}
-            sx={{ textTransform: "none", color: "#B71C1C", fontWeight: "bold" }}
+            disabled={processing}
+            sx={{ 
+              textTransform: "none", 
+              color: "#B71C1C", 
+              fontWeight: "bold",
+              borderRadius: 2,
+              px: 3
+            }}
           >
             Cancel
           </Button>
           <Button
             variant="contained"
-            onClick={editing ? handleUpdate : handleCreate}
+            onClick={handleCreate}
+            disabled={processing}
             sx={{
               bgcolor: "#B71C1C",
               "&:hover": { bgcolor: "#D32F2F" },
               textTransform: "none",
-              borderRadius: "8px",
+              borderRadius: 2,
+              px: 3,
+              fontWeight: "bold"
             }}
           >
-            {editing ? "Update" : "Save"}
+            {processing ? <CircularProgress size={24} sx={{ color: "white" }} /> : "Save"}
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Snackbar 
+        open={snackbar.open} 
+        autoHideDuration={4000} 
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert 
+          severity={snackbar.severity} 
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          icon={snackbar.severity === "success" ? <CheckCircleIcon /> : undefined}
+          sx={{ 
+            width: '100%',
+            borderRadius: 2,
+            fontWeight: "medium"
+          }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 };

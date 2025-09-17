@@ -20,6 +20,7 @@ html, body, #root {
   margin-top: 64px; /* offset for header */
   height: calc(100vh - 124px); /* full height minus header/footer */
   overflow: hidden;
+  margin-bottom: 50px;
 }
 
 /* ----------------- 📌 TODO PANEL (Google Classroom style) ----------------- */
