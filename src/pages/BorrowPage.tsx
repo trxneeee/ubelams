@@ -6,7 +6,11 @@ import EventIcon from "@mui/icons-material/Event";
 import PersonIcon from "@mui/icons-material/Person";
 import SearchIcon from "@mui/icons-material/Search";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
+import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
 import CircularProgress from "@mui/material/CircularProgress";
+import ClearIcon from '@mui/icons-material/Clear';
+// Add this import at the top with other imports
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import {
   Box,
   Button,
@@ -19,7 +23,7 @@ import {
   DialogTitle,
   IconButton,
   InputAdornment,
-  LinearProgress,
+  Popover,
   Paper,
   Step,
   StepLabel,
@@ -36,8 +40,14 @@ import {
   Tooltip,
   Typography,
   alpha,
-  useTheme
+  useTheme,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Select,
+  Badge
 } from "@mui/material";
+import FilterListIcon from "@mui/icons-material/FilterList";
 import axios from "axios";
 import { useEffect, useMemo, useState } from "react";
 import Loader from "../components/Loader";
@@ -68,26 +78,55 @@ interface BorrowItem {
   available: number;
   brand_model?: string;
   location?: string;
+  identifier_type?: string;
+  identifiers?: string[];
+  statuses?: string[];
+  is_consumable?: boolean;
+  description?: string;
+  quantity_opened?: number;
+  quantity_unopened?: number;
 }
 
+interface SelectedItem {
+  num: string;
+  name: string;
+  qty: number;
+  available: number;
+  is_consumable: boolean;
+  selected_identifiers?: string[];
+  identifier_type?: string;
+}
+interface SetupData {
+  code: string;
+  course: string;
+  instructor: string;
+  subject: string;
+  schedule: string;
+  item: string;
+}
 export default function BorrowPage() {
   const theme = useTheme();
   // records & inventory
+
+  
   const [records, setRecords] = useState<BorrowRecord[]>([]);
   const [recordsLoading, setRecordsLoading] = useState(false);
   const [items, setItems] = useState<BorrowItem[]>([]);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([]);
-// Add these state variables near your other useState declarations
-const [aiDialogOpen, setAiDialogOpen] = useState(false);
-const [question, setQuestion] = useState("");
-const [loading, setLoading] = useState(false);
-const [reportText, setReportText] = useState("");
-const [reportTable, setReportTable] = useState<{ columns: string[]; rows: string[][] } | null>(null);
+  const [aiDialogOpen, setAiDialogOpen] = useState(false);
+  const [question, setQuestion] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [reportText, setReportText] = useState("");
+  const [reportTable, setReportTable] = useState<{ columns: string[]; rows: string[][] } | null>(null);
+  const [itemType, setItemType] = useState<"all" | "non-consumable" | "consumable">("all");
+  const [codeStatus, setCodeStatus] = useState<'idle' | 'loading' | 'valid' | 'invalid'>('idle');
+const [codeValidation, setCodeValidation] = useState({ isValid: false, message: '' });
   // selected items
-  const [selectedItems, setSelectedItems] = useState<
-    { num: string; name: string; qty: number; available: number }[]
-  >([]);
+  const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([]);
+  const [identifierDialogOpen, setIdentifierDialogOpen] = useState(false);
+  const [currentItem, setCurrentItem] = useState<BorrowItem | null>(null);
+  const [selectedIdentifiers, setSelectedIdentifiers] = useState<string[]>([]);
 
   // dialog + stepper
   const [open, setOpen] = useState(false);
@@ -112,7 +151,14 @@ const [reportTable, setReportTable] = useState<{ columns: string[]; rows: string
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [setupCode, setSetupCode] = useState("");
+
   const [rowsPerPage, setRowsPerPage] = useState(10);
+
+    // Date filter state
+  const [dateFilterAnchor, setDateFilterAnchor] = useState<null | HTMLElement>(null);
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
 
   const handleChangePage = (_: unknown, newPage: number) => {
     setPage(newPage);
@@ -122,18 +168,110 @@ const [reportTable, setReportTable] = useState<{ columns: string[]; rows: string
     setRowsPerPage(parseInt(event.target.value, 10));
     setPage(0);
   };
-// Add this function near your other handler functions
+
+// Update the useEffect to include proper typing
+// Update the useEffect
+useEffect(() => {
+  const fetchSetupData = async () => {
+    if (setupCode.length === 6) {
+      setCodeStatus('loading');
+      try {
+        const response = await axios.get(
+          "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec",
+          {
+            params: {
+              sheet: "pre_setup",
+              action: "read"
+            }
+          }
+        );
+
+        if (response.data.success) {
+          const setupData: string[][] = response.data.data;
+          const foundSetup = setupData.find((row: string[]) => row[0] === setupCode);
+          
+          if (foundSetup) {
+            setRequestForm(prev => ({
+              ...prev,
+              course: foundSetup[1] || "",
+              instructor: foundSetup[2] || "",
+              subject: foundSetup[3] || "",
+              schedule: foundSetup[4] || "",
+              item: foundSetup[5] || ""
+            }));
+            setCodeStatus('valid');
+            setCodeValidation({ isValid: true, message: 'Valid setup code' });
+          } else {
+            setCodeStatus('invalid');
+            setCodeValidation({ isValid: false, message: 'Invalid setup code' });
+          }
+        }
+      } catch (error) {
+        setCodeStatus('invalid');
+        setCodeValidation({ isValid: false, message: 'Error validating code' });
+        console.error("Error fetching setup data:", error);
+      }
+    } else {
+      setCodeStatus('idle');
+      setCodeValidation({ isValid: false, message: '' });
+    }
+  };
+
+  const debounceTimer = setTimeout(fetchSetupData, 500); // Debounce to avoid rapid API calls
+  return () => clearTimeout(debounceTimer);
+}, [setupCode]);
+
+// Add this function to clear the code
+const handleClearCode = () => {
+  setSetupCode("");
+  setCodeStatus('idle');
+  setCodeValidation({ isValid: false, message: '' });
+  setRequestForm(prev => ({
+    ...prev,
+    course: "",
+    instructor: "",
+    subject: "",
+    schedule: "",
+    item: ""
+  }));
+};
+
+const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const value = e.target.value.toUpperCase();
+  setSetupCode(value);
+
+  // If code is cleared, unlock the fields
+  if (value === "") {
+    setRequestForm(prev => ({
+      ...prev,
+      course: "",
+      instructor: "",
+      subject: "",
+      schedule: "",
+      item: ""
+    }));
+  }
+};
+
+
+
+// Update the handleGenerateReport function to handle the type conversion:
 const handleGenerateReport = async () => {
   setLoading(true);
   setReportText("");
   setReportTable(null);
 
   try {
+    // Add "in json" to the question if it's not already there
+    const formattedQuestion = question.toLowerCase().includes("json") 
+      ? question 
+      : `${question} in json`;
+
     const res = await axios.get(WEB_APP_URL, {
       params: {
-        sheet: "report", // or whatever sheet you want to query
-        targetSheet: "group_borrow", // adjust as needed
-        q: question,
+        sheet: "report",
+        targetSheet: "group_borrow",
+        q: formattedQuestion,
       },
     });
 
@@ -141,13 +279,52 @@ const handleGenerateReport = async () => {
 
     if (json.success && json.data) {
       try {
-        const parsed = JSON.parse(json.data);
-        if (parsed.columns && parsed.rows) {
-          setReportTable(parsed);
+        // Remove markdown code block syntax if present and extract only the JSON part
+        let cleanedData = json.data;
+        
+        // Extract JSON from markdown code blocks
+        if (cleanedData.includes('```json')) {
+          const jsonMatch = cleanedData.match(/```json\n([\s\S]*?)\n```/);
+          if (jsonMatch && jsonMatch[1]) {
+            cleanedData = jsonMatch[1].trim();
+          } else {
+            // Fallback: remove all markdown code block markers
+            cleanedData = cleanedData.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+          }
+        }
+        
+        // Remove any non-JSON text that might come after the JSON (like "Limitations:" notes)
+        const jsonStart = cleanedData.indexOf('[');
+        const jsonEnd = cleanedData.lastIndexOf(']') + 1;
+        
+        if (jsonStart !== -1 && jsonEnd !== -1) {
+          cleanedData = cleanedData.substring(jsonStart, jsonEnd);
+        }
+        
+        const parsed = JSON.parse(cleanedData);
+        
+        // Handle both response formats
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Convert array format to table format with proper string conversion
+          const columns = Object.keys(parsed[0]);
+          const rows = parsed.map((item: any) => 
+            Object.values(item).map((value: any) => 
+              value === null || value === undefined ? '' : String(value)
+            )
+          );
+          setReportTable({ columns, rows });
+        } else if (parsed.columns && parsed.rows) {
+          // Handle existing table format - ensure all values are strings
+          const columns = parsed.columns;
+          const rows = parsed.rows.map((row: any[]) => 
+            row.map((cell: any) => cell === null || cell === undefined ? '' : String(cell))
+          );
+          setReportTable({ columns, rows });
         } else {
           setReportText(json.data);
         }
-      } catch {
+      } catch (parseError) {
+        console.error("JSON parse error:", parseError);
         setReportText(json.data);
       }
     } else {
@@ -160,6 +337,51 @@ const handleGenerateReport = async () => {
 
   setLoading(false);
 };
+const handleGeneratePDF = () => {
+  if (!reportTable) return;
+  
+  // Create a printable version of the table
+  const printContent = `
+    <html>
+      <head>
+        <title>Borrow Report</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background-color: #f2f2f2; }
+          h1 { color: #b91c1c; }
+        </style>
+      </head>
+      <body>
+        <h1>Borrow Report</h1>
+        <p>Generated on: ${new Date().toLocaleString()}</p>
+        <table>
+          <thead>
+            <tr>
+              ${reportTable.columns.map(col => `<th>${col}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${reportTable.rows.map(row => `
+              <tr>
+                ${row.map(cell => `<td>${cell}</td>`).join('')}
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </body>
+    </html>
+  `;
+
+  const printWindow = window.open('', '_blank');
+  if (printWindow) {
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+    printWindow.print();
+  }
+};
+
   // fetch borrow records
   const fetchRecords = async () => {
     setRecordsLoading(true);
@@ -201,37 +423,90 @@ const handleGenerateReport = async () => {
     }
   };
 
-  // fetch inventory
+  // fetch inventory (both non-consumable and consumable)
   const fetchItems = async () => {
     setItemsLoading(true);
     try {
-      const res = await axios.get(WEB_APP_URL, {
+      // Fetch non-consumable items
+      const ncRes = await axios.get(WEB_APP_URL, {
         params: { action: "read", sheet: "nc_inventory" },
       });
-      const raw = res.data?.data;
-      if (!raw || raw.length <= 2) {
-        setItems([]);
-        return;
-      }
-
-      const headers = raw[1];
-      const idx = (key: string) => headers.indexOf(key);
-
-      const parsed = raw.slice(2).map((row: any[]) => {
-        const totalQty = parseInt(row[idx("TOTAL_QTY")] ?? "0") || 0;
-        const borrowed = parseInt(row[idx("BORROWED")] ?? "0") || 0;
-        return {
-          num: String(row[idx("NO.")] ?? row[0] ?? ""),
-          equipment_name: String(row[idx("EQUIPMENT_NAME")] ?? row[1] ?? ""),
-          total_qty: totalQty,
-          borrowed,
-          available: Math.max(0, totalQty - borrowed),
-          brand_model: String(row[idx("BRAND_MODEL")] ?? ""),
-          location: String(row[idx("LOCATION")] ?? ""),
-        } as BorrowItem;
+      
+      // Fetch consumable items
+      const cRes = await axios.get(WEB_APP_URL, {
+        params: { action: "read", sheet: "c_inventory" },
       });
 
-      setItems(parsed);
+      const ncRaw = ncRes.data?.data;
+      const cRaw = cRes.data?.data;
+
+      const allItems: BorrowItem[] = [];
+
+      // Process non-consumable items
+      if (ncRaw && ncRaw.length > 2) {
+        const headers = ncRaw[1];
+        const idx = (key: string) => headers.indexOf(key);
+
+        ncRaw.slice(2).forEach((row: any[]) => {
+          const totalQty = parseInt(row[idx("TOTAL_QTY")] ?? "0") || 0;
+          const borrowed = parseInt(row[idx("BORROWED")] ?? "0") || 0;
+          
+          const identifiersRaw = row[idx("IDENTIFIER_NUMBER")] || "";
+          const identifiers = identifiersRaw
+            ? String(identifiersRaw)
+                .split(",")
+                .map((id: string) => id.trim().replace(/^\{|\}$/g, ""))
+            : [];
+
+          const statusesRaw = row[idx("STATUS")] || "";
+          const statuses = statusesRaw
+            ? String(statusesRaw)
+                .split(",")
+                .map((s: string) => s.trim().toLowerCase())
+            : [];
+
+          allItems.push({
+            num: String(row[idx("NO.")] ?? row[0] ?? ""),
+            equipment_name: String(row[idx("EQUIPMENT_NAME")] ?? row[1] ?? ""),
+            total_qty: totalQty,
+            borrowed,
+            available: Math.max(0, totalQty - borrowed),
+            brand_model: String(row[idx("BRAND_MODEL")] ?? ""),
+            location: String(row[idx("LOCATION")] ?? ""),
+            identifier_type: String(row[idx("IDENTIFIER_TYPE")] ?? ""),
+            identifiers,
+            statuses,
+            is_consumable: false
+          });
+        });
+      }
+
+      // Process consumable items
+      if (cRaw && cRaw.length > 2) {
+        const headers = cRaw[1];
+        const idx = (key: string) => headers.indexOf(key);
+
+        cRaw.slice(2).forEach((row: any[]) => {
+          const quantityOpened = parseInt(row[idx("QUANTITY_OPENED")] ?? "0") || 0;
+          const quantityUnopened = parseInt(row[idx("QUANTITY_UNOPENED")] ?? "0") || 0;
+          const totalQty = quantityOpened + quantityUnopened;
+
+          allItems.push({
+            num: String(row[idx("NO.")] ?? row[0] ?? ""),
+            equipment_name: String(row[idx("DESCRIPTION")] ?? row[1] ?? ""),
+            total_qty: totalQty,
+            borrowed: 0,
+            available: totalQty,
+            location: String(row[idx("LOCATION")] ?? ""),
+            description: String(row[idx("DESCRIPTION")] ?? ""),
+            quantity_opened: quantityOpened,
+            quantity_unopened: quantityUnopened,
+            is_consumable: true
+          });
+        });
+      }
+
+      setItems(allItems);
     } catch (err) {
       console.error("fetchItems error:", err);
     } finally {
@@ -247,13 +522,23 @@ const handleGenerateReport = async () => {
   // filter items
   const filteredItems = useMemo(
     () =>
-      items.filter(
-        (it) =>
-          it.equipment_name.toLowerCase().includes(search.toLowerCase()) ||
-          (it.brand_model ?? "").toLowerCase().includes(search.toLowerCase()) ||
-          (it.location ?? "").toLowerCase().includes(search.toLowerCase())
-      ),
-    [items, search]
+      items.filter(item => {
+        // Filter by type
+        if (itemType !== "all") {
+          if (itemType === "non-consumable" && item.is_consumable) return false;
+          if (itemType === "consumable" && !item.is_consumable) return false;
+        }
+
+        // Filter by search
+        return (
+          item.equipment_name.toLowerCase().includes(search.toLowerCase()) ||
+          (item.brand_model ?? "").toLowerCase().includes(search.toLowerCase()) ||
+          (item.location ?? "").toLowerCase().includes(search.toLowerCase()) ||
+          (item.description ?? "").toLowerCase().includes(search.toLowerCase()) ||
+          (item.identifiers?.some(id => id.toLowerCase().includes(search.toLowerCase())) ?? false)
+        );
+      }),
+    [items, search, itemType]
   );
 
   // filter records
@@ -261,33 +546,98 @@ const handleGenerateReport = async () => {
     () =>
       records.filter(
         (r) =>
-          r.course?.toLowerCase().includes(search.toLowerCase()) ||
+          (r.course?.toLowerCase().includes(search.toLowerCase()) ||
           r.group_leader?.toLowerCase().includes(search.toLowerCase()) ||
           r.instructor?.toLowerCase().includes(search.toLowerCase()) ||
-          r.subject?.toLowerCase().includes(search.toLowerCase())
+          r.subject?.toLowerCase().includes(search.toLowerCase())) &&
+          // Date filter
+          (!startDate || !r.date_borrowed || new Date(r.date_borrowed) >= new Date(startDate)) &&
+          (!endDate || !r.date_borrowed || new Date(r.date_borrowed) <= new Date(endDate))
       ),
-    [records, search]
+    [records, search, startDate, endDate]
   );
+  // Apply date filter
+  const applyDateFilter = () => {
+    setDateFilterAnchor(null);
+  };
+
+  // Clear date filter
+  const clearDateFilter = () => {
+    setStartDate("");
+    setEndDate("");
+    setDateFilterAnchor(null);
+  };
+
+
+  // Open identifier selection dialog
+  const handleOpenIdentifierDialog = (item: BorrowItem) => {
+    setCurrentItem(item);
+    setSelectedIdentifiers([]);
+    setIdentifierDialogOpen(true);
+  };
+
+  // Add item with selected identifiers
+  const handleAddWithIdentifiers = () => {
+    if (!currentItem) return;
+
+    const newItem: SelectedItem = {
+      num: currentItem.num,
+      name: currentItem.equipment_name,
+      qty: selectedIdentifiers.length,
+      available: currentItem.available,
+      is_consumable: currentItem.is_consumable || false,
+      selected_identifiers: [...selectedIdentifiers],
+      identifier_type: currentItem.identifier_type
+    };
+
+    setSelectedItems(prev => [...prev, newItem]);
+    setIdentifierDialogOpen(false);
+    setCurrentItem(null);
+    setSelectedIdentifiers([]);
+  };
 
   // update item qty
   const updateItemQty = (
     num: string,
     delta: number,
     available: number,
-    name: string
+    name: string,
+    is_consumable: boolean = false
   ) => {
     setSelectedItems((prev) => {
       const existing = prev.find((i) => i.num === num);
+      
       if (!existing) {
-        if (delta > 0) return [...prev, { num, name, qty: 1, available }];
+        // For non-consumable items with identifiers, open the dialog
+        if (!is_consumable && delta > 0) {
+          const item = items.find(i => i.num === num);
+          if (item && item.identifiers && item.identifiers.length > 0) {
+            handleOpenIdentifierDialog(item);
+            return prev;
+          }
+        }
+        
+        if (delta > 0) return [...prev, { 
+          num, 
+          name, 
+          qty: 1, 
+          available,
+          is_consumable 
+        }];
         return prev;
       }
+      
       const newQty = Math.max(0, Math.min(existing.qty + delta, available));
       if (newQty === 0) {
         return prev.filter((i) => i.num !== num);
       }
       return prev.map((i) => (i.num === num ? { ...i, qty: newQty } : i));
     });
+  };
+
+  // Remove item from cart
+  const removeFromCart = (num: string) => {
+    setSelectedItems(prev => prev.filter(item => item.num !== num));
   };
 
   // stepper nav
@@ -318,6 +668,27 @@ const handleGenerateReport = async () => {
     }
   };
 
+  // Parse item and quantity strings from the database format
+  const parseItemsAndQuantities = (itemStr: string = "", qtyStr: string = "") => {
+    const items: {name: string, qty: number}[] = [];
+    
+    // Parse items in format like: (7-SEGMENT TESTER - CN001, CN002, CN003),(CALCULATOR - CN123)
+    const itemMatches = itemStr.match(/\(([^)]+)\)/g) || [];
+    const qtyMatches = qtyStr.match(/\(([^)]+)\)/g) || [];
+    
+    itemMatches.forEach((itemMatch, index) => {
+      const itemContent = itemMatch.replace(/[()]/g, "").trim();
+      const qtyContent = qtyMatches[index] ? qtyMatches[index].replace(/[()]/g, "").trim() : "0";
+      
+      items.push({
+        name: itemContent,
+        qty: parseInt(qtyContent) || 0
+      });
+    });
+    
+    return items;
+  };
+
   // View Borrow: open dialog and populate the stepper with data
   const handleViewBorrow = (record: BorrowRecord) => {
     setRequestForm({
@@ -333,12 +704,16 @@ const handleGenerateReport = async () => {
       date_borrowed: record.date_borrowed || "",
     });
 
-    const itemsArr = (record.item?.split(",") || []).map((itm, idx) => ({
+    // Parse the items and quantities correctly
+    const parsedItems = parseItemsAndQuantities(record.item, record.quantity);
+    const itemsArr = parsedItems.map((item, idx) => ({
       num: `view-${idx}`,
-      name: itm.replace(/[()]/g, "").trim(),
-      qty: parseInt((record.quantity?.split(",")[idx] || "0").replace(/[()]/g, "")) || 0,
+      name: item.name,
+      qty: item.qty,
       available: 0,
+      is_consumable: false
     }));
+    
     setSelectedItems(itemsArr);
     setActiveStep(2); // jump to summary
     setOpen(true);
@@ -359,11 +734,14 @@ const handleGenerateReport = async () => {
       date_borrowed: record.date_borrowed || "",
     });
 
-    const itemsArr = (record.item?.split(",") || []).map((itm, idx) => ({
+    // Parse the items and quantities correctly
+    const parsedItems = parseItemsAndQuantities(record.item, record.quantity);
+    const itemsArr = parsedItems.map((item, idx) => ({
       num: `edit-${idx}`,
-      name: itm.replace(/[()]/g, "").trim(),
-      qty: parseInt((record.quantity?.split(",")[idx] || "0").replace(/[()]/g, "")) || 0,
+      name: item.name,
+      qty: item.qty,
       available: 999, // allow editing
+      is_consumable: false
     }));
 
     setSelectedItems(itemsArr);
@@ -427,14 +805,27 @@ const handleGenerateReport = async () => {
     setError(null);
   };
 
+  // Format items and quantities for saving to database
+  const formatItemsAndQuantities = (items: SelectedItem[]) => {
+    const itemStr = items.map((s) => {
+      if (s.selected_identifiers && s.selected_identifiers.length > 0) {
+        return `(${s.name} - ${s.selected_identifiers.join(", ")})`;
+      }
+      return `(${s.name})`;
+    }).join(",");
+    
+    const qtyStr = items.map((s) => `(${s.qty})`).join(",");
+    
+    return { itemStr, qtyStr };
+  };
+
   // save borrow
   const handleConfirmBorrow = async () => {
     if (selectedItems.length === 0) return;
     setSaving(true);
     try {
-      const itemStr = selectedItems.map((s) => `(${s.name})`).join(",");
-      const qtyStr = selectedItems.map((s) => `(${s.qty})`).join(",");
-
+      const { itemStr, qtyStr } = formatItemsAndQuantities(selectedItems);
+      
       const action = requestForm.borrow_id ? "update" : "create";
 
       await axios.get(WEB_APP_URL, {
@@ -461,24 +852,29 @@ const handleGenerateReport = async () => {
   // summary calc
   const totalRequestedCount = records.reduce((acc, r) => {
     if (!r.quantity) return acc;
-    const sum = String(r.quantity)
-      .split(",")
-      .map((s) => Number(s.replace(/[()]/g, "").trim() || 0))
-      .reduce((a, b) => a + b, 0);
+    
+    // Parse the quantity string correctly
+    const qtyMatches = r.quantity.match(/\(([^)]+)\)/g) || [];
+    const sum = qtyMatches.reduce((total, qtyMatch) => {
+      const qtyContent = qtyMatch.replace(/[()]/g, "").trim();
+      return total + (parseInt(qtyContent) || 0);
+    }, 0);
+    
     return acc + sum;
   }, 0);
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
-      {/* Summary cards */}      {/* Header */}
-            <Box sx={{ mb: 4 }}>
-              <Typography variant="h4" fontWeight="bold" color="#b91c1c" gutterBottom>
-                Borrow Management
-              </Typography>
-              <Typography variant="body1" color="text.secondary">
-                Manage equipment and consumable inventory
-              </Typography>
-            </Box>
+      {/* Summary cards */}
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h4" fontWeight="bold" color="#b91c1c" gutterBottom>
+          Borrow Management
+        </Typography>
+        <Typography variant="body1" color="text.secondary">
+          Manage equipment and consumable inventory
+        </Typography>
+      </Box>
+      
       <Stack direction={{ xs: "column", md: "row" }} spacing={3} mb={4}>
         <Card sx={{ 
           flex: 1, 
@@ -487,13 +883,13 @@ const handleGenerateReport = async () => {
           display: "flex", 
           alignItems: "center", 
           gap: 2,
-  background: `linear-gradient(135deg, rgba(185,28,28,0.1) 0%, rgba(185,28,28,0.2) 100%)`,
+          background: `linear-gradient(135deg, rgba(185,28,28,0.1) 0%, rgba(185,28,28,0.2) 100%)`,
           boxShadow: "0 4px 20px rgba(0,0,0,0.08)"
         }}>
           <Box sx={{ 
             p: 1.5, 
             borderRadius: "50%", 
-    bgcolor: "rgba(185,28,28,0.1)",
+            bgcolor: "rgba(185,28,28,0.1)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center"
@@ -538,8 +934,8 @@ const handleGenerateReport = async () => {
       </Stack>
 
       {/* Action Bar */}
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={3} justifyContent="space-between" alignItems="center">
-        <Box sx={{ flex: 1, maxWidth: 400 }}>
+<Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={3} justifyContent="space-between" alignItems="center">
+        <Stack direction="row" spacing={1} sx={{ flex: 1, maxWidth: 600 }} alignItems="center">
           <TextField
             placeholder="Search course, leader, instructor, subject..."
             value={search}
@@ -549,8 +945,8 @@ const handleGenerateReport = async () => {
             }}
             variant="outlined"
             size="small"
-            fullWidth
             sx={{
+              flex: 1,
               bgcolor: "background.paper",
               borderRadius: 3,
               "& .MuiOutlinedInput-root": {
@@ -574,7 +970,82 @@ const handleGenerateReport = async () => {
               ),
             }}
           />
-        </Box>
+          
+          {/* Date Filter Button */}
+          <Button
+            variant="outlined"
+            onClick={(e) => setDateFilterAnchor(e.currentTarget)}
+            startIcon={<FilterListIcon />}
+            sx={{
+              borderRadius: 3,
+              textTransform: "none",
+              px: 2,
+              borderColor: "#b91c1c",
+              color: "#b91c1c",
+              "&:hover": {
+                borderColor: "#b91c1c",
+                bgcolor: "rgba(185, 28, 28, 0.04)"
+              }
+            }}
+          >
+            Date Filter
+          </Button>
+
+          {/* Date Filter Popover */}
+          <Popover
+            open={Boolean(dateFilterAnchor)}
+            anchorEl={dateFilterAnchor}
+            onClose={() => setDateFilterAnchor(null)}
+            anchorOrigin={{
+              vertical: 'bottom',
+              horizontal: 'left',
+            }}
+            transformOrigin={{
+              vertical: 'top',
+              horizontal: 'left',
+            }}
+          >
+            <Box sx={{ p: 2, minWidth: 300 }}>
+              <Typography variant="subtitle1" gutterBottom>
+                Filter by Borrow Date
+              </Typography>
+              <Stack spacing={2}>
+                <TextField
+                  label="Start Date"
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  fullWidth
+                />
+                <TextField
+                  label="End Date"
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  fullWidth
+                />
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    variant="contained"
+                    onClick={applyDateFilter}
+                    sx={{ flex: 1 }}
+                  >
+                    Apply
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    onClick={clearDateFilter}
+                    sx={{ flex: 1 }}
+                  >
+                    Clear
+                  </Button>
+                </Stack>
+              </Stack>
+            </Box>
+          </Popover>
+        </Stack>
         
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
           <Button
@@ -608,27 +1079,26 @@ const handleGenerateReport = async () => {
             Delete Selected ({selectedRecordIds.length})
           </Button>
 
-            {/* Add this AI Button */}
-  <Button
-    variant="outlined"
-    color="primary"
-    onClick={() => setAiDialogOpen(true)}
-    sx={{
-      borderRadius: 2,
-      textTransform: "none",
-      px: 3,
-      fontWeight: "bold",
-      borderColor: "#1976d2",
-      color: "#1976d2",
-      "&:hover": {
-        borderColor: "#1565c0",
-        bgcolor: "rgba(25, 118, 210, 0.04)"
-      }
-    }}
-    startIcon={<AutoAwesomeIcon />} // You'll need to import this icon
-  >
-    AI
-  </Button>
+          <Button
+            variant="outlined"
+            color="primary"
+            onClick={() => setAiDialogOpen(true)}
+            sx={{
+              borderRadius: 2,
+              textTransform: "none",
+              px: 3,
+              fontWeight: "bold",
+              borderColor: "#1976d2",
+              color: "#1976d2",
+              "&:hover": {
+                borderColor: "#1565c0",
+                bgcolor: "rgba(25, 118, 210, 0.04)"
+              }
+            }}
+            startIcon={<AutoAwesomeIcon />}
+          >
+            AI Report
+          </Button>
         </Stack>
       </Stack>
 
@@ -740,12 +1210,11 @@ const handleGenerateReport = async () => {
                         <TableCell>{r.schedule}</TableCell>
                         <TableCell>
                           <Chip 
-  label={r.status} 
-  size="small" 
-  color={r.status === "Returned" ? "success" : "error"} 
-  variant={r.status === "Returned" ? "filled" : "outlined"} 
-/>
-
+                            label={r.status} 
+                            size="small" 
+                            color={r.status === "Returned" ? "success" : "error"} 
+                            variant={r.status === "Returned" ? "filled" : "outlined"} 
+                          />
                         </TableCell>
                         <TableCell>
                           <Stack direction="row" spacing={1} justifyContent="center">
@@ -767,10 +1236,10 @@ const handleGenerateReport = async () => {
                                 color="primary"
                                 onClick={() => handleUpdateBorrow(r)}
                                 sx={{
-        bgcolor: "#e3f2fd",
-        "&:hover": { bgcolor: "#90caf9" },
-        p: 1,
-      }}
+                                  bgcolor: "#e3f2fd",
+                                  "&:hover": { bgcolor: "#90caf9" },
+                                  p: 1,
+                                }}
                               >
                                 <EditIcon fontSize="small" />
                               </IconButton>
@@ -781,10 +1250,10 @@ const handleGenerateReport = async () => {
                                 color="error"
                                 onClick={() => handleDeleteBorrow(r.borrow_id!)}
                                 sx={{
-        bgcolor: "#ffebee",
-        "&:hover": { bgcolor: "#f44336", color: "#fff" },
-        p: 1,
-      }}
+                                  bgcolor: "#ffebee",
+                                  "&:hover": { bgcolor: "#f44336", color: "#fff" },
+                                  p: 1,
+                                }}
                               >
                                 <DeleteIcon fontSize="small" />
                               </IconButton>
@@ -854,394 +1323,526 @@ const handleGenerateReport = async () => {
           </Box>
 
           {/* Step 1: Borrower Info */}
-          {activeStep === 0 && (
-            <Stack spacing={2}>
-              <TextField
-                label="Course"
-                value={requestForm.course}
-                onChange={(e) => setRequestForm({ ...requestForm, course: e.target.value })}
-                fullWidth
-                variant="outlined"
-              />
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-                <TextField
-                  label="Group Number"
-                  value={requestForm.group_number}
-                  onChange={(e) => setRequestForm({ ...requestForm, group_number: e.target.value })}
-                  fullWidth
-                />
-                <TextField
-                  label="Group Leader"
-                  value={requestForm.group_leader}
-                  onChange={(e) => setRequestForm({ ...requestForm, group_leader: e.target.value })}
-                  fullWidth
-                />
-              </Stack>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-                <TextField
-                  label="Leader ID"
-                  value={requestForm.group_leader_id}
-                  onChange={(e) => setRequestForm({ ...requestForm, group_leader_id: e.target.value })}
-                  fullWidth
-                />
-                <TextField
-                  label="Instructor"
-                  value={requestForm.instructor}
-                  onChange={(e) => setRequestForm({ ...requestForm, instructor: e.target.value })}
-                  fullWidth
-                />
-              </Stack>
-              <TextField
-                label="Subject"
-                value={requestForm.subject}
-                onChange={(e) => setRequestForm({ ...requestForm, subject: e.target.value })}
-                fullWidth
-              />
-              <TextField
-                label="Schedule"
-                value={requestForm.schedule}
-                onChange={(e) => setRequestForm({ ...requestForm, schedule: e.target.value })}
-                fullWidth
-              />
-
-              {/* Status: only editable if updating */}
-              {requestForm.borrow_id && (
-                <TextField
-                  select
-                  label="Status"
-                  value={requestForm.status}
-                  onChange={(e) => setRequestForm({ ...requestForm, status: e.target.value })}
-                  fullWidth
-                  SelectProps={{ native: true }}
-                >
-                  <option value="Borrowed">Borrowed</option>
-                  <option value="Returned">Returned</option>
-                </TextField>
+ {activeStep === 0 && (
+  <Stack spacing={2}>
+    {/* Code Input Field with Buttons */}
+    <Box sx={{ position: 'relative' }}>
+      <TextField
+        label="Setup Code"
+        value={setupCode}
+        onChange={handleCodeChange}
+        fullWidth
+        variant="outlined"
+        placeholder="Enter 6-character code"
+        inputProps={{ maxLength: 6 }}
+        error={codeStatus === 'invalid'}
+        helperText={codeValidation.message}
+        InputProps={{
+          endAdornment: (
+            <InputAdornment position="end">
+              {setupCode && (
+                <>
+                  {codeStatus === 'loading' && (
+                    <CircularProgress size={20} sx={{ mr: 1 }} />
+                  )}
+                  {codeStatus === 'valid' && (
+                    <IconButton
+                      size="small"
+                      sx={{ color: 'green', mr: 1 }}
+                      disabled
+                    >
+                      <CheckCircleIcon />
+                    </IconButton>
+                  )}
+                  <IconButton
+                    size="small"
+                    sx={{ color: 'red' }}
+                    onClick={handleClearCode}
+                    edge="end"
+                  >
+                    <ClearIcon />
+                  </IconButton>
+                </>
               )}
-            </Stack>
-          )}
+            </InputAdornment>
+          )
+        }}
+      />
+    </Box>
+    
+    <TextField
+      label="Course"
+      value={requestForm.course}
+      onChange={(e) => setRequestForm({ ...requestForm, course: e.target.value })}
+      fullWidth
+      variant="outlined"
+      disabled={codeStatus === 'valid'}
+    />
+    <TextField
+      label="Instructor"
+      value={requestForm.instructor}
+      onChange={(e) => setRequestForm({ ...requestForm, instructor: e.target.value })}
+      fullWidth
+      disabled={codeStatus === 'valid'}
+    />
+    <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+      <TextField
+        label="Subject"
+        value={requestForm.subject}
+        onChange={(e) => setRequestForm({ ...requestForm, subject: e.target.value })}
+        fullWidth
+        disabled={codeStatus === 'valid'}
+      />
+      <TextField
+        label="Schedule"
+        value={requestForm.schedule}
+        onChange={(e) => setRequestForm({ ...requestForm, schedule: e.target.value })}
+        fullWidth
+        disabled={codeStatus === 'valid'}
+      />
+    </Stack>
+    <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+      <TextField
+        label="Group Number"
+        value={requestForm.group_number}
+        onChange={(e) => setRequestForm({ ...requestForm, group_number: e.target.value })}
+        fullWidth
+      />
+      <TextField
+        label="Leader ID"
+        value={requestForm.group_leader_id}
+        onChange={(e) => setRequestForm({ ...requestForm, group_leader_id: e.target.value })}
+        fullWidth
+      />
+      <TextField
+        label="Group Leader"
+        value={requestForm.group_leader}
+        onChange={(e) => setRequestForm({ ...requestForm, group_leader: e.target.value })}
+        fullWidth
+      />
+    </Stack>
+  </Stack>
+)}
 
-          {/* Step 2: Select Items */}
+          {/* Step 2: Item Selection */}
           {activeStep === 1 && (
-            <Stack spacing={2}>
-              <Stack direction="row" spacing={2}>
+            <Box>
+              <Stack direction="row" spacing={2} mb={3} alignItems="center">
+                <FormControl sx={{ minWidth: 180 }}>
+                  <InputLabel>Filter Items</InputLabel>
+                  <Select
+                    value={itemType}
+                    label="Filter Items"
+                    onChange={(e) => setItemType(e.target.value as any)}
+                  >
+                    <MenuItem value="all">All Items</MenuItem>
+                    <MenuItem value="non-consumable">Non-Consumable</MenuItem>
+                    <MenuItem value="consumable">Consumable</MenuItem>
+                  </Select>
+                </FormControl>
+                
                 <TextField
-                  placeholder="Search item..."
+                  placeholder="Search items..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  fullWidth
+                  variant="outlined"
+                  size="small"
+                  sx={{ flex: 1 }}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
-                        <SearchIcon color="action" />
+                        <SearchIcon />
                       </InputAdornment>
                     ),
                   }}
                 />
-                <Button variant="outlined" onClick={() => setSearch("")}>
-                  Clear
-                </Button>
               </Stack>
 
-              {itemsLoading ? (
-                <LinearProgress />
-              ) : (
-                <Paper variant="outlined" sx={{ maxHeight: 400, overflow: 'auto' }}>
-                  <Table size="small" stickyHeader>
-                    <TableHead>
-                      <TableRow sx={{ bgcolor: "grey.50" }}>
-                        <TableCell sx={{ fontWeight: "bold" }}>Item</TableCell>
-                        <TableCell sx={{ fontWeight: "bold" }}>Brand</TableCell>
-                        <TableCell sx={{ fontWeight: "bold" }}>Location</TableCell>
-                        <TableCell sx={{ fontWeight: "bold" }}>Available</TableCell>
-                        <TableCell align="center" sx={{ fontWeight: "bold" }}>Quantity</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {filteredItems.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={5} align="center">
-                            No items found
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        filteredItems.map((it) => {
-                          const sel = selectedItems.find((s) => s.num === it.num);
-                          return (
-                            <TableRow key={it.num} hover>
-                              <TableCell>{it.equipment_name}</TableCell>
-                              <TableCell>{it.brand_model}</TableCell>
-                              <TableCell>{it.location}</TableCell>
-                              <TableCell>
-                                <Chip 
-                                  label={it.available} 
-                                  size="small" 
-                                  color={it.available > 0 ? "success" : "error"}
-                                  variant="outlined"
-                                />
-                              </TableCell>
-                              <TableCell align="center">
-                                <Stack direction="row" alignItems="center" justifyContent="center" spacing={1}>
-                                  <Button
-                                    size="small"
-                                    variant="outlined"
-                                    onClick={() => updateItemQty(it.num, -1, it.available, it.equipment_name)}
-                                    disabled={!sel}
-                                    sx={{ minWidth: 30 }}
-                                  >
-                                    –
-                                  </Button>
-                                  <Typography sx={{ minWidth: 28, textAlign: "center" }}>{sel?.qty ?? 0}</Typography>
-                                  <Button
-                                    size="small"
-                                    variant="outlined"
-                                    onClick={() => updateItemQty(it.num, +1, it.available, it.equipment_name)}
-                                    disabled={it.available <= 0}
-                                    sx={{ minWidth: 30 }}
-                                  >
-                                    +
-                                  </Button>
-                                </Stack>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })
-                      )}
-                    </TableBody>
-                  </Table>
+              {/* Shopping Cart Summary */}
+              {selectedItems.length > 0 && (
+                <Paper sx={{ p: 2, mb: 3, bgcolor: "grey.50" }}>
+                  <Stack direction="row" alignItems="center" spacing={1} mb={1}>
+                    <ShoppingCartIcon color="primary" />
+                    <Typography variant="h6">Selected Items</Typography>
+                    <Chip label={selectedItems.length} color="primary" size="small" />
+                  </Stack>
+                  
+                  <Stack spacing={1}>
+                    {selectedItems.map((item) => (
+                      <Box key={item.num} sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <Box>
+                          <Typography variant="body2" fontWeight="medium">
+                            {item.name}
+                            {item.selected_identifiers && ` (${item.selected_identifiers.join(", ")})`}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {item.is_consumable ? "Consumable" : "Non-Consumable"}
+                          </Typography>
+                        </Box>
+                        
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Typography variant="body2">Qty: {item.qty}</Typography>
+                          <IconButton 
+                            size="small" 
+                            color="error" 
+                            onClick={() => removeFromCart(item.num)}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Stack>
+                      </Box>
+                    ))}
+                  </Stack>
                 </Paper>
               )}
-            </Stack>
+
+              {/* Items List */}
+              <Box sx={{ maxHeight: 400, overflow: "auto" }}>
+                {itemsLoading ? (
+                  <Box sx={{ display: "flex", justifyContent: "center", p: 3 }}>
+                    <CircularProgress size={24} />
+                  </Box>
+                ) : filteredItems.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary" textAlign="center" py={3}>
+                    No items found
+                  </Typography>
+                ) : (
+                  <Stack spacing={2}>
+                    {filteredItems.map((item) => {
+                      const cartItem = selectedItems.find(i => i.num === item.num);
+                      const currentQty = cartItem ? cartItem.qty : 0;
+                      
+                      return (
+                        <Paper key={item.num} sx={{ p: 2 }}>
+                          <Stack direction="row" spacing={2} alignItems="center">
+                            <Box sx={{ flex: 1 }}>
+                              <Typography variant="body1" fontWeight="medium">
+                                {item.equipment_name}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {item.brand_model && `${item.brand_model} • `}
+                                {item.location && `Location: ${item.location} • `}
+                                Available: {item.available}
+                                {item.is_consumable && " • Consumable"}
+                              </Typography>
+                              
+                              {item.identifiers && item.identifiers.length > 0 && (
+                                <Typography variant="caption" display="block" color="text.secondary">
+                                  Identifiers: {item.identifiers.join(", ")}
+                                </Typography>
+                              )}
+                            </Box>
+                            
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <IconButton
+                                size="small"
+                                onClick={() => updateItemQty(
+                                  item.num, 
+                                  -1, 
+                                  item.available, 
+                                  item.equipment_name,
+                                  item.is_consumable
+                                )}
+                                disabled={currentQty === 0}
+                              >
+                                -
+                              </IconButton>
+                              
+                              <Typography>{currentQty}</Typography>
+                              
+                              <IconButton
+                                size="small"
+                                onClick={() => updateItemQty(
+                                  item.num, 
+                                  1, 
+                                  item.available, 
+                                  item.equipment_name,
+                                  item.is_consumable
+                                )}
+                                disabled={currentQty >= item.available}
+                              >
+                                +
+                              </IconButton>
+                            </Stack>
+                          </Stack>
+                        </Paper>
+                      );
+                    })}
+                  </Stack>
+                )}
+              </Box>
+            </Box>
           )}
 
           {/* Step 3: Confirmation */}
           {activeStep === 2 && (
-            <Stack spacing={2}>
-              <Card sx={{ p: 2, bgcolor: "grey.50" }}>
-                <Typography fontWeight={700} color="#b91c1c" gutterBottom>
-                  {requestForm.course} — {requestForm.subject}
-                </Typography>
-                <Typography variant="body2" color="#b91c1c">
-                  Group {requestForm.group_number} • Leader: {requestForm.group_leader} ({requestForm.group_leader_id})
-                </Typography>
-                <Typography variant="caption" color="#b91c1c" display="block">
-                  Instructor: {requestForm.instructor}
-                </Typography>
-                <Typography variant="caption" color="#b91c1c" display="block">
-                  Schedule: {requestForm.schedule}
-                </Typography>
-                <Typography variant="caption" color="#b91c1c" display="block">
-                  Date Borrowed: {requestForm.date_borrowed
-                    ? new Date(requestForm.date_borrowed).toLocaleString()
-                    : "-"}
-                </Typography>
-              </Card>
-
-              <Card sx={{ p: 2, bgcolor: "grey.50" }}>
-                <Typography fontWeight={700} mb={1} color="#b91c1c">
-                  Selected Items
-                </Typography>
-                {selectedItems.length === 0 ? (
-                  <Typography color="text.secondary">No items selected</Typography>
-                ) : (
-                  selectedItems.map((s) => (
-                    <Box key={s.num} mb={1} display="flex" justifyContent="space-between" alignItems="center">
-                      <Box>
-                        <Typography fontWeight="medium">{s.name}</Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Qty: {s.qty}
-                        </Typography>
-                      </Box>
-                      <Chip label={`x${s.qty}`} size="small" color="error" />
-                    </Box>
-                  ))
-                )}
-              </Card>
-
-              {/* Status Selection */}
-              {requestForm.borrow_id && (
-                <TextField
-                  select
-                  label="Status"
-                  value={requestForm.status}
-                  onChange={(e) => setRequestForm({ ...requestForm, status: e.target.value })}
-                  fullWidth
-                  SelectProps={{ native: true }}
-                >
-                  <option value="Borrowed">Borrowed</option>
-                  <option value="Returned">Returned</option>
-                </TextField>
-              )}
-            </Stack>
-          )}
-
-          {error && (
-            <Box mt={2} p={1.5} bgcolor="error.light" borderRadius={2}>
-              <Typography color="white">{error}</Typography>
+            <Box>
+              <Typography variant="h6" gutterBottom>
+                Borrow Request Summary
+              </Typography>
+              
+              <Paper sx={{ p: 2, mb: 3, bgcolor: "grey.50" }}>
+                <Typography variant="subtitle2" gutterBottom>Borrower Information</Typography>
+                <Stack spacing={1}>
+                  <Box sx={{ display: "flex" }}>
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>Course:</Typography>
+                    <Typography variant="body2" fontWeight="medium">{requestForm.course}</Typography>
+                  </Box>
+                  <Box sx={{ display: "flex" }}>
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>Group:</Typography>
+                    <Typography variant="body2" fontWeight="medium">{requestForm.group_number}</Typography>
+                  </Box>
+                  <Box sx={{ display: "flex" }}>
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>Leader:</Typography>
+                    <Typography variant="body2" fontWeight="medium">{requestForm.group_leader}</Typography>
+                  </Box>
+                  <Box sx={{ display: "flex" }}>
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>Leader ID:</Typography>
+                    <Typography variant="body2" fontWeight="medium">{requestForm.group_leader_id}</Typography>
+                  </Box>
+                  <Box sx={{ display: "flex" }}>
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>Instructor:</Typography>
+                    <Typography variant="body2" fontWeight="medium">{requestForm.instructor}</Typography>
+                  </Box>
+                  <Box sx={{ display: "flex" }}>
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>Subject:</Typography>
+                    <Typography variant="body2" fontWeight="medium">{requestForm.subject}</Typography>
+                  </Box>
+                  <Box sx={{ display: "flex" }}>
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>Schedule:</Typography>
+                    <Typography variant="body2" fontWeight="medium">{requestForm.schedule}</Typography>
+                  </Box>
+                </Stack>
+              </Paper>
+              
+              <Paper sx={{ p: 2, bgcolor: "grey.50" }}>
+                <Typography variant="subtitle2" gutterBottom>Items to Borrow</Typography>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Item</TableCell>
+                      <TableCell align="right">Quantity</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {selectedItems.map((item) => (
+                      <TableRow key={item.num}>
+                        <TableCell>
+                          {item.name}
+                          {item.selected_identifiers && ` (${item.selected_identifiers.join(", ")})`}
+                          {item.is_consumable && " (Consumable)"}
+                        </TableCell>
+                        <TableCell align="right">{item.qty}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Paper>
             </Box>
           )}
 
-          <Stack direction="row" justifyContent="space-between" mt={3}>
-            <Button 
-              disabled={activeStep === 0} 
+          {error && (
+            <Typography color="error" sx={{ mt: 2 }}>
+              {error}
+            </Typography>
+          )}
+
+          {/* Stepper Navigation */}
+          <Box sx={{ display: "flex", justifyContent: "space-between", mt: 3 }}>
+            <Button
               onClick={handleBack}
-              variant="outlined"
+              disabled={activeStep === 0}
+              sx={{ borderRadius: 2 }}
             >
               Back
             </Button>
-            {activeStep < steps.length - 1 ? (
+
+            {activeStep === steps.length - 1 ? (
               <Button
                 variant="contained"
-                sx={{ 
-                  bgcolor: "#b91c1c", 
+                onClick={handleConfirmBorrow}
+                disabled={saving}
+                sx={{
+                  bgcolor: "#b91c1c",
                   "&:hover": { bgcolor: "#b91c1c.dark" },
-                  px: 3
+                  borderRadius: 2,
+                  minWidth: 120,
                 }}
-                onClick={handleNext}
               >
-                Next
+                {saving ? <CircularProgress size={24} /> : "Confirm"}
               </Button>
             ) : (
               <Button
                 variant="contained"
-                sx={{ 
-                  bgcolor: "#b91c1c", 
-                  "&:hover": { bgcolor: "#b91c1c" },
-                  px: 3
+                onClick={handleNext}
+                sx={{
+                  bgcolor: "#b91c1c",
+                  "&:hover": { bgcolor: "#b91c1c.dark" },
+                  borderRadius: 2,
+                  minWidth: 120,
                 }}
-                                onClick={handleConfirmBorrow}
-                disabled={saving}
               >
-                {saving ? "Saving..." : "Confirm"}
+                Next
               </Button>
             )}
-          </Stack>
+          </Box>
         </DialogContent>
       </Dialog>
-<Dialog
-  open={aiDialogOpen}
+
+      {/* Identifier Selection Dialog */}
+      <Dialog 
+        open={identifierDialogOpen} 
+        onClose={() => setIdentifierDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          Select Identifiers for {currentItem?.equipment_name}
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Available identifiers (select up to {currentItem?.available}):
+          </Typography>
+          
+          <Stack spacing={2} sx={{ mt: 2, maxHeight: 300, overflow: "auto" }}>
+            {currentItem?.identifiers?.map((identifier) => (
+              <Box 
+                key={identifier} 
+                sx={{ 
+                  display: "flex", 
+                  alignItems: "center",
+                  p: 1,
+                  borderRadius: 1,
+                  bgcolor: selectedIdentifiers.includes(identifier) 
+                    ? alpha(theme.palette.primary.main, 0.1) 
+                    : "transparent",
+                  cursor: "pointer",
+                  "&:hover": {
+                    bgcolor: alpha(theme.palette.primary.main, 0.05)
+                  }
+                }}
+                onClick={() => {
+                  if (selectedIdentifiers.includes(identifier)) {
+                    setSelectedIdentifiers(prev => prev.filter(id => id !== identifier));
+                  } else if (selectedIdentifiers.length < (currentItem?.available || 0)) {
+                    setSelectedIdentifiers(prev => [...prev, identifier]);
+                  }
+                }}
+              >
+                <Checkbox
+                  checked={selectedIdentifiers.includes(identifier)}
+                  onChange={(e) => {
+                    if (e.target.checked && selectedIdentifiers.length < (currentItem?.available || 0)) {
+                      setSelectedIdentifiers(prev => [...prev, identifier]);
+                    } else if (!e.target.checked) {
+                      setSelectedIdentifiers(prev => prev.filter(id => id !== identifier));
+                    }
+                  }}
+                />
+                <Typography variant="body2">{identifier}</Typography>
+              </Box>
+            ))}
+          </Stack>
+          
+          <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 3, gap: 1 }}>
+            <Button onClick={() => setIdentifierDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="contained" 
+              onClick={handleAddWithIdentifiers}
+              disabled={selectedIdentifiers.length === 0}
+            >
+              Add {selectedIdentifiers.length} Item(s)
+            </Button>
+          </Box>
+        </DialogContent>
+      </Dialog>
+
+      {/* AI Dialog */}
+      <Dialog 
+  open={aiDialogOpen} 
   onClose={() => setAiDialogOpen(false)}
-  maxWidth="lg"
+  maxWidth="md"
   fullWidth
-  PaperProps={{
-    sx: {
-      borderRadius: 3,
-      overflow: 'hidden',
-      boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
-    }
-  }}
-  // Make dialog draggable
-  onMouseDown={(e) => {
-    const target = e.target as HTMLElement;
-    if (target.closest('.MuiDialogTitle-root')) {
-      const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
-      if (dialog) {
-        dialog.style.cursor = 'move';
-      }
-    }
-  }}
-  onMouseUp={() => {
-    const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
-    if (dialog) {
-      dialog.style.cursor = '';
-    }
-  }}
 >
-  <DialogTitle 
-    sx={{ 
-      bgcolor: "#b91c1c", 
-      color: "white", 
-      fontWeight: "bold",
-      cursor: 'move',
-      display: 'flex',
-      alignItems: 'center',
-      gap: 1
-    }}
-  >
-    <AutoAwesomeIcon />
-    Ask AI
+  <DialogTitle>
+    <Stack direction="row" spacing={1} alignItems="center">
+      <AutoAwesomeIcon color="primary" />
+      <Typography variant="h6">AI Report</Typography>
+    </Stack>
   </DialogTitle>
-  
-  <DialogContent sx={{ p: 3, bgcolor: 'background.default' }}>
-    <Stack spacing={3}>
+  <DialogContent dividers>
+    <Typography variant="body2" color="text.secondary" gutterBottom>
+      Ask questions about borrow records, inventory status, or generate reports.
+    </Typography>
+    
+    <Stack spacing={2} sx={{ mt: 2 }}>
       <TextField
         multiline
-        rows={4}
-        placeholder='Ask: e.g. "List all students who borrowed an oscilloscope this month"'
+        rows={3}
+        placeholder="e.g., Show me all borrow requests for ECE students this month"
         value={question}
         onChange={(e) => setQuestion(e.target.value)}
-        variant="outlined"
         fullWidth
-        sx={{
-          '& .MuiOutlinedInput-root': {
-            borderRadius: 2,
-            bgcolor: 'white'
-          }
-        }}
+        variant="outlined"
       />
       
       <Button
         variant="contained"
         onClick={handleGenerateReport}
         disabled={loading || !question.trim()}
-        sx={{
-          bgcolor: "#b91c1c",
-          "&:hover": { bgcolor: "#b91c1c.dark" },
-          borderRadius: 2,
-          py: 1.5,
-          fontWeight: "bold",
-          textTransform: "none"
-        }}
+        startIcon={loading ? <CircularProgress size={20} /> : <AutoAwesomeIcon />}
       >
-        {loading ? <CircularProgress size={24} /> : "Ask"}
+        {loading ? "Generating..." : "Generate Report"}
       </Button>
-
-      {/* Results */}
-      {reportText && (
-        <Card sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 2 }}>
-          <Typography variant="h6" color="#b91c1c" gutterBottom>
-            AI Answer Preview:
-          </Typography>
-          <Paper variant="outlined" sx={{ p: 2, bgcolor: 'white', borderRadius: 2 }}>
-            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-              {reportText}
-            </Typography>
-          </Paper>
-        </Card>
-      )}
-
-      {reportTable && (
-        <Card sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 2 }}>
-          <Typography variant="h6" color="#b91c1c" gutterBottom>
-            AI Answer (Table):
-          </Typography>
-          <TableContainer component={Paper} variant="outlined">
-            <Table size="small">
-              <TableHead>
-                <TableRow sx={{ bgcolor: 'grey.100' }}>
-                  {reportTable.columns.map((col, idx) => (
-                    <TableCell key={idx} sx={{ fontWeight: 'bold' }}>
-                      {col}
-                    </TableCell>
+    </Stack>
+    
+    {reportText && (
+      <Paper sx={{ p: 2, mt: 3, bgcolor: "grey.50" }}>
+        <Typography variant="body2" whiteSpace="pre-wrap">
+          {reportText}
+        </Typography>
+      </Paper>
+    )}
+    
+    {reportTable && (
+      <Box sx={{ mt: 3 }}>
+        <Button
+          variant="outlined"
+          startIcon={<PictureAsPdfIcon />}
+          onClick={handleGeneratePDF}
+          sx={{ mb: 2 }}
+        >
+          Generate PDF
+        </Button>
+        <Typography variant="subtitle2" gutterBottom>
+          Report Results:
+        </Typography>
+        <TableContainer component={Paper} sx={{ maxHeight: 400 }}>
+          <Table size="small" stickyHeader>
+            <TableHead>
+              <TableRow>
+                {reportTable.columns.map((col, index) => (
+                  <TableCell key={index} sx={{ fontWeight: "bold" }}>
+                    {col}
+                  </TableCell>
+                ))}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {reportTable.rows.map((row, rowIndex) => (
+                <TableRow key={rowIndex}>
+                  {row.map((cell, cellIndex) => (
+                    <TableCell key={cellIndex}>{cell}</TableCell>
                   ))}
                 </TableRow>
-              </TableHead>
-              <TableBody>
-                {reportTable.rows.map((row, rIdx) => (
-                  <TableRow key={rIdx} hover>
-                    {row.map((cell, cIdx) => (
-                      <TableCell key={cIdx}>
-                        {cell}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Card>
-      )}
-    </Stack>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
+    )}
   </DialogContent>
 </Dialog>
     </Container>

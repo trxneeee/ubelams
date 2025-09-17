@@ -67,6 +67,7 @@ export default function Login() {
           role: user[roleIndex],
           firstname: user[firstnameIndex],
           lastname: user[lastnameIndex],
+          password: user[passwordIndex]
         };
         localStorage.setItem("user", JSON.stringify(loggedInUser));
         setSuccess("✅ Login successful!");

@@ -6,6 +6,7 @@ import Inventory2Icon from "@mui/icons-material/Inventory2";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { keyframes } from "@mui/system";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import {
   Box,
   Button,
@@ -201,17 +202,23 @@ const [reportTable, setReportTable] = useState<{ columns: string[]; rows: string
     stock_alert: "5"
   };
 // Add this function near your other handler functions
+// Update the handleGenerateReport function to handle responses with additional text:
 const handleGenerateReport = async () => {
-  setLoading2(true);
+  setLoading(true);
   setReportText("");
   setReportTable(null);
 
   try {
+    // Add "in json" to the question if it's not already there
+    const formattedQuestion = question.toLowerCase().includes("json") 
+      ? question 
+      : `${question} in json`;
+
     const res = await axios.get(API_URL, {
       params: {
-        sheet: "report", // or whatever sheet you want to query
-        targetSheet: "non_consumable_inventory", // adjust as needed
-        q: question,
+        sheet: "report",
+        targetSheet: "non_consumable_inventory",
+        q: formattedQuestion,
       },
     });
 
@@ -219,21 +226,104 @@ const handleGenerateReport = async () => {
 
     if (json.success && json.data) {
       try {
-        const parsed = JSON.parse(json.data);
-        if (parsed.columns && parsed.rows) {
-          setReportTable(parsed);
+        // Remove markdown code block syntax if present and extract only the JSON part
+        let cleanedData = json.data;
+        
+        // Extract JSON from markdown code blocks
+        if (cleanedData.includes('```json')) {
+          const jsonMatch = cleanedData.match(/```json\n([\s\S]*?)\n```/);
+          if (jsonMatch && jsonMatch[1]) {
+            cleanedData = jsonMatch[1].trim();
+          } else {
+            // Fallback: remove all markdown code block markers
+            cleanedData = cleanedData.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+          }
+        }
+        
+        // Remove any non-JSON text that might come after the JSON (like "Limitations:" notes)
+        const jsonStart = cleanedData.indexOf('[');
+        const jsonEnd = cleanedData.lastIndexOf(']') + 1;
+        
+        if (jsonStart !== -1 && jsonEnd !== -1) {
+          cleanedData = cleanedData.substring(jsonStart, jsonEnd);
+        }
+        
+        const parsed = JSON.parse(cleanedData);
+        
+        // Handle both response formats
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Convert array format to table format with proper string conversion
+          const columns = Object.keys(parsed[0]);
+          const rows = parsed.map((item: any) => 
+            Object.values(item).map((value: any) => 
+              value === null || value === undefined ? '' : String(value)
+            )
+          );
+          setReportTable({ columns, rows });
+        } else if (parsed.columns && parsed.rows) {
+          // Handle existing table format - ensure all values are strings
+          const columns = parsed.columns;
+          const rows = parsed.rows.map((row: any[]) => 
+            row.map((cell: any) => cell === null || cell === undefined ? '' : String(cell))
+          );
+          setReportTable({ columns, rows });
         } else {
           setReportText(json.data);
         }
-      } catch {
+      } catch (parseError) {
+        console.error("JSON parse error:", parseError);
         setReportText(json.data);
       }
-    }
+    } 
   } catch (err) {
     console.error(err);
   }
 
-  setLoading2(false);
+  setLoading(false);
+};
+const handleGeneratePDF = () => {
+  if (!reportTable) return;
+  
+  // Create a printable version of the table
+  const printContent = `
+    <html>
+      <head>
+        <title>Inventory Report</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background-color: #f2f2f2; }
+          h1 { color: #b91c1c; }
+        </style>
+      </head>
+      <body>
+        <h1>Inventory Report</h1>
+        <p>Generated on: ${new Date().toLocaleString()}</p>
+        <table>
+          <thead>
+            <tr>
+              ${reportTable.columns.map(col => `<th>${col}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${reportTable.rows.map(row => `
+              <tr>
+                ${row.map(cell => `<td>${cell}</td>`).join('')}
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </body>
+    </html>
+  `;
+
+  const printWindow = window.open('', '_blank');
+  if (printWindow) {
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+    printWindow.print();
+  }
 };
 
   const handleEditClick = (item: InventoryItem | CInventoryItem) => {
@@ -819,7 +909,7 @@ const handleGenerateReport = async () => {
     }}
     startIcon={<AutoAwesomeIcon />} // You'll need to import this icon
   >
-    AI
+    AI Report
   </Button>
         </Stack>
       </Stack>
@@ -1941,130 +2031,89 @@ const handleGenerateReport = async () => {
   </DialogActions>
 </Dialog>
 
-<Dialog
-  open={aiDialogOpen}
+    <Dialog 
+  open={aiDialogOpen} 
   onClose={() => setAiDialogOpen(false)}
-  maxWidth="lg"
+  maxWidth="md"
   fullWidth
-  PaperProps={{
-    sx: {
-      borderRadius: 3,
-      overflow: 'hidden',
-      boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
-    }
-  }}
-  // Make dialog draggable
-  onMouseDown={(e) => {
-    const target = e.target as HTMLElement;
-    if (target.closest('.MuiDialogTitle-root')) {
-      const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
-      if (dialog) {
-        dialog.style.cursor = 'move';
-      }
-    }
-  }}
-  onMouseUp={() => {
-    const dialog = document.querySelector('[role="dialog"]') as HTMLElement;
-    if (dialog) {
-      dialog.style.cursor = '';
-    }
-  }}
 >
-  <DialogTitle 
-    sx={{ 
-      bgcolor: "#b91c1c", 
-      color: "white", 
-      fontWeight: "bold",
-      cursor: 'move',
-      display: 'flex',
-      alignItems: 'center',
-      gap: 1
-    }}
-  >
-    <AutoAwesomeIcon />
-    Ask AI
+  <DialogTitle>
+    <Stack direction="row" spacing={1} alignItems="center">
+      <AutoAwesomeIcon color="primary" />
+      <Typography variant="h6">AI Report</Typography>
+    </Stack>
   </DialogTitle>
-  
-  <DialogContent sx={{ p: 3, bgcolor: 'background.default' }}>
-    <Stack spacing={3}>
+  <DialogContent dividers>
+    <Typography variant="body2" color="text.secondary" gutterBottom>
+      Ask questions about borrow records, inventory status, or generate reports.
+    </Typography>
+    
+    <Stack spacing={2} sx={{ mt: 2 }}>
       <TextField
         multiline
-        rows={4}
-        placeholder='Ask: e.g. "List all students who borrowed an oscilloscope this month"'
+        rows={3}
+        placeholder="e.g., Show me all borrow requests for ECE students this month"
         value={question}
         onChange={(e) => setQuestion(e.target.value)}
-        variant="outlined"
         fullWidth
-        sx={{
-          '& .MuiOutlinedInput-root': {
-            borderRadius: 2,
-            bgcolor: 'white'
-          }
-        }}
+        variant="outlined"
       />
       
       <Button
         variant="contained"
         onClick={handleGenerateReport}
-        disabled={loading2 || !question.trim()}
-        sx={{
-          bgcolor: "#b91c1c",
-          "&:hover": { bgcolor: "#b91c1c.dark" },
-          borderRadius: 2,
-          py: 1.5,
-          fontWeight: "bold",
-          textTransform: "none"
-        }}
+        disabled={loading || !question.trim()}
+        startIcon={loading ? <CircularProgress size={20} /> : <AutoAwesomeIcon />}
       >
-        {loading2 ? <CircularProgress size={24} /> : "Ask"}
+        {loading ? "Generating..." : "Generate Report"}
       </Button>
-
-      {/* Results */}
-      {reportText && (
-        <Card sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 2 }}>
-          <Typography variant="h6" color="#b91c1c" gutterBottom>
-            AI Answer Preview:
-          </Typography>
-          <Paper variant="outlined" sx={{ p: 2, bgcolor: 'white', borderRadius: 2 }}>
-            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-              {reportText}
-            </Typography>
-          </Paper>
-        </Card>
-      )}
-
-      {reportTable && (
-        <Card sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 2 }}>
-          <Typography variant="h6" color="#b91c1c" gutterBottom>
-            AI Answer (Table):
-          </Typography>
-          <TableContainer component={Paper} variant="outlined">
-            <Table size="small">
-              <TableHead>
-                <TableRow sx={{ bgcolor: 'grey.100' }}>
-                  {reportTable.columns.map((col, idx) => (
-                    <TableCell key={idx} sx={{ fontWeight: 'bold' }}>
-                      {col}
-                    </TableCell>
+    </Stack>
+    
+    {reportText && (
+      <Paper sx={{ p: 2, mt: 3, bgcolor: "grey.50" }}>
+        <Typography variant="body2" whiteSpace="pre-wrap">
+          {reportText}
+        </Typography>
+      </Paper>
+    )}
+    
+    {reportTable && (
+      <Box sx={{ mt: 3 }}>
+        <Button
+          variant="outlined"
+          startIcon={<PictureAsPdfIcon />}
+          onClick={handleGeneratePDF}
+          sx={{ mb: 2 }}
+        >
+          Generate PDF
+        </Button>
+        <Typography variant="subtitle2" gutterBottom>
+          Report Results:
+        </Typography>
+        <TableContainer component={Paper} sx={{ maxHeight: 400 }}>
+          <Table size="small" stickyHeader>
+            <TableHead>
+              <TableRow>
+                {reportTable.columns.map((col, index) => (
+                  <TableCell key={index} sx={{ fontWeight: "bold" }}>
+                    {col}
+                  </TableCell>
+                ))}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {reportTable.rows.map((row, rowIndex) => (
+                <TableRow key={rowIndex}>
+                  {row.map((cell, cellIndex) => (
+                    <TableCell key={cellIndex}>{cell}</TableCell>
                   ))}
                 </TableRow>
-              </TableHead>
-              <TableBody>
-                {reportTable.rows.map((row, rIdx) => (
-                  <TableRow key={rIdx} hover>
-                    {row.map((cell, cIdx) => (
-                      <TableCell key={cIdx}>
-                        {cell}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Card>
-      )}
-    </Stack>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
+    )}
   </DialogContent>
 </Dialog>
 

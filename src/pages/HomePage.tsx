@@ -29,6 +29,7 @@ interface User {
   role: string;
   firstname: string;
   lastname: string;
+  password: string;
 }
 
 interface DashboardStats {
