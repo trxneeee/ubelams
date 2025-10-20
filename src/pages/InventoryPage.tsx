@@ -7,6 +7,7 @@ import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { keyframes } from "@mui/system";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
+import FilterListIcon from "@mui/icons-material/FilterList";
 import {
   Box,
   Button,
@@ -39,18 +40,22 @@ import {
   InputAdornment,
   CircularProgress,
   Backdrop,
+  FormControl,
+  Select,
+  MenuItem,
+  InputLabel
 } from "@mui/material";
 import axios from "axios";
 import { useEffect, useState } from "react";
 import Loader from "../components/Loader";
 import { useSearchParams } from "react-router-dom";
 import SearchIcon from "@mui/icons-material/Search";
-
+import AddIcon from '@mui/icons-material/Add';
 const API_URL =
   "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
-
+const API_BASE_URL = "https://elams-server.onrender.com/api";
   const user = JSON.parse(localStorage.getItem("user") || "{}");
-  const userRole = user?.role || "";
+  const userRole = user?.role || "Custodian";
 
 interface InventoryItem {
   num: string;
@@ -89,8 +94,24 @@ interface CInventoryItem {
   stock_alert: string;
 }
 
+interface ReportField {
+  field: string;
+  label: string;
+  type: 'string' | 'number' | 'date';
+}
+
+interface ReportFilter {
+  field: string;
+  operator: 'equals' | 'contains' | 'greaterThan' | 'lessThan' | 'greaterThanOrEqual' | 'lessThanOrEqual';
+  value: string;
+}
+
 const InventoryPage = () => {
   const theme = useTheme();
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+const [selectedFields, setSelectedFields] = useState<string[]>([]);
+const [reportFilters, setReportFilters] = useState<ReportFilter[]>([]);
+const [availableFields, setAvailableFields] = useState<ReportField[]>([]);
   const [editing, setEditing] = useState(false);
   const [viewing, setViewing] = useState(false);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -102,13 +123,13 @@ const InventoryPage = () => {
   const [lowStockSearch, setLowStockSearch] = useState("");
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [searchParams, setSearchParams] = useSearchParams();
+  const [sortBy, setSortBy] = useState("");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const queryType = searchParams.get("stock"); 
   // Add these state variables near your other useState declarations
 const [aiDialogOpen, setAiDialogOpen] = useState(false);
 const [question, setQuestion] = useState("");
-const [loading2, setLoading2] = useState(false);
 const [reportText, setReportText] = useState("");
 const [reportTable, setReportTable] = useState<{ columns: string[]; rows: string[][] } | null>(null);
   const handleChangePage = (_: unknown, newPage: number) => {
@@ -152,6 +173,148 @@ const [reportTable, setReportTable] = useState<{ columns: string[]; rows: string
     inhouse_outsourced: "",
     month: ""
   });
+
+  const getAvailableFields = (): ReportField[] => {
+  if (itemType === "Non-Consumable") {
+    return [
+      { field: 'equipment_name', label: 'Equipment Name', type: 'string' },
+      { field: 'brand_model', label: 'Brand/Model', type: 'string' },
+      { field: 'facility', label: 'Facility', type: 'string' },
+      { field: 'location', label: 'Location', type: 'string' },
+      { field: 'total_qty', label: 'Total Quantity', type: 'number' },
+      { field: 'borrowed', label: 'Borrowed', type: 'number' },
+      { field: 'soft_hard', label: 'Manual Type', type: 'string' },
+      { field: 'bat_type', label: 'Battery Type', type: 'string' },
+      { field: 'bat_qty', label: 'Battery Quantity', type: 'number' },
+      { field: 'identifier_type', label: 'Identifier Type', type: 'string' },
+      { field: 'yes_or_no', label: 'Has Maintenance', type: 'string' },
+      { field: 'preventive_or_calibration', label: 'Maintenance Type', type: 'string' },
+      { field: 'inhouse_outsourced', label: 'Service Type', type: 'string' },
+      { field: 'month', label: 'Maintenance Month', type: 'string' }
+    ];
+  } else {
+    return [
+      { field: 'description', label: 'Description', type: 'string' },
+      { field: 'location', label: 'Location', type: 'string' },
+      { field: 'quantity_opened', label: 'Quantity Opened', type: 'number' },
+      { field: 'quantity_unopened', label: 'Quantity Unopened', type: 'number' },
+      { field: 'quantity_on_order', label: 'Quantity On Order', type: 'number' },
+      { field: 'remarks', label: 'Remarks', type: 'string' },
+      { field: 'experiment', label: 'Experiment', type: 'string' },
+      { field: 'subject', label: 'Subject', type: 'string' },
+      { field: 'date_issued', label: 'Date Issued', type: 'date' },
+      { field: 'issuance_no', label: 'Issuance No.', type: 'string' },
+      { field: 'stock_alert', label: 'Stock Alert', type: 'number' }
+    ];
+  }
+};
+
+// Add this useEffect to update available fields when item type changes
+useEffect(() => {
+  setAvailableFields(getAvailableFields());
+  setSelectedFields([]);
+  setReportFilters([]);
+}, [itemType]);
+
+// Add this function to handle field selection
+const handleFieldSelection = (field: string) => {
+  setSelectedFields(prev => 
+    prev.includes(field) 
+      ? prev.filter(f => f !== field)
+      : [...prev, field]
+  );
+};
+
+// Add this function to add a new filter
+const addFilter = () => {
+  setReportFilters(prev => [...prev, { field: '', operator: 'equals', value: '' }]);
+};
+
+// Add this function to remove a filter
+const removeFilter = (index: number) => {
+  setReportFilters(prev => prev.filter((_, i) => i !== index));
+};
+
+// Add this function to update a filter
+const updateFilter = (index: number, updates: Partial<ReportFilter>) => {
+  setReportFilters(prev => prev.map((filter, i) => 
+    i === index ? { ...filter, ...updates } : filter
+  ));
+};
+
+// Add this function to generate the custom report
+const generateCustomReport = () => {
+  const data = itemType === "Non-Consumable" ? inventory : cinventory;
+  
+  // Apply filters
+  let filteredData = data.filter(item => {
+    return reportFilters.every(filter => {
+      if (!filter.field || !filter.value) return true;
+      
+      const fieldValue = item[filter.field as keyof typeof item];
+      const stringValue = String(fieldValue || '').toLowerCase();
+      const numValue = Number(fieldValue) || 0;
+      const filterValue = filter.value.toLowerCase();
+      const numFilterValue = Number(filter.value) || 0;
+      
+      switch (filter.operator) {
+        case 'equals':
+          return stringValue === filterValue;
+        case 'contains':
+          return stringValue.includes(filterValue);
+        case 'greaterThan':
+          return numValue > numFilterValue;
+        case 'lessThan':
+          return numValue < numFilterValue;
+        case 'greaterThanOrEqual':
+          return numValue >= numFilterValue;
+        case 'lessThanOrEqual':
+          return numValue <= numFilterValue;
+        default:
+          return true;
+      }
+    });
+  });
+
+  // Select only chosen fields
+  const columns = selectedFields.map(field => {
+    const fieldInfo = availableFields.find(f => f.field === field);
+    return fieldInfo?.label || field;
+  });
+
+  const rows = filteredData.map(item => 
+    selectedFields.map(field => {
+      const value = item[field as keyof typeof item];
+      return value === null || value === undefined ? '' : String(value);
+    })
+  );
+
+  setReportTable({ columns, rows });
+  setReportDialogOpen(false);
+  
+  // Generate PDF automatically
+  setTimeout(() => {
+    handleGeneratePDF();
+  }, 500);
+};
+
+// Add this function to get operators for a field type
+const getOperatorsForField = (fieldType: string) => {
+  if (fieldType === 'number') {
+    return [
+      { value: 'equals', label: 'Equals' },
+      { value: 'greaterThan', label: 'Greater Than' },
+      { value: 'lessThan', label: 'Less Than' },
+      { value: 'greaterThanOrEqual', label: 'Greater Than or Equal' },
+      { value: 'lessThanOrEqual', label: 'Less Than or Equal' }
+    ];
+  } else {
+    return [
+      { value: 'equals', label: 'Equals' },
+      { value: 'contains', label: 'Contains' }
+    ];
+  }
+};
 
   const [form2, setForm2] = useState<CInventoryItem>({
     num: "",
@@ -360,19 +523,31 @@ const handleGeneratePDF = () => {
     },
   };
 
-  const filteredInventory = inventory.filter((item) =>
-    [item.equipment_name, item.location, item.brand_model]
-      .some((field) =>
-        String(field || "").toLowerCase().includes(searchQuery.toLowerCase())
-      )
-  );
+const filteredInventory = inventory
+  .filter((item) =>
+    [item.equipment_name, item.location, item.brand_model].some((field) =>
+      String(field || "").toLowerCase().includes(searchQuery.toLowerCase())
+    )
+  )
+  .sort((a, b) => {
+    if (sortBy === "equipment_name") {
+      return a.equipment_name.localeCompare(b.equipment_name);
+    }
+    return 0;
+  });
 
-  const filteredCInventory = cinventory.filter((item) =>
-    [item.description, item.location, item.remarks]
-      .some((field) =>
-        String(field || "").toLowerCase().includes(searchQuery.toLowerCase())
-      )
-  );
+const filteredCInventory = cinventory
+  .filter((item) =>
+    [item.description, item.location, item.remarks].some((field) =>
+      String(field || "").toLowerCase().includes(searchQuery.toLowerCase())
+    )
+  )
+  .sort((a, b) => {
+    if (sortBy === "description") {
+      return a.description.localeCompare(b.description);
+    }
+    return 0;
+  });
 
   const validateForm = () => {
     const newErrors: { [key: string]: string } = {};
@@ -424,216 +599,247 @@ const handleGeneratePDF = () => {
   }, [form.total_qty]);
 
   const fetchInventory = async () => {
-    setLoading(true);
-    try {
-      const sheet = itemType === "Non-Consumable" ? "nc_inventory" : "c_inventory";
-      const response = await axios.get(API_URL, {
-        params: { sheet, action: "read" },
-      });
+  setLoading(true);
+  try {
+    const endpoint = itemType === "Non-Consumable" ? "nc-inventory" : "c-inventory";
+    
+    // Replace Google Apps Script call:
+    // const response = await axios.get(API_URL, {
+    //   params: { sheet, action: "read" },
+    // });
 
-      const result = response.data;
-      if (result.success) {
-        const rows = result.data;
-        const headers = rows[1];
-        const idx = (key: string) => headers.indexOf(key);
-
-        if (itemType === "Non-Consumable") {
-          const parsed: InventoryItem[] = rows.slice(2).map((row: any[]) => {
-            const identifiersRaw = row[idx("IDENTIFIER_NUMBER")] || "";
-            const identifiers = identifiersRaw
-              ? String(identifiersRaw)
-                  .split(",")
-                  .map((id: string) =>
-                    id.trim().replace(/^\{|\}$/g, "")
-                  )
-              : [];
-
-            const statusesRaw = row[idx("STATUS")] || "";
-            const statuses = statusesRaw
-              ? String(statusesRaw)
-                  .split(",")
-                  .map((s: string) => s.trim().toLowerCase())
-              : [];
-
-            return {
-              num: row[idx("NO.")],
-              equipment_name: row[idx("EQUIPMENT_NAME")],
-              facility: row[idx("FACILITY")],
-              brand_model: row[idx("BRAND_MODEL")],
-              total_qty: row[idx("TOTAL_QTY")],
-              borrowed: row[idx("BORROWED")],
-              identifier_type: row[idx("IDENTIFIER_TYPE")],
-              identifiers,
-              statuses,
-              location: row[idx("LOCATION")],
-              soft_hard: row[idx("SOFT_HARD")],
-              e_location: row[idx("E_LOCATION")],
-              bat_type: row[idx("BAT_TYPE")],
-              bat_qty: row[idx("BAT_QTY")],
-              bat_total: row[idx("BAT_TOTAL")],
-              yes_or_no: row[idx("YES_OR_NO")],
-              preventive_or_calibration: row[idx("PREVENTIVE_OR_CALIBRATION")],
-              inhouse_outsourced: row[idx("INHOUSE/OUTSOURCED")],
-              month: row[idx("MONTH")],
-            };
-          });
-          setInventory(parsed);
-        } else {
-          const parsed: CInventoryItem[] = rows.slice(2).map((row: any[]) => ({
-            num: row[idx("NO.")],
-            location: row[idx("LOCATION")],
-            description: row[idx("DESCRIPTION")],
-            quantity_opened: row[idx("QUANTITY_OPENED")],
-            quantity_unopened: row[idx("QUANTITY_UNOPENED")],
-            quantity_on_order: row[idx("QUANTITY_ON_ORDER")],
-            remarks: row[idx("REMARKS")],
-            experiment: row[idx("EXPERIMENT")],
-            subject: row[idx("SUBJECT")],
-            date_issued: row[idx("DATE_ISSUED")],
-            issuance_no: row[idx("ISSUANCE_NO")],
-            stock_alert: row[idx("STOCK_ALERT")],
-          }));
-          setCInventory(parsed);
-        }
+    // With MongoDB call:
+    const response = await axios.post(`${API_BASE_URL}/${endpoint}`, {
+      action: "read"
+    });
+    
+    const result = response.data;
+    if (result.success) {
+      const data = result.data;
+      
+      if (itemType === "Non-Consumable") {
+        const parsed: InventoryItem[] = data.map((item: any) => ({
+          num: item.equipment_num.toString(), // Convert to string to match your interface
+          equipment_name: item.equipment_name,
+          facility: item.facility,
+          brand_model: item.brand_model,
+          total_qty: item.total_qty?.toString() || "0",
+          borrowed: item.borrowed?.toString() || "0",
+          identifier_type: item.identifier_type,
+          identifiers: item.identifiers || [],
+          statuses: item.statuses || [],
+          location: item.location,
+          soft_hard: item.soft_hard,
+          e_location: item.e_location,
+          bat_type: item.bat_type,
+          bat_qty: item.bat_qty?.toString() || "",
+          bat_total: item.bat_total?.toString() || "",
+          yes_or_no: item.yes_or_no,
+          preventive_or_calibration: item.preventive_or_calibration,
+          inhouse_outsourced: item.inhouse_outsourced,
+          month: item.month,
+        }));
+        setInventory(parsed);
+      } else {
+        const parsed: CInventoryItem[] = data.map((item: any) => ({
+          num: item.item_num.toString(), // Convert to string to match your interface
+          location: item.location,
+          description: item.description,
+          quantity_opened: item.quantity_opened?.toString() || "0",
+          quantity_unopened: item.quantity_unopened?.toString() || "0",
+          quantity_on_order: item.quantity_on_order?.toString() || "0",
+          remarks: item.remarks,
+          experiment: item.experiment,
+          subject: item.subject,
+          date_issued: item.date_issued,
+          issuance_no: item.issuance_no,
+          stock_alert: item.stock_alert?.toString() || "5",
+        }));
+        setCInventory(parsed);
       }
-    } catch (err) {
-      console.error("Failed to fetch inventory", err);
-    } finally {
-      setLoading(false);
     }
-  };
+  } catch (err) {
+    console.error("Failed to fetch inventory", err);
+  } finally {
+    setLoading(false);
+  }
+};
 
   useEffect(() => {
     fetchInventory();
   }, [itemType]);
 
-  const handleCreate = async () => {
-    setProcessing(true);
-    try {
-      if (itemType === "Non-Consumable") {
-        const totalQty = Number(form.total_qty) || 0;
-        const identifiers = form.identifiers.slice(0, totalQty);
+const handleCreate = async () => {
+  setProcessing(true);
+  try {
+    if (itemType === "Non-Consumable") {
+      const totalQty = Number(form.total_qty) || 0;
+      const identifiers = form.identifiers.slice(0, totalQty);
 
-        const res = await axios.get(API_URL, {
-          params: {
-            sheet: "nc_inventory",
-            action: "create",
-            ...form,
-            identifiers: identifiers.map(id => `{${id}}`).join(","),
-            statuses: form.statuses.join(","),
-          },
-        });
-
-        const inventoryNum = res.data.data.equipment_num; 
-
-        if (form.month && form.month.trim() !== "") {
-          for (let id of identifiers) {
-            await axios.get(API_URL, {
-              params: {
-                sheet: "maintenance",
-                action: "create",
-                ...form,
-                equipment_num: inventoryNum,
-                identifier_number: id,
-              },
-            });
-          }
-        }
-
-        setForm(initialFormNC);
-        fetchInventory();
-      } else {
-        await axios.get(API_URL, {
-          params: {
-            sheet: "c_inventory",
-            action: "create",
-            ...form2,
-          },
-        });
-
-        setForm2(initialFormC);
-        fetchInventory();
-      }
-
-      setOpen(false);
-    } catch (err) {
-      console.error("Failed to create item", err);
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  const handleDelete = async (item: any) => {
-    const sheet = itemType === "Non-Consumable" ? "nc_inventory" : "c_inventory";
-    const name =
-      itemType === "Non-Consumable"
-        ? item.equipment_name
-        : item.description;
-
-    if (
-      !window.confirm(
-        `Are you sure you want to delete "${name}"`
-      )
-    )
-      return;
-
-    try {
-      await axios.get(API_URL, {
-        params: {
-          sheet,
-          action: "delete",
-          num: item.num,
-        },
+      // FIXED: Remove .join(",") - send arrays directly
+      const res = await axios.post(`${API_BASE_URL}/nc-inventory`, {
+        action: "create",
+        equipment_name: form.equipment_name,
+        facility: form.facility,
+        brand_model: form.brand_model,
+        total_qty: Number(form.total_qty) || 1,
+        borrowed: Number(form.borrowed) || 0,
+        identifier_type: form.identifier_type,
+        identifiers: identifiers, // Send as array directly, no join needed
+        statuses: form.statuses, // Send as array directly, no join needed
+        location: form.location,
+        soft_hard: form.soft_hard,
+        e_location: form.e_location,
+        bat_type: form.bat_type,
+        bat_qty: Number(form.bat_qty) || 0,
+        bat_total: Number(form.bat_total) || 0,
+        yes_or_no: form.yes_or_no,
+        preventive_or_calibration: form.preventive_or_calibration,
+        inhouse_outsourced: form.inhouse_outsourced,
+        month: form.month,
       });
 
-      fetchInventory();
-    } catch (err) {
-      console.error("Failed to delete item", err);
-    }
-  };
+      const inventoryNum = res.data.data.equipment_num;
 
-  const handleUpdateItem = async () => {
-    setProcessing(true);
-    try {
-      if (itemType === "Non-Consumable") {
-        const totalQty = Number(form.total_qty) || 0;
-        const trimmedIdentifiers = form.identifiers
-          .slice(0, totalQty)
-          .map(id => `{${id}}`);
-
-        await axios.get(API_URL, {
-          params: {
-            sheet: "nc_inventory",
-            action: "update",
-            ...form,
-            identifiers: trimmedIdentifiers.join(", "),
-            statuses: form.statuses.join(","),
-          },
-        });
-
-        setForm(initialFormNC);
-        fetchInventory();
-      } else {
-        await axios.get(API_URL, {
-          params: {
-            sheet: "c_inventory",
-            action: "update",
-            ...form2,
-          },
-        });
-
-        setForm2(initialFormC);
-        fetchInventory();
+      // Create maintenance records if needed
+      if (form.month && form.month.trim() !== "") {
+        for (let id of identifiers) {
+          await axios.post(`${API_BASE_URL}/maintenance`, {
+            action: "create",
+            equipment_num: inventoryNum,
+            equipment_name: form.equipment_name,
+            brand_model: form.brand_model,
+            identifier_type: form.identifier_type,
+            identifier_number: id,
+            month: form.month,
+          });
+        }
       }
 
-      setOpen(false);
-      setEditing(false);
-    } catch (err) {
-      console.error("Failed to update item", err);
-    } finally {
-      setProcessing(false);
+      setForm(initialFormNC);
+      fetchInventory();
+    } else {
+      await axios.post(`${API_BASE_URL}/c-inventory`, {
+        action: "create",
+        location: form2.location,
+        description: form2.description,
+        quantity_opened: Number(form2.quantity_opened) || 0,
+        quantity_unopened: Number(form2.quantity_unopened) || 0,
+        quantity_on_order: Number(form2.quantity_on_order) || 0,
+        remarks: form2.remarks,
+        experiment: form2.experiment,
+        subject: form2.subject,
+        date_issued: form2.date_issued,
+        issuance_no: form2.issuance_no,
+        stock_alert: Number(form2.stock_alert) || 5,
+      });
+
+      setForm2(initialFormC);
+      fetchInventory();
     }
-  };
+
+    setOpen(false);
+  } catch (err: any) {
+    console.error("Failed to create item", err);
+    console.error("Error details:", err.response?.data);
+    alert(`Failed to create item: ${err.response?.data?.error || err.message}`);
+  } finally {
+    setProcessing(false);
+  }
+};
+
+const handleDelete = async (item: any) => {
+  const endpoint = itemType === "Non-Consumable" ? "nc-inventory" : "c-inventory";
+  const name = itemType === "Non-Consumable" ? item.equipment_name : item.description;
+
+  if (!window.confirm(`Are you sure you want to delete "${name}"`)) return;
+
+  try {
+    // Replace Google Apps Script call:
+    // await axios.get(API_URL, {
+    //   params: {
+    //     sheet,
+    //     action: "delete",
+    //     num: item.num,
+    //   },
+    // });
+
+    // With MongoDB call:
+    await axios.post(`${API_BASE_URL}/${endpoint}`, {
+      action: "delete",
+      num: Number(item.num), // Convert to number for MongoDB
+    });
+
+    fetchInventory();
+  } catch (err) {
+    console.error("Failed to delete item", err);
+  }
+};
+
+const handleUpdateItem = async () => {
+  setProcessing(true);
+  try {
+    if (itemType === "Non-Consumable") {
+      const totalQty = Number(form.total_qty) || 0;
+      const trimmedIdentifiers = form.identifiers.slice(0, totalQty);
+
+      // FIXED: Remove .join(",") - send arrays directly
+      await axios.post(`${API_BASE_URL}/nc-inventory`, {
+        action: "update",
+        num: Number(form.num),
+        equipment_name: form.equipment_name,
+        facility: form.facility,
+        brand_model: form.brand_model,
+        total_qty: Number(form.total_qty) || 1,
+        borrowed: Number(form.borrowed) || 0,
+        identifier_type: form.identifier_type,
+        identifiers: trimmedIdentifiers, // Send as array directly, no join needed
+        statuses: form.statuses, // Send as array directly, no join needed
+        location: form.location,
+        soft_hard: form.soft_hard,
+        e_location: form.e_location,
+        bat_type: form.bat_type,
+        bat_qty: Number(form.bat_qty) || 0,
+        bat_total: Number(form.bat_total) || 0,
+        yes_or_no: form.yes_or_no,
+        preventive_or_calibration: form.preventive_or_calibration,
+        inhouse_outsourced: form.inhouse_outsourced,
+        month: form.month,
+      });
+
+      setForm(initialFormNC);
+      fetchInventory();
+    } else {
+      await axios.post(`${API_BASE_URL}/c-inventory`, {
+        action: "update",
+        num: Number(form2.num),
+        location: form2.location,
+        description: form2.description,
+        quantity_opened: Number(form2.quantity_opened) || 0,
+        quantity_unopened: Number(form2.quantity_unopened) || 0,
+        quantity_on_order: Number(form2.quantity_on_order) || 0,
+        remarks: form2.remarks,
+        experiment: form2.experiment,
+        subject: form2.subject,
+        date_issued: form2.date_issued,
+        issuance_no: form2.issuance_no,
+        stock_alert: Number(form2.stock_alert) || 5,
+      });
+
+      setForm2(initialFormC);
+      fetchInventory();
+    }
+
+    setOpen(false);
+    setEditing(false);
+  } catch (err: any) {
+    console.error("Failed to update item", err);
+    console.error("Error details:", err.response?.data);
+    alert(`Failed to update item: ${err.response?.data?.error || err.message}`);
+  } finally {
+    setProcessing(false);
+  }
+};
 
   useEffect(() => {
     const queryType = searchParams.get("stock");
@@ -649,7 +855,7 @@ const handleGeneratePDF = () => {
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Backdrop
-        sx={{ color: "#fff", zIndex: (theme) => theme.zIndex.drawer + 1 }}
+        sx={{ color: "#fff",zIndex: (theme) => theme.zIndex.modal + 1,  }}
         open={processing}
       >
         <Stack alignItems="center" spacing={2}>
@@ -669,7 +875,59 @@ const handleGeneratePDF = () => {
           Manage equipment and consumable inventory
         </Typography>
       </Box>
+      {/* Item Type Toggle */}
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={2}>
+        <ToggleButtonGroup
+          value={itemType}
+          exclusive
+          fullWidth
+          sx={{
+            mb: 2,
+            borderRadius: 2,
+            overflow: "hidden",
+          }}
+        >
+          <ToggleButton
+            value="Non-Consumable"
+            selected={itemType === "Non-Consumable"}
+            onClick={() => setItemType("Non-Consumable")}
+            sx={{
+              flex: 1,
+              height: 48,
+              textTransform: "none",
+              fontSize: "0.9rem",
+              fontWeight: "bold",
+              "&.Mui-selected": {
+                bgcolor: "#b91c1c",
+                color: "#fff",
+                "&:hover": { bgcolor: "#b91c1c" },
+              },
+            }}
+          >
+            Non-Consumable
+          </ToggleButton>
 
+          <ToggleButton
+            value="Consumable"
+            selected={itemType === "Consumable"}
+            onClick={() => setItemType("Consumable")}
+            sx={{
+              flex: 1,
+              height: 48,
+              textTransform: "none",
+              fontSize: "0.9rem",
+              fontWeight: "bold",
+              "&.Mui-selected": {
+                bgcolor: "#b91c1c",
+                color: "#fff",
+                "&:hover": { bgcolor: "#b91c1c" },
+              },
+            }}
+          >
+            Consumable
+          </ToggleButton>
+        </ToggleButtonGroup>
+      </Stack>
       {/* Summary cards */}
       <Stack direction={{ xs: "column", md: "row" }} spacing={3} mb={4}>
 <Card sx={{ 
@@ -791,45 +1049,74 @@ const handleGeneratePDF = () => {
 
       {/* Action Bar */}
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={3} justifyContent="space-between" alignItems="center">
-        <Box sx={{ flex: 1, maxWidth: 400 }}>
-          <TextField
-            placeholder="Search name, description, location, brand/model..."
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
-              setPage(0);
-            }}
-            variant="outlined"
-            size="small"
-            fullWidth
-            sx={{
-              bgcolor: "background.paper",
+  <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ flex: 1 }}>
+    <Box sx={{ maxWidth: 400, width: "100%" }}>
+      <TextField
+        placeholder="Search name, description, location, brand/model..."
+        value={searchQuery}
+        onChange={(e) => {
+          setSearchQuery(e.target.value);
+          setPage(0);
+        }}
+        variant="outlined"
+        size="small"
+        fullWidth
+        sx={{
+          bgcolor: "background.paper",
+          borderRadius: 3,
+          "& .MuiOutlinedInput-root": {
+            borderRadius: 3,
+            "& fieldset": {
               borderRadius: 3,
-              "& .MuiOutlinedInput-root": {
-                borderRadius: 3,
-                "& fieldset": {
-                  borderRadius: 3,
-                },
-                "&:hover fieldset": {
-                  borderColor: "primary.main",
-                },
-                "&.Mui-focused fieldset": {
-                  borderColor: "primary.main",
-                },
-              },
-            }}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon color="action" />
-                </InputAdornment>
-              ),
-            }}
-          />
-        </Box>
+            },
+            "&:hover fieldset": {
+              borderColor: "primary.main",
+            },
+            "&.Mui-focused fieldset": {
+              borderColor: "primary.main",
+            },
+          },
+        }}
+        InputProps={{
+          startAdornment: (
+            <InputAdornment position="start">
+              <SearchIcon color="action" />
+            </InputAdornment>
+          ),
+        }}
+      />
+    </Box>
+    
+    {/* Add this filter dropdown */}
+    <TextField
+      select
+      label="Sort by"
+      value={sortBy}
+      onChange={(e) => setSortBy(e.target.value)}
+      size="small"
+      sx={{ minWidth: 150 }}
+      SelectProps={{
+        native: true,
+      }}
+      InputProps={{
+        startAdornment: (
+          <InputAdornment position="start">
+            <FilterListIcon fontSize="small" />
+          </InputAdornment>
+        ),
+      }}
+    >
+      <option value="">None</option>
+      {itemType === "Non-Consumable" ? (
+        <option value="equipment_name">Equipment Name</option>
+      ) : (
+        <option value="description">Description</option>
+      )}
+    </TextField>
+  </Stack>
         
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-           {userRole === "Custodian" && (
+           {userRole === "Custodian" || userRole === "Admin" && (
           <Button
             variant="contained"
             onClick={() => {
@@ -850,7 +1137,7 @@ const handleGeneratePDF = () => {
           </Button>
            )}
 
-{userRole === "Custodian" && (
+{userRole === "Custodian" || userRole === "Admin" && (
           <Button
             variant="outlined"
             color="error"
@@ -880,13 +1167,14 @@ const handleGeneratePDF = () => {
                 return;
 
               try {
-                await Promise.all(
-                  selectedItems.map((num) =>
-                    axios.get(API_URL, {
-                      params: { sheet: sheetName, action: "delete", num },
-                    })
-                  )
-                );
+await Promise.all(
+  selectedItems.map((num) =>
+    axios.post(`${API_BASE_URL}/${sheetName === "nc_inventory" ? "nc-inventory" : "c-inventory"}`, {
+      action: "delete",
+      num: Number(num),
+    })
+  )
+);
                 setSelectedItems([]);
                 fetchInventory();
               } catch (err) {
@@ -897,7 +1185,7 @@ const handleGeneratePDF = () => {
             Delete Selected ({selectedItems.length})
           </Button> )}
            {/* Add this AI Button */}
-           {userRole === "Custodian" && (
+           {userRole === "Custodian" || userRole === "Admin" && (
   <Button
     variant="outlined"
     color="primary"
@@ -918,62 +1206,33 @@ const handleGeneratePDF = () => {
   >
     AI Report
   </Button> )}
+   {/* NEW: Generate Report Button */}
+  {userRole === "Custodian" || userRole === "Admin" && (
+    <Button
+      variant="outlined"
+      color="secondary"
+      onClick={() => setReportDialogOpen(true)}
+      sx={{
+        borderRadius: 2,
+        textTransform: "none",
+        px: 3,
+        fontWeight: "bold",
+        borderColor: theme.palette.secondary.main,
+        color: theme.palette.secondary.main,
+        "&:hover": {
+          borderColor: theme.palette.secondary.dark,
+          bgcolor: alpha(theme.palette.secondary.main, 0.04)
+        }
+      }}
+      startIcon={<PictureAsPdfIcon />}
+    >
+      Generate Report
+    </Button>
+  )}
         </Stack>
       </Stack>
 
-      {/* Item Type Toggle */}
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={2}>
-        <ToggleButtonGroup
-          value={itemType}
-          exclusive
-          fullWidth
-          sx={{
-            mb: 2,
-            borderRadius: 2,
-            overflow: "hidden",
-          }}
-        >
-          <ToggleButton
-            value="Non-Consumable"
-            selected={itemType === "Non-Consumable"}
-            onClick={() => setItemType("Non-Consumable")}
-            sx={{
-              flex: 1,
-              height: 48,
-              textTransform: "none",
-              fontSize: "0.9rem",
-              fontWeight: "bold",
-              "&.Mui-selected": {
-                bgcolor: "#b91c1c",
-                color: "#fff",
-                "&:hover": { bgcolor: "#b91c1c" },
-              },
-            }}
-          >
-            Non-Consumable
-          </ToggleButton>
 
-          <ToggleButton
-            value="Consumable"
-            selected={itemType === "Consumable"}
-            onClick={() => setItemType("Consumable")}
-            sx={{
-              flex: 1,
-              height: 48,
-              textTransform: "none",
-              fontSize: "0.9rem",
-              fontWeight: "bold",
-              "&.Mui-selected": {
-                bgcolor: "#b91c1c",
-                color: "#fff",
-                "&:hover": { bgcolor: "#b91c1c" },
-              },
-            }}
-          >
-            Consumable
-          </ToggleButton>
-        </ToggleButtonGroup>
-      </Stack>
 
       {/* Inventory Table */}
       <Card
@@ -1109,7 +1368,7 @@ const handleGeneratePDF = () => {
     <Inventory2Icon fontSize="small" />
   </IconButton>
 </Tooltip>
-{userRole === "Custodian" && (
+{userRole === "Custodian" || userRole === "Admin" && (
   <Tooltip title="Update">
     <IconButton
       color="primary"
@@ -1125,7 +1384,7 @@ const handleGeneratePDF = () => {
   </Tooltip>
 )}
 
-{userRole === "Custodian" && (
+{userRole === "Custodian" || userRole === "Admin" && (
 
   <Tooltip title="Delete">
     <IconButton
@@ -1215,10 +1474,13 @@ const handleGeneratePDF = () => {
         </Button>
         <Button
           variant="contained"
-         onClick={() => {
-    if (!validateForm()) return; // show errors instead of saving
-    editing ? handleUpdateItem() : handleCreate();
-  }}
+         // Update the Save/Update button onClick handler:
+onClick={() => {
+  if (!validateForm()) return;
+  
+  setProcessing(true); // Add this line to show the loading overlay
+  editing ? handleUpdateItem() : handleCreate();
+}}
           sx={{
             bgcolor: "#B71C1C",
             color: "#FFF",
@@ -2127,7 +2389,140 @@ const handleGeneratePDF = () => {
     )}
   </DialogContent>
 </Dialog>
+<Dialog 
+  open={reportDialogOpen} 
+  onClose={() => setReportDialogOpen(false)}
+  maxWidth="lg"
+  fullWidth
+>
+  <DialogTitle>
+    <Stack direction="row" spacing={1} alignItems="center">
+      <PictureAsPdfIcon color="secondary" />
+      <Typography variant="h6">Generate Custom Report</Typography>
+    </Stack>
+  </DialogTitle>
+  <DialogContent dividers>
+    <Typography variant="body2" color="text.secondary" gutterBottom>
+      Select fields to include and apply filters to generate a custom report.
+    </Typography>
+    
+    {/* Field Selection Section */}
+    <Box sx={{ mb: 3 }}>
+      <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+        Select Fields to Include
+      </Typography>
+      <Paper variant="outlined" sx={{ p: 2, maxHeight: 200, overflow: 'auto' }}>
+        <Stack spacing={1}>
+          {availableFields.map((field) => (
+            <Box key={field.field} sx={{ display: 'flex', alignItems: 'center' }}>
+              <Checkbox
+                checked={selectedFields.includes(field.field)}
+                onChange={() => handleFieldSelection(field.field)}
+                color="secondary"
+              />
+              <Typography variant="body2">
+                {field.label} ({field.type})
+              </Typography>
+            </Box>
+          ))}
+        </Stack>
+      </Paper>
+    </Box>
 
+    {/* Filters Section */}
+    <Box sx={{ mb: 3 }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+        <Typography variant="subtitle1" fontWeight="bold">
+          Filters
+        </Typography>
+        <Button 
+          variant="outlined" 
+          size="small" 
+          onClick={addFilter}
+          startIcon={<AddIcon />}
+        >
+          Add Filter
+        </Button>
+      </Stack>
+
+      <Stack spacing={2}>
+        {reportFilters.map((filter, index) => (
+          <Paper key={index} variant="outlined" sx={{ p: 2 }}>
+            <Stack direction="row" spacing={2} alignItems="center">
+              {/* Field Select */}
+              <FormControl size="small" sx={{ minWidth: 150 }}>
+                <InputLabel>Field</InputLabel>
+                <Select
+                  value={filter.field}
+                  label="Field"
+                  onChange={(e) => updateFilter(index, { field: e.target.value })}
+                >
+                  {availableFields.map((field) => (
+                    <MenuItem key={field.field} value={field.field}>
+                      {field.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              {/* Operator Select */}
+              <FormControl size="small" sx={{ minWidth: 150 }}>
+                <InputLabel>Operator</InputLabel>
+                <Select
+                  value={filter.operator}
+                  label="Operator"
+                  onChange={(e) => updateFilter(index, { operator: e.target.value as any })}
+                >
+                  {filter.field ? getOperatorsForField(
+                    availableFields.find(f => f.field === filter.field)?.type || 'string'
+                  ).map(op => (
+                    <MenuItem key={op.value} value={op.value}>
+                      {op.label}
+                    </MenuItem>
+                  )) : (
+                    <MenuItem value="equals">Equals</MenuItem>
+                  )}
+                </Select>
+              </FormControl>
+
+              {/* Value Input */}
+              <TextField
+                size="small"
+                label="Value"
+                value={filter.value}
+                onChange={(e) => updateFilter(index, { value: e.target.value })}
+                sx={{ flex: 1 }}
+                type={availableFields.find(f => f.field === filter.field)?.type === 'number' ? 'number' : 'text'}
+              />
+
+              {/* Remove Filter Button */}
+              <IconButton 
+                size="small" 
+                onClick={() => removeFilter(index)}
+                color="error"
+              >
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </Stack>
+          </Paper>
+        ))}
+      </Stack>
+    </Box>
+  </DialogContent>
+  
+  <DialogActions>
+    <Button onClick={() => setReportDialogOpen(false)}>Cancel</Button>
+    <Button 
+      variant="contained" 
+      onClick={generateCustomReport}
+      disabled={selectedFields.length === 0}
+      color="secondary"
+      startIcon={<PictureAsPdfIcon />}
+    >
+      Generate PDF Report
+    </Button>
+  </DialogActions>
+</Dialog>
     </Container>
   );
 };

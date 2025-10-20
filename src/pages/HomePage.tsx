@@ -7,8 +7,6 @@ import {
   Box, 
   Paper,
   Chip,
-  alpha,
-  useTheme,
   CircularProgress
 } from "@mui/material";
 import { useNavigate } from "react-router-dom";
@@ -21,14 +19,15 @@ import {
   EventAvailable as EventIcon
 } from "@mui/icons-material";
 import axios from "axios";
+import { alpha, useTheme } from "@mui/material/styles";
 
-const API_URL = "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
+const API_BASE_URL = "https://elams-server.onrender.com/api";
 
 interface User {
   email: string;
   role: string;
-  firstname: string;
-  lastname: string;
+  given_name: string;
+  family_name: string;
   password: string;
 }
 
@@ -66,72 +65,65 @@ const HomePage = () => {
     if (!storedUser) {
       navigate("/");
     } else {
-      setUser(JSON.parse(storedUser));
-      fetchDashboardStats();
+      const parsed = JSON.parse(storedUser);
+      setUser(parsed);
+      fetchDashboardStats(parsed);
     }
   }, [navigate]);
 
-  const fetchDashboardStats = async () => {
+  const fetchDashboardStats = async (currentUser: any = JSON.parse(localStorage.getItem("user") || "{}")) => {
     try {
-      const [
-        ncInventoryRes, 
-        cInventoryRes, 
-        borrowRes, 
-        maintenanceRes, 
-        staffRes
-      ] = await Promise.all([
-        axios.get(API_URL, { params: { sheet: "nc_inventory", action: "read" } }),
-        axios.get(API_URL, { params: { sheet: "c_inventory", action: "read" } }),
-        axios.get(API_URL, { params: { sheet: "borrow", action: "read" } }),
-        axios.get(API_URL, { params: { sheet: "maintenance", action: "read" } }),
-        axios.get(API_URL, { params: { sheet: "users", action: "read" } })
+      // Get combined inventory (both consumable and non-consumable)
+      const [inventoryRes, borrowRes, maintenanceRes, usersRes] = await Promise.all([
+        axios.get(`${API_BASE_URL}/inventory`),
+        axios.get(`${API_BASE_URL}/borrow-records`),
+        axios.post(`${API_BASE_URL}/maintenance`, { action: "read" }),
+        axios.post(`${API_BASE_URL}/users`, { action: "read" })
       ]);
 
-      const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+      const combinedInventory = Array.isArray(inventoryRes.data) ? inventoryRes.data : [];
+      const borrowRecords = Array.isArray(borrowRes.data) ? borrowRes.data : [];
+      const maintenanceRecords = Array.isArray(maintenanceRes.data && maintenanceRes.data.data ? maintenanceRes.data.data : maintenanceRes.data) ? (maintenanceRes.data.data || maintenanceRes.data) : [];
+      const users = Array.isArray(usersRes.data && usersRes.data.data ? usersRes.data.data : usersRes.data) ? (usersRes.data.data || usersRes.data) : [];
       
-      // Calculate total items
-      const ncInventory = ncInventoryRes.data?.data?.slice(2) || [];
-      const cInventory = cInventoryRes.data?.data?.slice(2) || [];
-      const totalItems = ncInventory.length + cInventory.length;
-      
-      // Calculate borrowed items
-      const borrowRecords = borrowRes.data?.data?.slice(1) || [];
-      const borrowedItems = borrowRecords.reduce((acc: number, record: any[]) => {
-        const quantity = record[9] || "0";
-        const quantities = quantity.split(',').map((q: string) => {
-          const match = q.match(/\((\d+)\)/);
-          return match ? parseInt(match[1]) : 0;
-        });
-        return acc + quantities.reduce((sum: number, q: number) => sum + q, 0);
+      // total items: sum total_qty for all items
+      const totalItems = combinedInventory.reduce((acc: number, item: any) => {
+        return acc + (Number(item.total_qty || 0));
       }, 0);
       
-      // Calculate low stock items
-      const lowStockItems = cInventory.filter((item: any[]) => {
-        const qtyOpened = parseInt(item[3] || "0");
-        const stockAlert = parseInt(item[11] || "5");
-        return qtyOpened <= stockAlert;
-      }).length;
+      // borrowed items: sum of quantities in borrow records
+      const borrowedItems = borrowRecords.reduce((acc: number, record: any) => {
+        return acc + (Array.isArray(record.items) ? record.items.reduce((s: number, it: any) => s + (Number(it.quantity) || 0), 0) : 0);
+      }, 0);
       
-      // Calculate maintenance stats
-      const maintenanceRecords = maintenanceRes.data?.data?.slice(2) || [];
+      // Get consumable inventory (via c-inventory) to compute low stock
+      let lowStockItems = 0;
+      try {
+        const cInvRes = await axios.post(`${API_BASE_URL}/c-inventory`, { action: "read" });
+        const cData = cInvRes.data && cInvRes.data.data ? cInvRes.data.data : cInvRes.data;
+        lowStockItems = Array.isArray(cData) ? cData.filter((row: any) => {
+          const qtyOpened = Number(row.quantity_opened || 0);
+          const stockAlert = Number(row.stock_alert || 5);
+          return qtyOpened <= stockAlert;
+        }).length : 0;
+      } catch (err) {
+        // ignore and keep 0
+        console.warn("Failed to fetch consumable inventory for low stock", err);
+      }
+      
+      // maintenance stats
       const currentYear = new Date().getFullYear();
-      const completedMaintenance = maintenanceRecords.filter((record: any[]) => {
-        const dateAccomplished = record[8];
-        if (!dateAccomplished) return false;
-        const date = new Date(dateAccomplished);
+      const completedMaintenance = Array.isArray(maintenanceRecords) ? maintenanceRecords.filter((m: any) => {
+        const d = m.date_accomplished || m.dateAccomplished || m.dateAccomplished;
+        if (!d) return false;
+        const date = new Date(d);
         return date.getFullYear() === currentYear;
-      }).length;
+      }).length : 0;
+      const pendingMaintenance = (Array.isArray(maintenanceRecords) ? maintenanceRecords.length : 0) - completedMaintenance;
       
-      const pendingMaintenance = maintenanceRecords.length - completedMaintenance;
+      // staff count excluding current user
+      const totalStaff = Array.isArray(users) ? users.filter((u: any) => u.email !== currentUser.email).length : 0;
       
-      // Calculate staff count (excluding current user)
-      const staffRecords = staffRes.data?.data?.slice(1) || [];
-      const totalStaff = staffRecords.filter((record: any[]) => {
-        const email = record[0];
-        return email !== currentUser.email;
-      }).length;
-      
-      // Generate recent activity
       const recentActivity = [
         { type: "borrow", description: `${borrowRecords.length} active borrow requests`, time: "Today" },
         { type: "maintenance", description: `${pendingMaintenance} pending maintenance tasks`, time: "This week" },
@@ -149,6 +141,7 @@ const HomePage = () => {
       });
     } catch (err) {
       console.error("Failed to fetch dashboard data", err);
+      // keep previous fallback sample data as before
       setStats({
         totalItems: 142,
         borrowedItems: 28,
@@ -306,7 +299,7 @@ const HomePage = () => {
       {/* Welcome Section */}
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" fontWeight="bold" gutterBottom>
-          Welcome back, {user?.firstname} {user?.lastname}
+          Welcome back, {user?.given_name} {user?.family_name}
         </Typography>
         <Chip 
           label={user?.role} 

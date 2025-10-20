@@ -39,10 +39,10 @@ import {
   AiOutlineSetting,
   AiOutlineSecurityScan,
 } from "react-icons/ai";
+import { AiOutlineBook, AiFillBook } from "react-icons/ai";
 import { MdPerson, MdMenu, MdEditDocument, MdLogout } from "react-icons/md";
 import { useTheme } from "@mui/material/styles";
 import axios from "axios";
-
 const Header = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -62,10 +62,11 @@ const Header = () => {
 
 const pathToIndex: Record<string, number> = {
   "/dashboard": 0,
-  ...(userRoles === "Custodian" ? { "/staff": 1 } : {}),
-  "/borrow": userRoles === "Custodian" ? 2 : 1,
-  "/inventory": userRoles === "Custodian" ? 3 : 2,
-  "/maintenance": userRoles === "Custodian" ? 4 : 3,
+  ...(userRoles === "Custodian" || userRoles === "Admin"  ? { "/staff": 1 } : {}),
+  "/reservation": userRoles === "Custodian" || userRoles === "Admin" ? 2 : 1,
+  "/borrow": userRoles === "Custodian" || userRoles === "Admin" ? 3 : 2,
+  "/inventory": userRoles === "Custodian" || userRoles === "Admin" ? 4 : 3,
+  "/maintenance": userRoles === "Custodian" || userRoles === "Admin" ? 5 : 4,
 };
 
   const [value, setValue] = useState(pathToIndex[location.pathname] || 0);
@@ -248,7 +249,8 @@ const handleSecurityUpdate = async () => {
 
 const tabIcons = [
   { to: "/dashboard", label: "Home", icon: <AiOutlineHome size={24} />, active: <AiFillHome size={24} /> },
-  ...(userRoles === "Custodian" ? [{ to: "/staff", label: "Staff", icon: <AiOutlineUser size={24} />, active: <MdPerson size={24} /> }] : []),
+  ...(userRoles === "Custodian" || userRoles === "Admin" ? [{ to: "/staff", label: "Staff", icon: <AiOutlineUser size={24} />, active: <MdPerson size={24} /> }] : []),
+{ to: "/reservation", label: "Reservation", icon: <AiOutlineBook size={24} />, active: <AiFillBook size={24} /> },
   { to: "/borrow", label: "Borrow", icon: <AiOutlineFileSearch size={24} />, active: <MdEditDocument size={24} /> },
   { to: "/inventory", label: "Inventory", icon: <AiOutlineAppstore size={24} />, active: <AiFillAppstore size={24} /> },
   { to: "/maintenance", label: "Maintenance", icon: <AiOutlineTool size={24} />, active: <AiFillTool size={24} /> },
@@ -256,10 +258,12 @@ const tabIcons = [
 
   // Get logged in user from localStorage
   const user = JSON.parse(localStorage.getItem("user") || "{}");
-  const userName = user?.email?.split("@")[0] || "Guest";
   const userRole = user?.role || "No Role";
-  const userFirstName = user?.firstname;
-  const userLastName = user?.lastname;
+  const userFirstName = user?.firstname || user?.given_name;
+  
+  // If role is "Admin", set lastname to "Admin", otherwise use the stored lastname
+  const userLastName = userRole === "Admin" ? "Admin" : (user?.lastname || user?.family_name);
+  
   const userPassword = user?.password;
 
   // Safe initials extraction
@@ -335,11 +339,18 @@ const tabIcons = [
           {/* Profile Section - right aligned on desktop */}
           {!isMobile && (
             <Box sx={{ display: "flex", alignItems: "center", position: "absolute", right: 16 }}>
-              <IconButton onClick={handleProfileClick} size="small" sx={{ ml: 2 }}>
-                <Avatar sx={{ bgcolor: "white", color: "#b91c1c" }}>
-                  {initials}
-                </Avatar>
-              </IconButton>
+<IconButton onClick={handleProfileClick} size="small" sx={{ ml: 2 }}>
+<Avatar
+    src={user.picture}
+    alt={user.name || "User"}
+    sx={{
+      width: 32,
+      height: 32,
+      border: "2px solid white",    // ✅ White border
+      boxShadow: "0 0 0 1px #e5e7eb" // Optional subtle outer edge (like Gmail)
+    }}
+  />
+</IconButton>
               <Box sx={{ ml: 1, textAlign: "left", color: "white" }}>
                 <Typography variant="body1" sx={{ fontWeight: "bold" }}>
                   {userFirstName + " " + userLastName}
@@ -366,14 +377,6 @@ const tabIcons = [
               },
             }}
           >
-            <MenuItem onClick={handleSettingsOpen}>
-              <AiOutlineSetting style={{ marginRight: 8 }} />
-              Settings
-            </MenuItem>
-            <MenuItem onClick={handleSecurityOpen}>
-              <AiOutlineSecurityScan style={{ marginRight: 8 }} />
-              Security
-            </MenuItem>
             <MenuItem onClick={handleLogout}>
               <MdLogout style={{ marginRight: 8 }} />
               Logout
@@ -390,7 +393,7 @@ const tabIcons = [
               </Avatar>
               <Box>
                 <Typography variant="body1" sx={{ fontWeight: "bold" }}>
-                  {userName}
+                  {userFirstName + " " + userLastName}
                 </Typography>
                 <Typography variant="body2" sx={{ fontSize: "0.8rem" }}>
                   {userRole}
@@ -463,6 +466,7 @@ const tabIcons = [
             value={userData.lastname}
             onChange={handleInputChange}
             sx={{ mb: 2 }}
+            disabled={userRole === "Admin"} // Disable last name field for Admin
           />
           <TextField
             margin="dense"

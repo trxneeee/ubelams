@@ -8,6 +8,7 @@ import Footer from "./components/Footer";
 import Header from "./components/Header";
 import BorrowPage from "./pages/BorrowPage";
 import DatabasePage from "./pages/DatabasePage";
+import FacultyReservationPage from "./pages/FacultyReservationPage";
 import HomePage from "./pages/HomePage";
 import InventoryPage from "./pages/InventoryPage";
 import { useNavigate } from "react-router-dom";
@@ -20,6 +21,7 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import Inventory2Icon from "@mui/icons-material/Inventory2";
 import NotificationsIcon from "@mui/icons-material/Notifications";
 import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
+import ReservationPage from "./pages/ReservationPage";
 interface CalendarEvent {
   id: string;
   title: string;
@@ -727,6 +729,22 @@ function App() {
           element={
             <AppLayout>
               <BorrowPage />
+            </AppLayout>
+          }
+        />
+                <Route
+          path="/facultyreserve"
+          element={
+            <AppLayout>
+              <FacultyReservationPage />
+            </AppLayout>
+          }
+        />
+                        <Route
+          path="/reservation"
+          element={
+            <AppLayout>
+              <ReservationPage />
             </AppLayout>
           }
         />

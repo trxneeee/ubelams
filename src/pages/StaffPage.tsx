@@ -26,26 +26,28 @@ import {
   Backdrop,
   Alert,
   Snackbar,
+  Chip,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import Loader from "../components/Loader";
 import DeleteIcon from "@mui/icons-material/Delete";
 import { useNavigate } from "react-router-dom";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 
-const API_URL =
-  "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
+const API_BASE_URL = "https://elams-server.onrender.com/api";
 
 interface Staff {
   email: string;
   lastname: string;
   firstname: string;
-  password: string;
   role: string;
 }
 
 interface User {
   email: string;
-  // Add other user properties as needed
+  role: string;
+  firstname?: string;
+  lastname?: string;
 }
 
 const StaffPage = () => {
@@ -54,11 +56,14 @@ const StaffPage = () => {
   const [processing, setProcessing] = useState(false);
   const [open, setOpen] = useState(false);
   const [selectedStaffs, setSelectedStaffs] = useState<string[]>([]);
-  const [form, setForm] = useState<Staff>({
-    email: "",
-    lastname: "",
-    firstname: "",
-    password: "12345678",
+  // form now supports multiple emails (like Google sharing)
+  const [form, setForm] = useState<{
+    emails: string[];
+    currentEmail: string;
+    role: string;
+  }>({
+    emails: [],
+    currentEmail: "",
     role: "Student Assistant",
   });
   const [user, setUser] = useState<User | null>(null);
@@ -68,24 +73,16 @@ const StaffPage = () => {
   const fetchStaffs = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(API_URL, {
-        params: { sheet: "users", action: "read" },
+      const response = await axios.post(`${API_BASE_URL}/users`, {
+        action: "read"
       });
+      
       const result = response.data;
       if (result.success) {
-        const rows = result.data;
-        const headers = rows[0];
-        const idx = (key: string) => headers.indexOf(key);
-        const parsed = rows.slice(1).map((row: any[]) => ({
-          email: row[idx("email")],
-          lastname: row[idx("lastname")],
-          firstname: row[idx("firstname")],
-          password: row[idx("password")],
-          role: row[idx("role")],
-        }));
+        const staffData = result.data;
         
         // Filter out the current user's account
-        const filteredStaffs = parsed.filter((staff: Staff) => 
+        const filteredStaffs = staffData.filter((staff: Staff) => 
           staff.email !== user?.email
         );
         setStaffs(filteredStaffs);
@@ -99,58 +96,145 @@ const StaffPage = () => {
   };
 
   const handleCreate = async () => {
+    // flush currentEmail into emails if present
+    const emailsToCreate = form.currentEmail.trim()
+      ? Array.from(new Set([...form.emails, form.currentEmail.trim()]))
+      : Array.from(new Set(form.emails));
+    
+    if (emailsToCreate.length === 0) {
+      setSnackbar({ open: true, message: "At least one email is required", severity: "error" });
+      return;
+    }
+
     setProcessing(true);
     try {
-      await axios.get(API_URL, {
-        params: { sheet: "users", action: "create", ...form },
-      });
+      const promises = emailsToCreate.map(email =>
+        axios.post(`${API_BASE_URL}/users`, {
+          action: "create",
+          email,
+          firstname: "",
+          lastname: "",
+          role: form.role
+        }).then(() => ({ email, status: "fulfilled" })).catch((err) => ({ email, status: "rejected", error: err }))
+      );
+
+      const results = await Promise.all(promises);
+      const successes = results.filter((r: any) => r.status === "fulfilled").map((r: any) => r.email);
+      const failures = results.filter((r: any) => r.status === "rejected").map((r: any) => ({
+        email: r.email,
+        error: r.error?.response?.data?.error || r.error?.message || "Failed"
+      }));
+
+      let message = "";
+      if (successes.length) message += `${successes.length} account(s) added. `;
+      if (failures.length) message += `${failures.length} failed.`;
+
+      setSnackbar({ open: true, message: message || "Operation completed", severity: failures.length ? "error" : "success" });
       setOpen(false);
-      setForm({ email: "", lastname: "", firstname: "", password: "", role: "Student Assistant" });
-      setSnackbar({ open: true, message: "Staff member added successfully", severity: "success" });
+      setForm({ emails: [], currentEmail: "", role: getAvailableRoles()[0] || "Student Assistant" });
       fetchStaffs();
-    } catch (err) {
-      console.error("Failed to create staff", err);
-      setSnackbar({ open: true, message: "Failed to add staff member", severity: "error" });
+    } catch (err: any) {
+      console.error("Failed to create staff(s)", err);
+      setSnackbar({ open: true, message: "Failed to add staff member(s)", severity: "error" });
     } finally {
       setProcessing(false);
     }
   };
 
+  // helper: basic email validation
+  const isValidEmail = (email: string) => {
+    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return re.test(email);
+  };
+
+  const addCurrentEmail = () => {
+    const val = form.currentEmail.trim().replace(/,+$/,"");
+    if (!val) return;
+    if (!isValidEmail(val)) {
+      setSnackbar({ open: true, message: `Invalid email: ${val}`, severity: "error" });
+      return;
+    }
+    if (form.emails.includes(val)) {
+      setForm(prev => ({ ...prev, currentEmail: "" }));
+      return;
+    }
+    setForm(prev => ({ ...prev, emails: [...prev.emails, val], currentEmail: "" }));
+  };
+
+  const handleEmailInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      addCurrentEmail();
+    }
+  };
+
+  const removeEmailAt = (index: number) => {
+    setForm(prev => ({ ...prev, emails: prev.emails.filter((_, i) => i !== index) }));
+  };
+
   const handleDelete = async (email: string) => {
-    if (!window.confirm("Are you sure you want to delete this staff?")) return;
+    if (!window.confirm("Are you sure you want to delete this staff member?")) return;
     setProcessing(true);
     try {
-      await axios.get(API_URL, {
-        params: { sheet: "users", action: "delete", email },
+      await axios.post(`${API_BASE_URL}/users`, {
+        action: "delete",
+        email: email
       });
       setSnackbar({ open: true, message: "Staff member deleted successfully", severity: "success" });
       fetchStaffs();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to delete staff", err);
-      setSnackbar({ open: true, message: "Failed to delete staff member", severity: "error" });
+      const errorMessage = err.response?.data?.error || "Failed to delete staff member";
+      setSnackbar({ open: true, message: errorMessage, severity: "error" });
     } finally {
       setProcessing(false);
     }
   };
 
   const handleBulkDelete = async () => {
-    if (!window.confirm("Are you sure you want to delete selected staff?")) return;
+    if (!window.confirm("Are you sure you want to delete selected staff members?")) return;
     setProcessing(true);
     try {
       await Promise.all(
         selectedStaffs.map(email =>
-          axios.get(API_URL, { params: { sheet: "users", action: "delete", email } })
+          axios.post(`${API_BASE_URL}/users`, { 
+            action: "delete", 
+            email: email 
+          })
         )
       );
       setSelectedStaffs([]);
       setSnackbar({ open: true, message: "Selected staff members deleted successfully", severity: "success" });
       fetchStaffs();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to delete selected staff", err);
-      setSnackbar({ open: true, message: "Failed to delete selected staff members", severity: "error" });
+      const errorMessage = err.response?.data?.error || "Failed to delete selected staff members";
+      setSnackbar({ open: true, message: errorMessage, severity: "error" });
     } finally {
       setProcessing(false);
     }
+  };
+
+  // Get available roles based on current user's role
+  const getAvailableRoles = () => {
+    if (!user) return ["Student Assistant"];
+    
+    switch (user.role) {
+      case "Admin":
+        return ["Custodian", "Student Assistant", "Program Chair"];
+      case "Custodian":
+        return ["Student Assistant"];
+      default:
+        return ["Student Assistant"];
+    }
+  };
+
+  // Check if current user can see a specific role in the table
+  const canSeeRole = (role: string) => {
+    if (!user) return false;
+    
+    const availableRoles = getAvailableRoles();
+    return availableRoles.includes(role);
   };
 
   useEffect(() => {
@@ -160,8 +244,8 @@ const StaffPage = () => {
     } else {
       const userData = JSON.parse(storedUser);
       setUser(userData);
-      if (userData.role != "Custodian"){
-        navigate("/dashboard"); 
+      if (userData.role !== "Custodian" && userData.role !== "Admin") {
+        navigate("/dashboard");
       }
     }
   }, [navigate]);
@@ -188,12 +272,12 @@ const StaffPage = () => {
 
       <Stack direction="row" mb={3} spacing={2} alignItems="center">
         <Typography variant="h5" sx={{ fontWeight: "bold", color: "#B71C1C" }}>
-          Staff Management
+          Account Management
         </Typography>
         <Button
           variant="contained"
           onClick={() => {
-            setForm({ email: "", lastname: "", firstname: "", password: "", role: "Student Assistant" });
+            setForm({ emails: [], currentEmail: "", role: getAvailableRoles()[0] });
             setOpen(true);
           }}
           sx={{ 
@@ -205,7 +289,7 @@ const StaffPage = () => {
             fontWeight: "bold"
           }}
         >
-          + Add Staff
+          + Add Account
         </Button>
         <Button
           variant="contained"
@@ -260,7 +344,9 @@ const StaffPage = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {staffs.map((staff) => (
+              {staffs
+                .filter(staff => canSeeRole(staff.role)) // Filter staff based on visible roles
+                .map((staff) => (
                 <TableRow key={staff.email} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
                   <TableCell padding="checkbox">
                     <Checkbox
@@ -276,8 +362,16 @@ const StaffPage = () => {
                   </TableCell>
                   <TableCell>
                     <Typography variant="body1" fontWeight="medium">
-                      {staff.firstname} {staff.lastname}
+                      {staff.firstname && staff.lastname 
+                        ? `${staff.firstname} ${staff.lastname}`
+                        : "Not yet logged in"
+                      }
                     </Typography>
+                    {!(staff.firstname && staff.lastname) && (
+                      <Typography variant="caption" color="text.secondary">
+                        Name will be filled after first login
+                      </Typography>
+                    )}
                   </TableCell>
                   <TableCell>{staff.email}</TableCell>
                   <TableCell>
@@ -289,7 +383,8 @@ const StaffPage = () => {
                         borderRadius: 3,
                         fontSize: "0.75rem",
                         fontWeight: "bold",
-                        bgcolor: staff.role === "Custodian" ? "primary.main" : "secondary.main",
+                        bgcolor: staff.role === "Custodian" ? "#B71C1C" : 
+                                 staff.role === "Program Chair" ? "#2E7D32" : "#f8a41a",
                         color: "white",
                       }}
                     >
@@ -320,45 +415,43 @@ const StaffPage = () => {
       {/* Add Staff Dialog */}
       <Dialog open={open} onClose={() => !processing && setOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontWeight: "bold", color: "#B71C1C", bgcolor: "#f5f5f5" }}>
-          Add Staff
+         Account Details
         </DialogTitle>
 
         <DialogContent dividers sx={{ bgcolor: "#fafafa" }}>
           <Stack spacing={2} mt={1}>
-            <TextField
-              label="Email"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              fullWidth
-              variant="outlined"
-              disabled={processing}
-            />
-            <TextField
-              label="Lastname"
-              value={form.lastname}
-              onChange={(e) => setForm({ ...form, lastname: e.target.value })}
-              fullWidth
-              variant="outlined"
-              disabled={processing}
-            />
-            <TextField
-              label="Firstname"
-              value={form.firstname}
-              onChange={(e) => setForm({ ...form, firstname: e.target.value })}
-              fullWidth
-              variant="outlined"
-              disabled={processing}
-            />
-            <TextField
-              label="Password"
-              type="password"
-              value={form.password}
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-              fullWidth
-              variant="outlined"
-              disabled={processing}
-            />
+            <Box>
+              <TextField
+                label="Add email (press Enter)"
+                value={form.currentEmail}
+                onChange={(e) => setForm({ ...form, currentEmail: e.target.value })}
+                onKeyDown={handleEmailInputKeyDown}
+                fullWidth
+                variant="outlined"
+                disabled={processing}
+                placeholder="user@s.ubaguio.edu"
+                helperText="Type an email and press Enter. Add multiple emails before confirming."
+              />
 
+              {/* chips for pending emails */}
+              <Box sx={{ mt: 1, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                {form.emails.map((email, idx) => (
+                  <Chip
+                    key={email}
+                    label={email}
+                    onDelete={() => removeEmailAt(idx)}
+                    sx={{ bgcolor: alpha("#B71C1C", 0.06), color: "#B71C1C", fontWeight: 'medium' }}
+                    size="medium"
+                  />
+                ))}
+              </Box>
+
+              <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 1 }}>
+                First name and last name will be automatically filled when the user logs in for the first time.
+              </Typography>
+            </Box>
+            
+            {/* Role Selection based on user role */}
             <ToggleButtonGroup
               value={form.role}
               exclusive
@@ -366,34 +459,27 @@ const StaffPage = () => {
               fullWidth
               disabled={processing}
             >
-              <ToggleButton
-                value="Student Assistant"
-                sx={{ 
-                  flex: 1, 
-                  "&.Mui-selected": { 
-                    bgcolor: "#B71C1C", 
-                    color: "#FFF",
-                    "&:hover": { bgcolor: "#D32F2F" }
-                  },
-                  fontWeight: "bold"
-                }}
-              >
-                Student Assistant
-              </ToggleButton>
-              <ToggleButton
-                value="Custodian"
-                sx={{ 
-                  flex: 1, 
-                  "&.Mui-selected": { 
-                    bgcolor: "#B71C1C", 
-                    color: "#FFF",
-                    "&:hover": { bgcolor: "#D32F2F" }
-                  },
-                  fontWeight: "bold"
-                }}
-              >
-                Custodian
-              </ToggleButton>
+              {getAvailableRoles().map((role) => (
+                <ToggleButton
+                  key={role}
+                  value={role}
+                  sx={{ 
+                    flex: 1, 
+                    "&.Mui-selected": { 
+                      bgcolor: role === "Custodian" ? "#B71C1C" : 
+                               role === "Program Chair" ? "#2E7D32" : "#f8a41a", 
+                      color: "#FFF",
+                      "&:hover": { 
+                        bgcolor: role === "Custodian" ? "#D32F2F" : 
+                                 role === "Program Chair" ? "#388E3C" : "#e5940e" 
+                      }
+                    },
+                    fontWeight: "bold"
+                  }}
+                >
+                  {role}
+                </ToggleButton>
+              ))}
             </ToggleButtonGroup>
           </Stack>
         </DialogContent>
@@ -415,7 +501,7 @@ const StaffPage = () => {
           <Button
             variant="contained"
             onClick={handleCreate}
-            disabled={processing}
+            disabled={processing || (form.emails.length === 0 && !form.currentEmail.trim())}
             sx={{
               bgcolor: "#B71C1C",
               "&:hover": { bgcolor: "#D32F2F" },
@@ -425,7 +511,7 @@ const StaffPage = () => {
               fontWeight: "bold"
             }}
           >
-            {processing ? <CircularProgress size={24} sx={{ color: "white" }} /> : "Save"}
+            {processing ? <CircularProgress size={24} sx={{ color: "white" }} /> : "Add Account"}
           </Button>
         </DialogActions>
       </Dialog>
