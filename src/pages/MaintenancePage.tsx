@@ -37,8 +37,7 @@ import axios from "axios";
 import { useEffect, useState } from "react";
 import Loader from "../components/Loader";
 
-const API_URL =
-  "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
+const API_BASE_URL = "http://localhost:5000/api";
 
 interface MaintenanceItem {
   num: string;
@@ -120,29 +119,25 @@ const MaintenancePage = () => {
   const fetchMaintenance = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(API_URL, {
-        params: { sheet: "maintenance", action: "read" },
-      });
-
-      const result = response.data;
-      if (result.success) {
-        const rows = result.data;
-        const headers = rows[1];
-        const idx = (key: string) => headers.indexOf(key);
-
-        const parsed: MaintenanceItem[] = rows.slice(2).map((row: any[]) => ({
-          num: row[idx("NO.")] || "",
-          equipment_num: row[idx("EQUIPMENT_NO")] || "",
-          equipment_name: row[idx("EQUIPMENT_NAME")] || "",
-          brand_model: row[idx("BRAND_MODEL")] || "",
-          identifier_type: row[idx("IDENTIFIER_TYPE")] || "",
-          identifier_number: row[idx("IDENTIFIER_NUMBER")] || "",
-          month: row[idx("MONTH")] || "",
-          date_accomplished: row[idx("DATE_ACCOMPLISHED")] || "",
-          accomplished_by: row[idx("ACCOMPLISHED_BY")] || "",
+      // call local server endpoint
+      const resp = await axios.post(`${API_BASE_URL}/maintenance`, { action: "read" });
+      if (resp.data && resp.data.success) {
+        const rows = resp.data.data || [];
+        // server returns array of maintenance objects; map to MaintenanceItem shape expected by this component
+        const parsed: MaintenanceItem[] = rows.map((it: any) => ({
+          num: (it.maintenance_num ?? it.num ?? "").toString(),
+          equipment_num: (it.equipment_num ?? "").toString(),
+          equipment_name: it.equipment_name ?? it.equipment_name ?? "",
+          brand_model: it.brand_model ?? "",
+          identifier_type: it.identifier_type ?? "",
+          identifier_number: it.identifier_number ?? "",
+          month: it.month ?? "",
+          date_accomplished: it.date_accomplished ? new Date(it.date_accomplished).toISOString() : "",
+          accomplished_by: it.accomplished_by ?? ""
         }));
-
         setMaintenance(parsed);
+      } else {
+        setMaintenance([]);
       }
     } catch (err) {
       console.error("Failed to fetch maintenance records", err);
@@ -158,14 +153,12 @@ const MaintenancePage = () => {
   const handleUpdateItem = async () => {
     setProcessing(true);
     try {
-      await axios.get(API_URL, {
-        params: {
-          sheet: "maintenance",
-          action: "update",
-          num: form.num,
-          accomplished_by: form.accomplished_by,
-          date_accomplished: new Date().toISOString().split('T')[0]
-        },
+      // call server to update maintenance row by maintenance_num (num)
+      await axios.post(`${API_BASE_URL}/maintenance`, {
+        action: "update",
+        num: form.num,
+        accomplished_by: form.accomplished_by
+        // server will set date_accomplished automatically in handler
       });
 
       setForm({
@@ -173,10 +166,11 @@ const MaintenancePage = () => {
         accomplished_by: ""
       });
 
-      fetchMaintenance();
+      await fetchMaintenance();
       setOpen(false);
     } catch (err) {
       console.error("Failed to update maintenance record", err);
+      alert("Failed to update maintenance record");
     } finally {
       setProcessing(false);
     }

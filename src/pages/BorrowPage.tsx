@@ -59,7 +59,7 @@ import axios from "axios";
 import { useEffect, useMemo, useState, useRef } from "react";
 import Loader from "../components/Loader";
 
-const API_BASE_URL = "https://elams-server.onrender.com/api";
+const API_BASE_URL = "http://localhost:5000/api";
 const user = JSON.parse(localStorage.getItem("user") || "{}");
 const userRole = user?.role || "";
 
@@ -252,136 +252,134 @@ export default function BorrowPage() {
   const [endDate, setEndDate] = useState<string>("");
 
   // Add these states
-const [returnDialogOpen, setReturnDialogOpen] = useState(false);
-const [selectedBorrowForReturn, setSelectedBorrowForReturn] = useState<BorrowRecord | null>(null);
-const [returnForm, setReturnForm] = useState<{
-  items: {
-    itemId: string;
-    itemName: string;
-    itemType: string;
-    borrowedQty: number;
-    returnedQty: number;
-    condition: string;
-    damageReport: string;
-    lackingItems: string;
-    notes: string;
-    returnedIdentifiers?: string[];
-  }[];
-}>({ items: [] });
+  const [returnDialogOpen, setReturnDialogOpen] = useState(false);
+  const [selectedBorrowForReturn, setSelectedBorrowForReturn] = useState<BorrowRecord | null>(null);
+  const [returnForm, setReturnForm] = useState<{
+    items: {
+      itemId: string;
+      itemName: string;
+      itemType: string;
+      borrowedQty: number;
+      returnedQty: number;
+      condition: string;
+      damageReport: string;
+      lackingItems: string;
+      notes: string;
+      returnedIdentifiers?: string[];
+    }[];
+  }>({ items: [] });
 
-// Add this function to handle return initiation
-const handleInitiateReturn = (record: BorrowRecord) => {
-  setSelectedBorrowForReturn(record);
-  
-  // Initialize return form with current items - FIXED ID ACCESS
-  const returnItems = record.items.map(item => ({
-    itemId: item._id || `${item.item_id}-${Date.now()}`, // Use _id if available, fallback to composite ID
-    itemName: item.item_name,
-    itemType: item.item_type,
-    borrowedQty: item.quantity,
-    returnedQty: item.quantity, // Default to full return
-    condition: item.return_condition || 'Good', // Use existing condition if available
-    damageReport: item.damage_report || '',
-    lackingItems: item.lacking_items || '',
-    notes: item.notes || '',
-    returnedIdentifiers: item.identifiers?.map(id => id.identifier) || []
-  }));
-  
-  setReturnForm({ items: returnItems });
-  setReturnDialogOpen(true);
-};
+  // highlight newly added item (glow)
+  const [newlyAddedItemNum, setNewlyAddedItemNum] = useState<string | null>(null);
 
-// Add this function to handle return submission
-const handleSubmitReturn = async () => {
-  try {
-    if (!selectedBorrowForReturn) return;
+  // View-only dialog state
+  const [viewDialogOpenBorrow, setViewDialogOpenBorrow] = useState(false);
+  const [viewBorrowRecord, setViewBorrowRecord] = useState<BorrowRecord | null>(null);
 
-    console.log('Submitting return for borrow:', selectedBorrowForReturn._id);
-    console.log('Return form items:', returnForm.items);
+  // Add this function to handle return initiation
+  const handleInitiateReturn = (record: BorrowRecord) => {
+    // Only include non-consumable items for return -> consumables are not returnable.
+    const nonConsumableItems = (record.items || []).filter(it => it.item_type === 'non-consumable');
+    
+    if (nonConsumableItems.length === 0) {
+      alert('This borrow record has no non-consumable items to return. Consumable items are not returnable.');
+      return;
+    }
 
-    // Update each item individually
-    const updatePromises = returnForm.items.map(item => {
-      const status = item.returnedQty === item.borrowedQty ? 'Returned' : 
-                    item.returnedQty > 0 ? 'Partially Returned' : 'Borrowed';
-      
-      console.log(`Updating item ${item.itemId}:`, {
-        status,
-        condition: item.condition,
-        returnedQty: item.returnedQty,
-        borrowedQty: item.borrowedQty
-      });
+    // Ensure we use the MongoDB subdocument _id for updates.
+    const returnItems = nonConsumableItems.map(item => {
+      if (!item._id) {
+        // If no subdocument _id, we cannot reliably update server-side item; mark for skip but still present
+        console.warn('Borrow item missing _id (cannot update):', item);
+      }
+      return {
+        itemId: item._id || '', // empty => will be skipped on submit
+        itemName: item.item_name,
+        itemType: item.item_type,
+        borrowedQty: item.quantity,
+        returnedQty: item.quantity, // default to full
+        condition: item.return_condition || 'Good',
+        damageReport: item.damage_report || '',
+        lackingItems: item.lacking_items || '',
+        notes: item.notes || '',
+        returnedIdentifiers: item.identifiers?.map((id: any) => id.identifier) || []
+      };
+    });
 
-      return axios.put(
-        `${API_BASE_URL}/borrow-records/${selectedBorrowForReturn._id}/items/${item.itemId}`,
-        {
-          status: status,
+    setSelectedBorrowForReturn(record);
+    setReturnForm({ items: returnItems });
+    setReturnDialogOpen(true);
+  };
+
+  // Add this function to handle return submission
+  const handleSubmitReturn = async () => {
+    try {
+      if (!selectedBorrowForReturn) return;
+
+      const updatePromises: Promise<any>[] = [];
+      const skipped: string[] = [];
+
+      for (const item of returnForm.items) {
+        if (!item.itemId) {
+          // cannot update items without a valid subdocument _id
+          skipped.push(item.itemName);
+          continue;
+        }
+
+        const status = item.returnedQty === item.borrowedQty ? 'Returned' :
+                       item.returnedQty > 0 ? 'Partially Returned' : 'Borrowed';
+
+        const payload: any = {
+          status,
           condition: item.condition,
           damageReport: item.damageReport,
           lackingItems: item.lackingItems,
           notes: item.notes
+        };
+
+        if (item.returnedIdentifiers && item.returnedIdentifiers.length > 0) {
+          payload.returnedIdentifiers = item.returnedIdentifiers;
         }
-      );
-    });
 
-    const results = await Promise.all(updatePromises);
-    console.log('Return API responses:', results);
-    
-    setReturnDialogOpen(false);
-    await fetchRecords(); // Refresh the records
-    await fetchItems(); // Refresh inventory
-    alert('Items returned successfully!');
-  } catch (error: any) {
-    console.error('Return submission error:', error);
-    console.error('Error details:', error.response?.data);
-    alert('Failed to return items: ' + (error.response?.data?.error || error.message));
-  }
-};
+        updatePromises.push(
+          axios.put(`${API_BASE_URL}/borrow-records/${selectedBorrowForReturn._id}/items/${item.itemId}`, payload)
+        );
+      }
 
-// Update the condition of a specific item in return form
-const updateReturnItemCondition = (itemIndex: number, updates: any) => {
-  setReturnForm(prev => ({
-    items: prev.items.map((item, index) => 
-      index === itemIndex ? { ...item, ...updates } : item
-    )
-  }));
-};
+      const results = await Promise.allSettled(updatePromises);
+      const failed = results.filter(r => r.status === 'rejected');
 
-// Fix the View function to only view, not update
-const handleViewBorrow = (record: BorrowRecord) => {
-  setSelectedBorrowForReturn(record);
-  setBorrowType(record.borrow_type);
-  setUserType(record.user_type);
-  setRequestForm({
-    borrow_id: record._id || "",
-    borrow_type: record.borrow_type,
-    user_type: record.user_type,
-    borrow_user: record.borrow_user,
-    course: record.course,
-    group_number: record.group_number || "",
-    group_leader: record.group_leader || "",
-    group_leader_id: record.group_leader_id || "",
-    instructor: record.instructor,
-    subject: record.subject,
-    schedule: record.schedule,
-    status: record.status,
-    date_borrowed: record.date_borrowed,
-    reservation_code: record.reservation_code || "",
-  });
+      await fetchRecords();
+      await fetchItems();
+      setReturnDialogOpen(false);
 
-  const itemsArr = record.items.map((item) => ({
-    num: item.item_id,
-    name: item.item_name,
-    qty: item.quantity,
-    available: 0,
-    is_consumable: item.item_type === 'consumable',
-    selected_identifiers: item.identifiers?.map(i => i.identifier),
-    item_type: item.item_type
-  }));
-  
-  setSelectedItems(itemsArr);
-  setActiveStep(3); // jump to summary (view only)
-  setOpen(true);
-};
+      if (skipped.length > 0) {
+        alert(`Returned processed. Note: some items were skipped because they have no server ID: ${skipped.join(', ')}`);
+      } else if (failed.length > 0) {
+        alert('Return processed but some updates failed. Check console for details.');
+      } else {
+        alert('Items returned successfully!');
+      }
+    } catch (err) {
+      console.error('Return submission error:', err);
+      alert('Failed to return items, see console for details.');
+    }
+  };
+
+  // Update the condition of a specific item in return form
+  const updateReturnItemCondition = (itemIndex: number, updates: any) => {
+    setReturnForm(prev => ({
+      items: prev.items.map((item, index) => 
+        index === itemIndex ? { ...item, ...updates } : item
+      )
+    }));
+  };
+
+  // Fix the View function to open a read-only dialog (do not reuse the stepper)
+  const handleViewBorrow = (record: BorrowRecord) => {
+    setViewBorrowRecord(record);
+    setViewDialogOpenBorrow(true);
+  };
 
   const handleChangePage = (_: unknown, newPage: number) => {
     setPage(newPage);
@@ -673,6 +671,72 @@ const handleViewBorrow = (record: BorrowRecord) => {
     }
   };
 
+  // Load reservation items into selected items (one cart line per assigned inventory item)
+  const loadReservationItems = (reservation: Reservation) => {
+    if (!reservation || !Array.isArray(reservation.assigned_items)) {
+      console.warn('No assigned_items on reservation', reservation);
+      setSelectedItems([]);
+      return;
+    }
+
+    const reservationItemsMap: Record<string, SelectedItem> = {};
+
+    // Helper to normalize item_type
+    const normalizeType = (t?: string) => (t === 'consumable' ? 'consumable' : 'non-consumable');
+
+    reservation.assigned_items.forEach((assigned) => {
+      const requestedQty = Number(assigned.quantity || 0);
+      const assignedType = normalizeType(assigned.item_type);
+      let inventoryItem: InventoryItem | undefined;
+
+      // Prefer exact num (item_id) match first
+      if (assigned.item_id) {
+        inventoryItem = items.find(i => (i.num === String(assigned.item_id) || i.num === assigned.item_id) && i.item_type === assignedType);
+      }
+
+      // Fallback to name match (case-insensitive) with same type
+      if (!inventoryItem && assigned.item_name) {
+        inventoryItem = items.find(i =>
+          i.item_type === assignedType &&
+          i.equipment_name?.toLowerCase().includes(assigned.item_name.toLowerCase())
+        );
+      }
+
+      // Build selected item key (use inventory num when available, else a generated key)
+      const key = inventoryItem ? `${inventoryItem.num}:::${assignedType}` : `${assigned.item_id || 'temp'}:::${assigned.item_name}:::${assignedType}`;
+
+      const selectedIdentifiers = assigned.identifier ? [assigned.identifier] : [];
+
+      if (reservationItemsMap[key]) {
+        // merge: sum qty and append identifiers (unique)
+        reservationItemsMap[key].qty += requestedQty;
+        reservationItemsMap[key].selected_identifiers = Array.from(new Set([...(reservationItemsMap[key].selected_identifiers || []), ...selectedIdentifiers]));
+      } else {
+        const sel: SelectedItem = {
+          num: inventoryItem ? inventoryItem.num : (assigned.item_id ? String(assigned.item_id) : `temp-${Date.now()}-${Math.random().toString(36).slice(2,6)}`),
+          name: inventoryItem ? inventoryItem.equipment_name : assigned.item_name,
+          qty: requestedQty,
+          available: inventoryItem ? (inventoryItem.available ?? 0) : requestedQty,
+          is_consumable: assignedType === 'consumable' || Boolean(inventoryItem?.is_consumable),
+          selected_identifiers: selectedIdentifiers.length > 0 ? selectedIdentifiers : undefined,
+          identifier_type: inventoryItem?.identifier_type,
+          item_type: assignedType
+        };
+        reservationItemsMap[key] = sel;
+      }
+    });
+
+    const reservationItems = Object.values(reservationItemsMap);
+
+    // Set to state and highlight last added item briefly
+    setSelectedItems(reservationItems);
+    if (reservationItems.length > 0) {
+      const lastNum = reservationItems[reservationItems.length - 1].num;
+      setNewlyAddedItemNum(lastNum);
+      setTimeout(() => setNewlyAddedItemNum(null), 1600);
+    }
+  };
+
   useEffect(() => {
     fetchRecords();
     fetchItems();
@@ -752,9 +816,9 @@ const handleViewBorrow = (record: BorrowRecord) => {
   };
 
   // Open identifier selection dialog
-  const handleOpenIdentifierDialog = (item: InventoryItem) => {
+  const handleOpenIdentifierDialog = (item: InventoryItem, preselect: string[] = []) => {
     setCurrentItem(item);
-    setSelectedIdentifiers([]);
+    setSelectedIdentifiers(preselect || []);
     setIdentifierDialogOpen(true);
   };
 
@@ -773,13 +837,27 @@ const handleViewBorrow = (record: BorrowRecord) => {
       item_type: currentItem.item_type // ADDED: Include item_type
     };
 
-    setSelectedItems(prev => [...prev, newItem]);
+    // If item already exists in cart, update it (single-line cart per item)
+    setSelectedItems(prev => {
+      const exists = prev.find(i => i.num === newItem.num && i.item_type === newItem.item_type);
+      if (exists) {
+        return prev.map(i => (i.num === newItem.num && i.item_type === newItem.item_type)
+          ? { ...i, qty: Math.max(i.qty, newItem.qty), selected_identifiers: newItem.selected_identifiers }
+          : i
+        );
+      }
+      return [...prev, newItem];
+    });
+    // glow indicator
+    setNewlyAddedItemNum(newItem.num);
+    setTimeout(() => setNewlyAddedItemNum(null), 1800);
+
     setIdentifierDialogOpen(false);
     setCurrentItem(null);
     setSelectedIdentifiers([]);
   };
 
-  // update item qty - COMPLETELY FIXED VERSION
+  // Add or replace missing updateItemQty implementation
   const updateItemQty = (
     num: string,
     delta: number,
@@ -787,144 +865,60 @@ const handleViewBorrow = (record: BorrowRecord) => {
     name: string,
     is_consumable: boolean = false
   ) => {
-    const item_type = is_consumable ? 'consumable' : 'non-consumable';
-    
+    const item_type = is_consumable ? "consumable" : "non-consumable";
+
     setSelectedItems((prev) => {
       const existing = prev.find((i) => i.num === num && i.item_type === item_type);
-      
+      const invItem = items.find((it) => it.num === num && it.item_type === item_type);
+
+      // If no existing cart entry
       if (!existing) {
-        // For non-consumable items with identifiers, open the dialog
-        if (!is_consumable && delta > 0) {
-          const item = items.find(i => i.num === num && i.item_type === item_type);
-          if (item && item.identifiers && item.identifiers.length > 0) {
-            handleOpenIdentifierDialog(item);
-            return prev;
-          }
+        // If inventory item has identifiers, require identifier selection first
+        if (invItem && invItem.identifiers && invItem.identifiers.length > 0) {
+          handleOpenIdentifierDialog(invItem, []); // open dialog to pick identifiers
+          return prev;
         }
-        
+
+        // Otherwise add a new item with qty 1 when delta > 0
         if (delta > 0) {
-          const newItem: SelectedItem = { 
-            num, 
-            name, 
-            qty: 1, 
+          const newItem: SelectedItem = {
+            num,
+            name,
+            qty: 1,
             available,
             is_consumable,
-            item_type // ADDED: Include item_type
+            item_type,
           };
+          // glow feedback
+          setNewlyAddedItemNum(num);
+          setTimeout(() => setNewlyAddedItemNum(null), 1800);
           return [...prev, newItem];
         }
+
         return prev;
       }
-      
-      // Calculate new quantity
+
+      // If existing and user tries to increase quantity for an item that has identifiers,
+      // open identifier dialog so they can select additional identifiers.
+      if (delta > 0 && invItem && invItem.identifiers && invItem.identifiers.length > 0) {
+        // Preselect already chosen identifiers if any
+        handleOpenIdentifierDialog(invItem, existing.selected_identifiers || []);
+        return prev;
+      }
+
+      // Calculate new qty bounded by 0..available
       const newQty = Math.max(0, Math.min(existing.qty + delta, available));
-      
+
+      // If qty becomes zero, remove item
       if (newQty === 0) {
         return prev.filter((i) => !(i.num === num && i.item_type === item_type));
       }
-      
-      // Return new array with updated item
-      return prev.map((i) => 
-        (i.num === num && i.item_type === item_type) ? { ...i, qty: newQty } : i
+
+      // Otherwise update qty
+      return prev.map((i) =>
+        i.num === num && i.item_type === item_type ? { ...i, qty: newQty } : i
       );
     });
-  };
-
-  // Remove item from cart - FIXED
-  const removeFromCart = (num: string, item_type: 'consumable' | 'non-consumable') => {
-    setSelectedItems(prev => prev.filter(item => !(item.num === num && item.item_type === item_type)));
-  };
-
-  // Load reservation items into selected items - FIXED
-  const loadReservationItems = (reservation: Reservation) => {
-    const reservationItems: SelectedItem[] = [];
-    
-    if (!reservation.assigned_items || !Array.isArray(reservation.assigned_items)) {
-      console.error('No assigned items found in reservation:', reservation);
-      setSelectedItems([]);
-      return;
-    }
-    
-    console.log('=== LOADING RESERVATION ITEMS DEBUG ===');
-    console.log('Assigned items from reservation:', reservation.assigned_items);
-    console.log('Available inventory items:', items);
-    
-// In loadReservationItems function - IMPROVED MATCHING LOGIC
-reservation.assigned_items.forEach(assignedItem => {
-  console.log('Processing assigned item:', assignedItem);
-  console.log('Item type:', assignedItem.item_type);
-  
-  let inventoryItem = null;
-  
-  // For consumables, try to match by description/name AND type
-  if (assignedItem.item_type === 'consumable') {
-    // Try to find consumable by name/description AND type
-    inventoryItem = items.find(item => 
-      item.item_type === 'consumable' &&
-      (item.equipment_name?.toLowerCase().includes(assignedItem.item_name.toLowerCase()) ||
-       item.description?.toLowerCase().includes(assignedItem.item_name.toLowerCase()) ||
-       assignedItem.item_name.toLowerCase().includes(item.equipment_name?.toLowerCase() || '') ||
-       assignedItem.item_name.toLowerCase().includes(item.description?.toLowerCase() || ''))
-    );
-    
-    console.log('Consumable match result:', inventoryItem);
-  } 
-  // For non-consumables, try exact ID match first, then name match WITH TYPE
-  else {
-    // Try exact ID match with type
-    inventoryItem = items.find(item => 
-      item.num === assignedItem.item_id && 
-      item.item_type === 'non-consumable'
-    );
-    
-    // If no ID match, try name match with type
-    if (!inventoryItem) {
-      inventoryItem = items.find(item => 
-        item.item_type === 'non-consumable' &&
-        item.equipment_name?.toLowerCase().includes(assignedItem.item_name.toLowerCase())
-      );
-    }
-  }
-  
-  if (inventoryItem) {
-    console.log('✅ Found matching inventory item:', inventoryItem);
-    
-    const selectedItem: SelectedItem = {
-      num: inventoryItem.num,
-      name: inventoryItem.equipment_name,
-      qty: assignedItem.quantity,
-      available: inventoryItem.available,
-      is_consumable: assignedItem.item_type === 'consumable',
-      selected_identifiers: assignedItem.identifier ? [assignedItem.identifier] : [],
-      identifier_type: inventoryItem.identifier_type,
-      item_type: assignedItem.item_type // This should be correct now
-    };
-    
-    reservationItems.push(selectedItem);
-  } else {
-    console.log('❌ No inventory match found for:', assignedItem.item_name);
-    console.log('Creating basic item with reservation data');
-    
-    // Create basic item using reservation data
-    const basicItem: SelectedItem = {
-      num: assignedItem.item_id || `temp-${Date.now()}-${Math.random()}`,
-      name: assignedItem.item_name,
-      qty: assignedItem.quantity,
-      available: assignedItem.quantity, // Use assigned quantity as available
-      is_consumable: assignedItem.item_type === 'consumable',
-      selected_identifiers: assignedItem.identifier ? [assignedItem.identifier] : [],
-      item_type: assignedItem.item_type // This should be correct now
-    };
-    
-    reservationItems.push(basicItem);
-  }
-});
-    console.log('Final reservation items to set:', reservationItems);
-    console.log('Consumable items count:', reservationItems.filter(item => item.is_consumable).length);
-    console.log('Non-consumable items count:', reservationItems.filter(item => !item.is_consumable).length);
-    console.log('=== END DEBUG ===');
-    
-    setSelectedItems(reservationItems);
   };
 
   // stepper nav
@@ -973,6 +967,23 @@ reservation.assigned_items.forEach(assignedItem => {
         setError("Please select at least one item.");
         return;
       }
+
+      // Validate identifier requirements before moving to Confirmation:
+      for (const sItem of selectedItems) {
+        const inv = items.find(i => i.num === sItem.num && i.item_type === sItem.item_type);
+        if (inv && inv.identifiers && inv.identifiers.length > 0) {
+          // require identifiers selected and count matches qty (or at least >= qty)
+          if (!sItem.selected_identifiers || sItem.selected_identifiers.length < sItem.qty) {
+            setError(`Please select ${sItem.qty} identifier(s) for "${sItem.name}"`);
+            // open identifier selection for this item (prefill existing selections)
+            if (inv) {
+              handleOpenIdentifierDialog(inv, sItem.selected_identifiers?.slice(0, sItem.qty) || []);
+            }
+            return;
+          }
+        }
+      }
+
       setError(null);
       setActiveStep(3);
     }
@@ -1132,6 +1143,20 @@ reservation.assigned_items.forEach(assignedItem => {
   // save borrow
   const handleConfirmBorrow = async () => {
     if (selectedItems.length === 0) return;
+
+    // Final validation: ensure identifiers are selected where required
+    for (const sItem of selectedItems) {
+      const inv = items.find(i => i.num === sItem.num && i.item_type === sItem.item_type);
+      if (inv && inv.identifiers && inv.identifiers.length > 0) {
+        if (!sItem.selected_identifiers || sItem.selected_identifiers.length < sItem.qty) {
+          // open identifier dialog for this item and block submission
+          setError(`Please select ${sItem.qty} identifier(s) for "${sItem.name}" before confirming.`);
+          handleOpenIdentifierDialog(inv, sItem.selected_identifiers?.slice(0, sItem.qty) || []);
+          return;
+        }
+      }
+    }
+
     setSaving(true);
     try {
       const borrowData = {
@@ -1382,10 +1407,10 @@ reservation.assigned_items.forEach(assignedItem => {
               boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
             }}
           >
-            + New Borrow
+            + New Borrow 
           </Button>
 
-          {userRole === "Custodian" || userRole === "Admin"  && (
+          {(userRole === "Custodian" || userRole === "Admin")  && (
             <Button
               variant="outlined"
               color="error"
@@ -1403,7 +1428,7 @@ reservation.assigned_items.forEach(assignedItem => {
           )}
 
           {/* AI Report Button - Only show for Custodian */}
-          {userRole === "Custodian" || userRole === "Admin"  && (
+          {(userRole === "Custodian" || userRole === "Admin")  && (
             <Button
               variant="outlined"
               color="primary"
@@ -1427,7 +1452,7 @@ reservation.assigned_items.forEach(assignedItem => {
           )}
 
               {/* ADD THIS NEW BUTTON - Generate Report */}
-          {userRole === "Custodian" || userRole === "Admin" && (
+          {(userRole === "Custodian" || userRole === "Admin") && (
             <Button
               variant="outlined"
               color="secondary"
@@ -1627,7 +1652,7 @@ reservation.assigned_items.forEach(assignedItem => {
       </Tooltip>
     )}
 
-    {userRole === "Custodian" || userRole === "Admin" && (
+    {(userRole === "Custodian" || userRole === "Admin") && (
       <Tooltip title="Delete">
         <IconButton
           color="error"
@@ -1679,7 +1704,7 @@ reservation.assigned_items.forEach(assignedItem => {
             borderColor: "divider",
           }}
         >
-          {requestForm.borrow_id ? "Update Borrow Request" : "New Borrow Request"}
+          {requestForm.borrow_id ? "Update Borrow Request" : "New Borrow"}
           <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <EventIcon color="error" />
             <Typography variant="caption" color="text.secondary">
@@ -1914,6 +1939,7 @@ reservation.assigned_items.forEach(assignedItem => {
               )}
 
               <Stack direction="row" spacing={2} mb={3} alignItems="center">
+                {/* filters/search - unchanged */}
                 <FormControl sx={{ minWidth: 180 }}>
                   <InputLabel>Filter Items</InputLabel>
                   <Select
@@ -1944,345 +1970,287 @@ reservation.assigned_items.forEach(assignedItem => {
                 />
               </Stack>
 
-              {/* Barcode Scanner Search */}
-              <TextField
-                inputRef={barcodeInputRef}
-                placeholder="Scan barcode or type identifier..."
-                value={barcodeSearch}
-                onChange={(e) => setBarcodeSearch(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter') {
-                    handleBarcodeSearch(barcodeSearch);
-                  }
-                }}
-                variant="outlined"
-                size="small"
-                fullWidth
-                sx={{ mb: 3 }}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon color="primary" />
-                    </InputAdornment>
-                  ),
-                  endAdornment: barcodeSearch && (
-                    <InputAdornment position="end">
-                      <IconButton
-                        size="small"
-                        onClick={() => setBarcodeSearch("")}
-                      >
-                        <ClearIcon />
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                }}
-              />
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                {/* Left: Items list */}
+                <Box sx={{ flex: 2, maxHeight: 520, overflow: 'auto' }}>
+                  {/* Barcode/Search input - unchanged */}
+                  <TextField
+                    inputRef={barcodeInputRef}
+                    placeholder="Scan barcode or type identifier..."
+                    value={barcodeSearch}
+                    onChange={(e) => setBarcodeSearch(e.target.value)}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter') {
+                        handleBarcodeSearch(barcodeSearch);
+                      }
+                    }}
+                    variant="outlined"
+                    size="small"
+                    fullWidth
+                    sx={{ mb: 3 }}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <SearchIcon color="primary" />
+                        </InputAdornment>
+                      ),
+                      endAdornment: barcodeSearch && (
+                        <InputAdornment position="end">
+                          <IconButton size="small" onClick={() => setBarcodeSearch("")}><ClearIcon /></IconButton>
+                        </InputAdornment>
+                      )
+                    }}
+                  />
 
-              {/* Shopping Cart Summary - FIXED */}
-              {selectedItems.length > 0 && (
-                <Paper sx={{ p: 2, mb: 3, bgcolor: "grey.50" }}>
-                  <Stack direction="row" alignItems="center" spacing={1} mb={1}>
-                    <ShoppingCartIcon color="primary" />
-                    <Typography variant="h6">Selected Items</Typography>
-                    <Chip label={selectedItems.length} color="primary" size="small" />
-                  </Stack>
-                  
-                  <Stack spacing={1}>
-                    {selectedItems.map((item) => (
-                      <Box key={`${item.num}-${item.item_type}`} sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <Box>
-                          <Typography variant="body2" fontWeight="medium">
-                            {item.name}
-                            {item.selected_identifiers && ` (${item.selected_identifiers.join(", ")})`}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {item.is_consumable ? "Consumable" : "Non-Consumable"}
-                          </Typography>
-                        </Box>
+                  {itemsLoading ? (
+                    <Box sx={{ display: "flex", justifyContent: "center", p: 3 }}>
+                      <CircularProgress size={24} />
+                    </Box>
+                  ) : filteredItems.length === 0 ? (
+                    <Typography variant="body2" color="text.secondary" textAlign="center" py={3}>
+                      No items found
+                    </Typography>
+                  ) : (
+                    <Stack spacing={2}>
+                      {filteredItems.map((item) => {
+                        const cartItem = selectedItems.find(i => i.num === item.num && i.item_type === item.item_type);
+                        const currentQty = cartItem ? cartItem.qty : 0;
                         
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <IconButton
-                            size="small"
-                            onClick={() => updateItemQty(
-                              item.num, 
-                              -1, 
-                              item.available, 
-                              item.name,
-                              item.is_consumable
-                            )}
-                            disabled={item.qty <= 1}
-                          >
-                            -
-                          </IconButton>
-                          
-                          <Typography sx={{ minWidth: 30, textAlign: 'center' }}>
-                            {item.qty}
-                          </Typography>
-                          
-                          <IconButton
-                            size="small"
-                            onClick={() => updateItemQty(
-                              item.num, 
-                              1, 
-                              item.available, 
-                              item.name,
-                              item.is_consumable
-                            )}
-                            disabled={item.qty >= item.available}
-                          >
-                            +
-                          </IconButton>
-                          
-                          <IconButton 
-                            size="small" 
-                            color="error" 
-                            onClick={() => removeFromCart(item.num, item.item_type)}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </Stack>
-                      </Box>
-                    ))}
-                  </Stack>
-                </Paper>
-              )}
-
-              {/* Items List - FIXED */}
-              <Box sx={{ maxHeight: 400, overflow: "auto" }}>
-                {itemsLoading ? (
-                  <Box sx={{ display: "flex", justifyContent: "center", p: 3 }}>
-                    <CircularProgress size={24} />
-                  </Box>
-                ) : filteredItems.length === 0 ? (
-                  <Typography variant="body2" color="text.secondary" textAlign="center" py={3}>
-                    No items found
-                  </Typography>
-                ) : (
-                  <Stack spacing={2}>
-                    {filteredItems.map((item) => {
-                      const cartItem = selectedItems.find(i => i.num === item.num && i.item_type === item.item_type);
-                      const currentQty = cartItem ? cartItem.qty : 0;
-                      
-                      return (
-                        <Paper key={`${item.num}-${item.item_type}`} sx={{ p: 2 }}>
-                          <Stack direction="row" spacing={2} alignItems="center">
-                            <Box sx={{ flex: 1 }}>
-                              <Typography variant="body1" fontWeight="medium">
-                                {item.equipment_name}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {item.brand_model && `${item.brand_model} • `}
-                                {item.location && `Location: ${item.location} • `}
-                                Available: {item.available}
-                                {item.is_consumable && " • Consumable"}
-                              </Typography>
-                              
-                              {item.identifiers && item.identifiers.length > 0 && (
-                                <Typography variant="caption" display="block" color="text.secondary">
-                                  Identifiers: {item.identifiers.join(", ")}
+                        return (
+                          <Paper key={`${item.num}-${item.item_type}`} sx={{ p: 2 }}>
+                            <Stack direction="row" spacing={2} alignItems="center">
+                              <Box sx={{ flex: 1 }}>
+                                <Typography variant="body1" fontWeight="medium">{item.equipment_name}</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {item.brand_model && `${item.brand_model} • `}
+                                  {item.location && `Location: ${item.location} • `}
+                                  Available: {item.available}
+                                  {item.is_consumable && " • Consumable"}
                                 </Typography>
-                              )}
-                            </Box>
-                            
-                            <Stack direction="row" spacing={1} alignItems="center">
-                              <IconButton
-                                size="small"
-                                onClick={() => updateItemQty(
-                                  item.num, 
-                                  -1, 
-                                  item.available, 
-                                  item.equipment_name,
-                                  item.is_consumable
+                                
+                                {item.identifiers && item.identifiers.length > 0 && (
+                                  <Typography variant="caption" display="block" color="text.secondary">
+                                    Identifiers: {item.identifiers.join(", ")}
+                                  </Typography>
                                 )}
-                                disabled={currentQty === 0}
-                              >
-                                -
-                              </IconButton>
+                              </Box>
                               
-                              <Typography sx={{ minWidth: 30, textAlign: 'center' }}>
-                                {currentQty}
-                              </Typography>
-                              
-                              <IconButton
-                                size="small"
-                                onClick={() => updateItemQty(
-                                  item.num, 
-                                  1, 
-                                  item.available, 
-                                  item.equipment_name,
-                                  item.is_consumable
-                                )}
-                                disabled={currentQty >= item.available}
-                              >
-                                +
-                              </IconButton>
+                              <Stack direction="row" spacing={1} alignItems="center">
+                                <IconButton size="small" onClick={() => updateItemQty(item.num, -1, item.available, item.equipment_name, item.is_consumable)} disabled={currentQty === 0}>-</IconButton>
+                                <Typography sx={{ minWidth: 30, textAlign: 'center' }}>{currentQty}</Typography>
+                                <IconButton size="small" onClick={() => updateItemQty(item.num, 1, item.available, item.equipment_name, item.is_consumable)} disabled={currentQty >= item.available}>+</IconButton>
+                              </Stack>
                             </Stack>
-                          </Stack>
-                        </Paper>
-                      );
-                    })}
-                  </Stack>
-                )}
+                          </Paper>
+                        );
+                      })}
+                    </Stack>
+                  )}
+                </Box>
+
+                {/* Right: POS-style Cart */}
+                <Box sx={{ width: 360, position: 'relative' }}>
+                  <Paper sx={{ p: 2, position: 'sticky', top: 16 }}>
+                    <Stack direction="row" alignItems="center" spacing={1} mb={1}>
+                      <ShoppingCartIcon color="primary" />
+                      <Typography variant="h6">Cart</Typography>
+                      <Chip label={selectedItems.length} color="primary" size="small" />
+                    </Stack>
+
+                    <Stack spacing={1}>
+                      {selectedItems.length === 0 ? (
+                        <Typography variant="body2" color="text.secondary">No items selected</Typography>
+                      ) : selectedItems.map(item => {
+                          const glow = item.num === newlyAddedItemNum;
+                          return (
+                            <Paper key={`${item.num}-${item.item_type}`} sx={{
+                              p: 1,
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              transition: 'box-shadow 300ms, transform 300ms',
+                              boxShadow: glow ? '0 0 18px rgba(59,130,246,0.55)' : 'none',
+                              transform: glow ? 'translateY(-2px)' : 'none',
+                              bgcolor: glow ? 'rgba(59,130,246,0.03)' : 'inherit'
+                            }}>
+                              <Box>
+                                <Typography variant="body2" fontWeight="medium">{item.name}</Typography>
+                                {item.selected_identifiers && item.selected_identifiers.length > 0 && (
+                                  <Typography variant="caption" color="text.secondary">IDs: {item.selected_identifiers.join(', ')}</Typography>
+                                )}
+                              </Box>
+                              <Box>
+                                <Typography variant="body2" textAlign="right">{item.qty}</Typography>
+                                <Typography variant="caption" color="text.secondary">{item.is_consumable ? 'Consumable' : 'Non-Consumable'}</Typography>
+                              </Box>
+                            </Paper>
+                          );
+                        })}
+                    </Stack>
+
+                    <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
+                      <Button fullWidth variant="outlined" onClick={() => { setSelectedItems([]); setNewlyAddedItemNum(null); }}>Clear</Button>
+                      <Button fullWidth variant="contained" onClick={handleNext} sx={{ bgcolor: '#b91c1c', '&:hover': { bgcolor: '#9f1515' }}}>Proceed</Button>
+                    </Box>
+                  </Paper>
+                </Box>
               </Box>
             </Box>
           )}
 
           {/* Step 3: Confirmation */}
-{/* Step 3: Confirmation */}
-{activeStep === 3 && (
-  <Box>
-    <Typography variant="h6" gutterBottom>
-      {requestForm.borrow_id ? "Borrow Details" : "Borrow Request Summary"}
-    </Typography>
-    
-    <Paper sx={{ p: 2, mb: 3, bgcolor: "grey.50" }}>
-      <Typography variant="subtitle2" gutterBottom>Borrower Information</Typography>
-      <Stack spacing={1}>
-        <Box sx={{ display: "flex" }}>
-          <Typography variant="body2" sx={{ minWidth: 120 }}>Type:</Typography>
-          <Typography variant="body2" fontWeight="medium">{borrowType} - {userType}</Typography>
-        </Box>
-        {borrowType === 'Reservation' && (
-          <Box sx={{ display: "flex" }}>
-            <Typography variant="body2" sx={{ minWidth: 120 }}>Reservation Code:</Typography>
-            <Typography variant="body2" fontWeight="medium">{reservationCode}</Typography>
-          </Box>
-        )}
-        <Box sx={{ display: "flex" }}>
-          <Typography variant="body2" sx={{ minWidth: 120 }}>Borrower:</Typography>
-          <Typography variant="body2" fontWeight="medium">{requestForm.borrow_user}</Typography>
-        </Box>
-        <Box sx={{ display: "flex" }}>
-          <Typography variant="body2" sx={{ minWidth: 120 }}>Course:</Typography>
-          <Typography variant="body2" fontWeight="medium">{requestForm.course}</Typography>
-        </Box>
-        {userType === 'Group' && (
-          <>
-            <Box sx={{ display: "flex" }}>
-              <Typography variant="body2" sx={{ minWidth: 120 }}>Group:</Typography>
-              <Typography variant="body2" fontWeight="medium">{requestForm.group_number}</Typography>
-            </Box>
-            <Box sx={{ display: "flex" }}>
-              <Typography variant="body2" sx={{ minWidth: 120 }}>Leader:</Typography>
-              <Typography variant="body2" fontWeight="medium">{requestForm.group_leader}</Typography>
-            </Box>
-            <Box sx={{ display: "flex" }}>
-              <Typography variant="body2" sx={{ minWidth: 120 }}>Leader ID:</Typography>
-              <Typography variant="body2" fontWeight="medium">{requestForm.group_leader_id}</Typography>
-            </Box>
-          </>
-        )}
-        <Box sx={{ display: "flex" }}>
-          <Typography variant="body2" sx={{ minWidth: 120 }}>Instructor:</Typography>
-          <Typography variant="body2" fontWeight="medium">{requestForm.instructor}</Typography>
-        </Box>
-        <Box sx={{ display: "flex" }}>
-          <Typography variant="body2" sx={{ minWidth: 120 }}>Subject:</Typography>
-          <Typography variant="body2" fontWeight="medium">{requestForm.subject}</Typography>
-        </Box>
-        <Box sx={{ display: "flex" }}>
-          <Typography variant="body2" sx={{ minWidth: 120 }}>Schedule:</Typography>
-          <Typography variant="body2" fontWeight="medium">{requestForm.schedule}</Typography>
-        </Box>
-        {/* Add return status information */}
-        <Box sx={{ display: "flex" }}>
-          <Typography variant="body2" sx={{ minWidth: 120 }}>Status:</Typography>
-          <Chip 
-            label={requestForm.status} 
-            size="small" 
-            color={
-              requestForm.status === "Returned" ? "success" : 
-              requestForm.status === "Partially Returned" ? "warning" : "error"
-            } 
-          />
-        </Box>
-        {requestForm.status === "Returned" && selectedBorrowForReturn?.date_returned && (
-          <Box sx={{ display: "flex" }}>
-            <Typography variant="body2" sx={{ minWidth: 120 }}>Date Returned:</Typography>
-            <Typography variant="body2" fontWeight="medium">
-              {new Date(selectedBorrowForReturn.date_returned).toLocaleString()}
-            </Typography>
-          </Box>
-        )}
-      </Stack>
-    </Paper>
-    
-    <Paper sx={{ p: 2, bgcolor: "grey.50" }}>
-      <Typography variant="subtitle2" gutterBottom>
-        Items {requestForm.borrow_id ? "Details" : "to Borrow"}
-      </Typography>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell>Item</TableCell>
-            <TableCell align="right">Quantity</TableCell>
-            <TableCell>Type</TableCell>
-            <TableCell>Status</TableCell>
-            <TableCell>Condition</TableCell>
-            <TableCell>Notes</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {selectedItems.map((item: any) => (
-            <TableRow key={`${item.num}-${item.item_type}`}>
-              <TableCell>
-                <Typography variant="body2" fontWeight="medium">
-                  {item.name}
+          {activeStep === 3 && (
+            <Box>
+              <Typography variant="h6" gutterBottom>
+                {requestForm.borrow_id ? "Borrow Details" : "Borrow Request Summary"}
+              </Typography>
+              
+              <Paper sx={{ p: 2, mb: 3, bgcolor: "grey.50" }}>
+                <Typography variant="subtitle2" gutterBottom>Borrower Information</Typography>
+                <Stack spacing={1}>
+                  <Box sx={{ display: "flex" }}>
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>Type:</Typography>
+                    <Typography variant="body2" fontWeight="medium">{borrowType} - {userType}</Typography>
+                  </Box>
+                  {borrowType === 'Reservation' && (
+                    <Box sx={{ display: "flex" }}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Reservation Code:</Typography>
+                      <Typography variant="body2" fontWeight="medium">{reservationCode}</Typography>
+                    </Box>
+                  )}
+                  <Box sx={{ display: "flex" }}>
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>Borrower:</Typography>
+                    <Typography variant="body2" fontWeight="medium">{requestForm.borrow_user}</Typography>
+                  </Box>
+                  <Box sx={{ display: "flex" }}>
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>Course:</Typography>
+                    <Typography variant="body2" fontWeight="medium">{requestForm.course}</Typography>
+                  </Box>
+                  {userType === 'Group' && (
+                    <>
+                      <Box sx={{ display: "flex" }}>
+                        <Typography variant="body2" sx={{ minWidth: 120 }}>Group:</Typography>
+                        <Typography variant="body2" fontWeight="medium">{requestForm.group_number}</Typography>
+                      </Box>
+                      <Box sx={{ display: "flex" }}>
+                        <Typography variant="body2" sx={{ minWidth: 120 }}>Leader:</Typography>
+                        <Typography variant="body2" fontWeight="medium">{requestForm.group_leader}</Typography>
+                      </Box>
+                      <Box sx={{ display: "flex" }}>
+                        <Typography variant="body2" sx={{ minWidth: 120 }}>Leader ID:</Typography>
+                        <Typography variant="body2" fontWeight="medium">{requestForm.group_leader_id}</Typography>
+                      </Box>
+                    </>
+                  )}
+                  <Box sx={{ display: "flex" }}>
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>Instructor:</Typography>
+                    <Typography variant="body2" fontWeight="medium">{requestForm.instructor}</Typography>
+                  </Box>
+                  <Box sx={{ display: "flex" }}>
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>Subject:</Typography>
+                    <Typography variant="body2" fontWeight="medium">{requestForm.subject}</Typography>
+                  </Box>
+                  <Box sx={{ display: "flex" }}>
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>Schedule:</Typography>
+                    <Typography variant="body2" fontWeight="medium">{requestForm.schedule}</Typography>
+                  </Box>
+                  {/* Add return status information */}
+                  <Box sx={{ display: "flex" }}>
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>Status:</Typography>
+                    <Chip 
+                      label={requestForm.status} 
+                      size="small" 
+                      color={
+                        requestForm.status === "Returned" ? "success" : 
+                        requestForm.status === "Partially Returned" ? "warning" : "error"
+                      } 
+                    />
+                  </Box>
+                  {requestForm.status === "Returned" && selectedBorrowForReturn?.date_returned && (
+                    <Box sx={{ display: "flex" }}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Date Returned:</Typography>
+                      <Typography variant="body2" fontWeight="medium">
+                        {new Date(selectedBorrowForReturn.date_returned).toLocaleString()}
+                      </Typography>
+                    </Box>
+                  )}
+                </Stack>
+              </Paper>
+              
+              <Paper sx={{ p: 2, bgcolor: "grey.50" }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  Items {requestForm.borrow_id ? "Details" : "to Borrow"}
                 </Typography>
-                {item.selected_identifiers && item.selected_identifiers.length > 0 && (
-                  <Typography variant="caption" color="text.secondary">
-                    IDs: {item.selected_identifiers.join(", ")}
-                  </Typography>
-                )}
-              </TableCell>
-              <TableCell align="right">{item.qty}</TableCell>
-              <TableCell>
-                <Chip 
-                  label={item.is_consumable ? "Consumable" : "Non-Consumable"} 
-                  size="small" 
-                  color={item.is_consumable ? "secondary" : "primary"}
-                  variant="outlined"
-                />
-              </TableCell>
-              <TableCell>
-                <Chip 
-                  label={item.status || 'Borrowed'} 
-                  size="small" 
-                  color={
-                    item.status === "Returned" ? "success" : 
-                    item.status === "Partially Returned" ? "warning" : "default"
-                  }
-                />
-              </TableCell>
-              <TableCell>
-                {item.return_condition ? (
-                  <Chip 
-                    label={item.return_condition} 
-                    size="small" 
-                    color={
-                      item.return_condition === "Good" ? "success" : 
-                      item.return_condition === "Damaged" ? "warning" : 
-                      item.return_condition === "Broken" ? "error" : "default"
-                    }
-                  />
-                ) : (
-                  <Typography variant="body2" color="text.secondary">-</Typography>
-                )}
-              </TableCell>
-              <TableCell>
-                <Typography variant="body2" fontSize="0.75rem">
-                  {item.notes || '-'}
-                  {item.damage_report && ` Damage: ${item.damage_report}`}
-                  {item.lacking_items && ` Lacking: ${item.lacking_items}`}
-                </Typography>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </Paper>
-  </Box>
-)}
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Item</TableCell>
+                      <TableCell align="right">Quantity</TableCell>
+                      <TableCell>Type</TableCell>
+                      <TableCell>Status</TableCell>
+                      <TableCell>Condition</TableCell>
+                      <TableCell>Notes</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {selectedItems.map((item: any) => (
+                      <TableRow key={`${item.num}-${item.item_type}`}>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight="medium">
+                            {item.name}
+                          </Typography>
+                          {item.selected_identifiers && item.selected_identifiers.length > 0 && (
+                            <Typography variant="caption" color="text.secondary">
+                              IDs: {item.selected_identifiers.join(", ")}
+                            </Typography>
+                          )}
+                        </TableCell>
+                        <TableCell align="right">{item.qty}</TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={item.is_consumable ? "Consumable" : "Non-Consumable"} 
+                            size="small" 
+                            color={item.is_consumable ? "secondary" : "primary"}
+                            variant="outlined"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={item.status || 'Borrowed'} 
+                            size="small" 
+                            color={
+                              item.status === "Returned" ? "success" : 
+                              item.status === "Partially Returned" ? "warning" : "default"
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={item.return_condition} 
+                            size="small" 
+                            color={
+                              item.return_condition === "Good" ? "success" : 
+                              item.return_condition === "Damaged" ? "warning" : 
+                              item.return_condition === "Broken" ? "error" : "default"
+                            }
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" fontSize="0.75rem">
+                            {item.notes || '-'}
+
+                            {item.damage_report && ` Damage: ${item.damage_report}`}
+
+                            {item.lacking_items && ` Lacking: ${item.lacking_items}`}
+                          </Typography>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Paper>
+            </Box>
+          )}
 
           {error && (
             <Typography color="error" sx={{ mt: 2 }}>
@@ -2590,167 +2558,213 @@ reservation.assigned_items.forEach(assignedItem => {
           </Button>
         </DialogActions>
       </Dialog>
-{/* Return Items Dialog */}
-<Dialog 
-  open={returnDialogOpen} 
-  onClose={() => setReturnDialogOpen(false)}
-  maxWidth="md"
-  fullWidth
->
-  <DialogTitle>
-    <Stack direction="row" alignItems="center" spacing={1}>
-      <CheckCircleIcon color="success" />
-      <Typography variant="h6">Return Items</Typography>
-    </Stack>
-    <Typography variant="body2" color="text.secondary">
-      {selectedBorrowForReturn?.borrow_user} - {selectedBorrowForReturn?.course}
-    </Typography>
-  </DialogTitle>
-  
-  <DialogContent dividers>
-    <Typography variant="body2" color="text.secondary" gutterBottom>
-      Report the condition of returned items and fill out necessary forms for damaged/lost items.
-    </Typography>
 
-    {returnForm.items.map((item, index) => (
-      <Paper key={item.itemId} sx={{ p: 2, mb: 2 }}>
-        <Stack spacing={2}>
-          {/* Item Header */}
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="subtitle1" fontWeight="bold">
-              {item.itemName}
-            </Typography>
-            <Chip 
-              label={item.itemType} 
-              size="small" 
-              color={item.itemType === 'consumable' ? 'secondary' : 'primary'}
-              variant="outlined"
-            />
-          </Box>
+      {/* View Borrow Dialog - read-only */}
+      {viewDialogOpenBorrow && (
+        <Dialog open={viewDialogOpenBorrow} onClose={() => setViewDialogOpenBorrow(false)} maxWidth="md" fullWidth>
+          <DialogTitle>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <EventIcon sx={{ color: "#1976d2" }} />
+              <Typography variant="h6">View Borrow Request</Typography>
+            </Box>
+          </DialogTitle>
+          <DialogContent dividers>
+            {viewBorrowRecord ? (
+              <Stack spacing={2}>
+                <Paper sx={{ p: 2 }}>
+                  <Typography variant="subtitle2">Borrower</Typography>
+                  <Typography variant="body2">{viewBorrowRecord.borrow_user}</Typography>
+                  <Typography variant="caption" color="text.secondary">Course: {viewBorrowRecord.course}</Typography>
+                </Paper>
 
-          {/* Quantity Returned */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Typography variant="body2">Quantity to Return:</Typography>
-            <TextField
-              type="number"
-              size="small"
-              value={item.returnedQty}
-              onChange={(e) => updateReturnItemCondition(index, { 
-                returnedQty: Math.max(0, Math.min(item.borrowedQty, parseInt(e.target.value) || 0))
-              })}
-              inputProps={{ min: 0, max: item.borrowedQty }}
-              sx={{ width: 80 }}
-            />
-            <Typography variant="body2" color="text.secondary">
-              / {item.borrowedQty} borrowed
-            </Typography>
-          </Box>
-
-          {/* Condition Selection */}
-          <FormControl fullWidth size="small">
-            <InputLabel>Condition</InputLabel>
-            <Select
-              value={item.condition}
-              label="Condition"
-              onChange={(e) => updateReturnItemCondition(index, { condition: e.target.value })}
-            >
-              <MenuItem value="Good">Good</MenuItem>
-              <MenuItem value="Damaged">Damaged</MenuItem>
-              <MenuItem value="Broken">Broken</MenuItem>
-              <MenuItem value="Lost">Lost</MenuItem>
-              <MenuItem value="Lacking">Lacking</MenuItem>
-            </Select>
-          </FormControl>
-
-          {/* Condition-specific forms */}
-          {(item.condition === 'Damaged' || item.condition === 'Broken') && (
-            <TextField
-              label="Damage/Breakage Report"
-              multiline
-              rows={3}
-              value={item.damageReport}
-              onChange={(e) => updateReturnItemCondition(index, { damageReport: e.target.value })}
-              fullWidth
-              placeholder="Describe the damage or breakage in detail..."
-            />
-          )}
-
-          {item.condition === 'Lacking' && (
-            <TextField
-              label="Lacking Items Report"
-              multiline
-              rows={2}
-              value={item.lackingItems}
-              onChange={(e) => updateReturnItemCondition(index, { lackingItems: e.target.value })}
-              fullWidth
-              placeholder="Specify what items are missing or incomplete..."
-            />
-          )}
-
-          {item.condition === 'Lost' && (
-            <TextField
-              label="Loss Report"
-              multiline
-              rows={2}
-              value={item.damageReport}
-              onChange={(e) => updateReturnItemCondition(index, { damageReport: e.target.value })}
-              fullWidth
-              placeholder="Provide details about the loss..."
-            />
-          )}
-
-          {/* General Notes */}
-          <TextField
-            label="Additional Notes"
-            multiline
-            rows={2}
-            value={item.notes}
-            onChange={(e) => updateReturnItemCondition(index, { notes: e.target.value })}
-            fullWidth
-            placeholder="Any additional comments..."
-          />
-
-          {/* Identifier Selection for Non-Consumables */}
-          {item.itemType === 'non-consumable' && selectedBorrowForReturn && (
-            <FormControl fullWidth size="small">
-              <InputLabel>Returned Identifiers</InputLabel>
-              <Select
-                multiple
-                value={item.returnedIdentifiers || []}
-                label="Returned Identifiers"
-                onChange={(e) => updateReturnItemCondition(index, { 
-                  returnedIdentifiers: e.target.value 
-                })}
-                renderValue={(selected) => selected.join(', ')}
-              >
-                {selectedBorrowForReturn.items
-                  .find(borrowItem => borrowItem._id === item.itemId)
-                  ?.identifiers?.map(identifier => (
-                    <MenuItem key={identifier.identifier} value={identifier.identifier}>
-                      <Checkbox checked={item.returnedIdentifiers?.includes(identifier.identifier) || false} />
-                      <ListItemText primary={identifier.identifier} />
-                    </MenuItem>
+                <Paper sx={{ p: 2 }}>
+                  <Typography variant="subtitle2">Items</Typography>
+                  {viewBorrowRecord.items.map(item => (
+                    <Box key={item._id || `${item.item_id}-${item.item_name}`} sx={{ mb: 1 }}>
+                      <Typography variant="body2" fontWeight="medium">{item.item_name}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Qty: {item.quantity} • Type: {item.item_type}
+                      </Typography>
+                      {item.identifiers && item.identifiers.length > 0 && (
+                        <Typography variant="caption" display="block" color="text.secondary">
+                          IDs: {item.identifiers.map((id:any) => id.identifier).join(', ')}
+                        </Typography>
+                      )}
+                    </Box>
                   ))}
-              </Select>
-            </FormControl>
-          )}
-        </Stack>
-      </Paper>
-    ))}
-  </DialogContent>
-  
-  <DialogActions>
-    <Button onClick={() => setReturnDialogOpen(false)}>Cancel</Button>
-    <Button 
-      variant="contained" 
-      color="success" 
-      onClick={handleSubmitReturn}
-      startIcon={<CheckCircleIcon />}
-    >
-      Confirm Return
-    </Button>
-  </DialogActions>
-</Dialog>
+                </Paper>
+              </Stack>
+            ) : (
+              <Typography>No data</Typography>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setViewDialogOpenBorrow(false)}>Close</Button>
+          </DialogActions>
+        </Dialog>
+      )}
+
+      {/* Return Items Dialog */}
+      <Dialog 
+        open={returnDialogOpen} 
+        onClose={() => setReturnDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <CheckCircleIcon color="success" />
+            <Typography variant="h6">Return Items</Typography>
+          </Stack>
+          <Typography variant="body2" color="text.secondary">
+            {selectedBorrowForReturn?.borrow_user} - {selectedBorrowForReturn?.course}
+          </Typography>
+        </DialogTitle>
+        
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Report the condition of returned items and fill out necessary forms for damaged/lost items.
+          </Typography>
+
+          {returnForm.items.map((item, index) => (
+            <Paper key={item.itemId} sx={{ p: 2, mb: 2 }}>
+              <Stack spacing={2}>
+                {/* Item Header */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography variant="subtitle1" fontWeight="bold">
+                    {item.itemName}
+                  </Typography>
+                  <Chip 
+                    label={item.itemType} 
+                    size="small" 
+                    color={item.itemType === 'consumable' ? 'secondary' : 'primary'}
+                    variant="outlined"
+                  />
+                </Box>
+
+                {/* Quantity Returned */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Typography variant="body2">Quantity to Return:</Typography>
+                  <TextField
+                    type="number"
+                    size="small"
+                    value={item.returnedQty}
+                    onChange={(e) => updateReturnItemCondition(index, { 
+                      returnedQty: Math.max(0, Math.min(item.borrowedQty, parseInt(e.target.value) || 0))
+                    })}
+                    inputProps={{ min: 0, max: item.borrowedQty }}
+                    sx={{ width: 80 }}
+                  />
+                  <Typography variant="body2" color="text.secondary">
+                    / {item.borrowedQty} borrowed
+                  </Typography>
+                </Box>
+
+                {/* Condition Selection */}
+                <FormControl fullWidth size="small">
+                  <InputLabel>Condition</InputLabel>
+                  <Select
+                    value={item.condition}
+                    label="Condition"
+                    onChange={(e) => updateReturnItemCondition(index, { condition: e.target.value })}
+                  >
+                    <MenuItem value="Good">Good</MenuItem>
+                    <MenuItem value="Damaged">Damaged</MenuItem>
+                    <MenuItem value="Broken">Broken</MenuItem>
+                    <MenuItem value="Lost">Lost</MenuItem>
+                    <MenuItem value="Lacking">Lacking</MenuItem>
+                  </Select>
+                </FormControl>
+
+                {/* Condition-specific forms */}
+                {(item.condition === 'Damaged' || item.condition === 'Broken') && (
+                  <TextField
+                    label="Damage/Breakage Report"
+                    multiline
+                    rows={3}
+                    value={item.damageReport}
+                    onChange={(e) => updateReturnItemCondition(index, { damageReport: e.target.value })}
+                    fullWidth
+                    placeholder="Describe the damage or breakage in detail..."
+                  />
+                )}
+
+                {item.condition === 'Lacking' && (
+                  <TextField
+                    label="Lacking Items Report"
+                    multiline
+                    rows={2}
+                    value={item.lackingItems}
+                    onChange={(e) => updateReturnItemCondition(index, { lackingItems: e.target.value })}
+                    fullWidth
+                    placeholder="Specify what items are missing or incomplete..."
+                  />
+                )}
+
+                {item.condition === 'Lost' && (
+                  <TextField
+                    label="Loss Report"
+                    multiline
+                    rows={2}
+                    value={item.damageReport}
+                    onChange={(e) => updateReturnItemCondition(index, { damageReport: e.target.value })}
+                    fullWidth
+                    placeholder="Provide details about the loss..."
+                  />
+                )}
+
+                {/* General Notes */}
+                <TextField
+                  label="Additional Notes"
+                  multiline
+                  rows={2}
+                  value={item.notes}
+                  onChange={(e) => updateReturnItemCondition(index, { notes: e.target.value })}
+                  fullWidth
+                  placeholder="Any additional comments..."
+                />
+
+                {/* Identifier Selection for Non-Consumables */}
+                {item.itemType === 'non-consumable' && selectedBorrowForReturn && (
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Returned Identifiers</InputLabel>
+                    <Select
+                      multiple
+                      value={item.returnedIdentifiers || []}
+                      label="Returned Identifiers"
+                      onChange={(e) => updateReturnItemCondition(index, { 
+                        returnedIdentifiers: e.target.value 
+                      })}
+                      renderValue={(selected) => selected.join(', ')}
+                    >
+                      {selectedBorrowForReturn.items
+                        .find(borrowItem => borrowItem._id === item.itemId)
+                        ?.identifiers?.map(identifier => (
+                          <MenuItem key={identifier.identifier} value={identifier.identifier}>
+                            <Checkbox checked={item.returnedIdentifiers?.includes(identifier.identifier) || false} />
+                            <ListItemText primary={identifier.identifier} />
+                          </MenuItem>
+                        ))}
+                    </Select>
+                  </FormControl>
+                )}
+              </Stack>
+            </Paper>
+          ))}
+        </DialogContent>
+        
+        <DialogActions>
+          <Button onClick={() => setReturnDialogOpen(false)}>Cancel</Button>
+          <Button 
+            variant="contained" 
+            color="success" 
+            onClick={handleSubmitReturn}
+            startIcon={<CheckCircleIcon />}
+          >
+            Confirm Return
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 }

@@ -1,5 +1,5 @@
 // src/pages/FacultyReservationPage.tsx
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import {
   Container,
   Card,
@@ -22,16 +22,29 @@ import {
   DialogActions,
   Chip,
   alpha,
-  useTheme
+  useTheme,
+  Tabs,
+  Tab,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  CircularProgress,
+  Backdrop,
+  Badge
 } from '@mui/material';
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EventIcon from "@mui/icons-material/Event";
 import ScienceIcon from "@mui/icons-material/Science";
 import BuildIcon from "@mui/icons-material/Build";
+import InboxIcon from "@mui/icons-material/Inbox";
+import VisibilityIcon from "@mui/icons-material/Visibility";
+import ChatBubbleIcon from "@mui/icons-material/ChatBubble";
+import SendIcon from "@mui/icons-material/Send";
 import axios from 'axios';
 
-const API_BASE_URL = "https://elams-server.onrender.com/api";
+const API_BASE_URL = "http://localhost:5000/api";
 
 interface RequestedItem {
   item_name: string;
@@ -43,21 +56,58 @@ interface ReservationForm {
   subject: string;
   instructor: string;
   schedule: string;
+  scheduleType: 'single' | 'recurring';
+  scheduleDate: string;
+  recurringDays: string[];
+  recurringEndDate: string;
+  course: string;
+  room: string;
+  startTime: string;
+  endTime: string;
+  group_count: number;
+  needsItems: boolean;
+  notes: string;
+}
+
+interface Reservation {
+  _id: string;
+  reservation_code: string;
+  subject: string;
+  instructor: string;
+  instructor_email: string;
+  schedule: string;
+  startTime?: string;
+  endTime?: string;
   course: string;
   room: string;
   group_count: number;
-  notes: string;
+  requested_items: RequestedItem[];
+  status: string;
+  date_created: string;
+  messages?: Array<{ sender: string; sender_name?: string; message: string; timestamp: string }>;
 }
 
 export default function FacultyReservationPage() {
   const theme = useTheme();
+  const brandRed = "#b91c1c";
+  const [currentTab, setCurrentTab] = useState(0);
+  const [facultyName, setFacultyName] = useState('');
+  
+  // Reservation Form State
   const [reservationForm, setReservationForm] = useState<ReservationForm>({
     subject: '',
     instructor: '',
     schedule: '',
+    scheduleType: 'single',
+    scheduleDate: new Date().toISOString().split('T')[0],
+    recurringDays: [],
+    recurringEndDate: '',
     course: '',
     room: '',
+    startTime: '09:00',
+    endTime: '10:00',
     group_count: 1,
+    needsItems: true,
     notes: ''
   });
   
@@ -73,9 +123,102 @@ export default function FacultyReservationPage() {
     quantity: 1,
     item_type: 'non-consumable'
   });
+  
+  // Reservation Inbox State
+  const [myReservations, setMyReservations] = useState<Reservation[]>([]);
+  const [loadingReservations, setLoadingReservations] = useState(false);
+  const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [messageDialogOpen, setMessageDialogOpen] = useState(false);
+  const [selectedReservationForChat, setSelectedReservationForChat] = useState<Reservation | null>(null);
+  const [messageText, setMessageText] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
+  
   const [saving, setSaving] = useState(false);
   const [successDialog, setSuccessDialog] = useState(false);
   const [reservationCode, setReservationCode] = useState('');
+
+  // ref to the messages container for automatic scrolling
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const COMPOSER_HEIGHT = 96;
+
+  // chat polling interval ref -> prevents "startChatPolling/stopChatPolling is not defined" errors
+  const chatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  const startChatPolling = (reservationId: string) => {
+    // stop existing interval first
+    stopChatPolling();
+    chatIntervalRef.current = setInterval(async () => {
+      try {
+        const resp = await axios.get(`${API_BASE_URL}/reservations/${reservationId}`);
+        const updated = resp.data as Reservation;
+        setMyReservations(prev => prev.map(r => r._id === updated._id ? updated : r));
+        setSelectedReservationForChat(prev => prev && prev._id === updated._id ? updated : prev);
+      } catch (err) {
+        console.error('Chat polling error:', err);
+      }
+    }, 1000); // faster polling for near real-time
+  };
+
+  const stopChatPolling = () => {
+    if (chatIntervalRef.current) {
+      clearInterval(chatIntervalRef.current);
+      chatIntervalRef.current = null;
+    }
+  };
+
+  // cleanup on unmount
+  useEffect(() => {
+    return () => {
+      stopChatPolling();
+    };
+  }, []);
+
+  useEffect(() => {
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    if (user.name && user.email) {
+      setFacultyName(user.name);
+      setReservationForm(prev => ({
+        ...prev,
+        instructor: user.name
+      }));
+    }
+    fetchMyReservations();
+  }, []);
+
+  const fetchMyReservations = async () => {
+    setLoadingReservations(true);
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      if (!user.email) {
+        console.error('No user email found in localStorage');
+        return;
+      }
+      
+      const response = await axios.get(`${API_BASE_URL}/reservations`);
+      const allReservations = response.data;
+      // Filter by current faculty member's email
+      const filtered = allReservations.filter((res: Reservation) => 
+        res.instructor_email && res.instructor_email.toLowerCase() === user.email.toLowerCase()
+      );
+      setMyReservations(filtered);
+    } catch (error) {
+      console.error('Fetch reservations error:', error);
+    } finally {
+      setLoadingReservations(false);
+    }
+  };
+
+  const generateScheduleString = (): string => {
+    if (reservationForm.scheduleType === 'single') {
+      return reservationForm.scheduleDate;
+    } else {
+      const days = reservationForm.recurringDays.join(', ');
+      const endDate = reservationForm.recurringEndDate ? ` until ${reservationForm.recurringEndDate}` : '';
+      return `Every ${days}${endDate}`;
+    }
+  };
 
   const handleAddConsumable = () => {
     if (currentConsumable.item_name.trim() && currentConsumable.quantity > 0) {
@@ -114,17 +257,42 @@ export default function FacultyReservationPage() {
 
   const handleSubmit = async () => {
     if (!reservationForm.subject || !reservationForm.instructor || 
-        !reservationForm.schedule || !reservationForm.course || 
-        !reservationForm.room || (consumableItems.length === 0 && nonConsumableItems.length === 0)) {
-      alert('Please fill all required fields and add at least one item');
+        !reservationForm.course || !reservationForm.room) {
+      alert('Please fill all required fields');
+      return;
+    }
+
+    // Validate items if needed
+    if (reservationForm.needsItems && consumableItems.length === 0 && nonConsumableItems.length === 0) {
+      alert('Please add at least one item or disable "Items Needed" if no items are required');
+      return;
+    }
+
+    // Validate schedule
+    if (reservationForm.scheduleType === 'single' && !reservationForm.scheduleDate) {
+      alert('Please select a date for single reservation');
+      return;
+    }
+
+    if (reservationForm.scheduleType === 'recurring' && reservationForm.recurringDays.length === 0) {
+      alert('Please select at least one day of the week for recurring reservation');
+      return;
+    }
+
+    // Validate times
+    if (!reservationForm.startTime || !reservationForm.endTime) {
+      alert('Please set start and end times');
       return;
     }
 
     setSaving(true);
     try {
-      const allItems = [...consumableItems, ...nonConsumableItems];
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const allItems = reservationForm.needsItems ? [...consumableItems, ...nonConsumableItems] : [];
       const response = await axios.post(`${API_BASE_URL}/reservations`, {
         ...reservationForm,
+        instructor_email: user.email,
+        schedule: generateScheduleString(),
         requested_items: allItems
       });
 
@@ -134,15 +302,25 @@ export default function FacultyReservationPage() {
       // Reset form
       setReservationForm({
         subject: '',
-        instructor: '',
+        instructor: facultyName,
         schedule: '',
+        scheduleType: 'single',
+        scheduleDate: new Date().toISOString().split('T')[0],
+        recurringDays: [],
+        recurringEndDate: '',
         course: '',
         room: '',
+        startTime: '09:00',
+        endTime: '10:00',
         group_count: 1,
+        needsItems: true,
         notes: ''
       });
       setConsumableItems([]);
       setNonConsumableItems([]);
+      
+      // Refresh reservations inbox
+      await fetchMyReservations();
     } catch (error) {
       console.error('Create reservation error:', error);
       alert('Failed to create reservation');
@@ -151,37 +329,128 @@ export default function FacultyReservationPage() {
     }
   };
 
-  // Create stable handler functions
-  const handleConsumableNameChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setCurrentConsumable(prev => ({ ...prev, item_name: e.target.value }));
-  }, []);
+  // helper: count unseen messages for current user
+  const unseenCount = (reservation: Reservation) => {
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const email = (user && (user.email || user.name)) || '';
+      if (!email) return 0;
+      return (reservation.messages || []).filter(m => !(m as any).seen_by || !(m as any).seen_by.includes(email)).length;
+    } catch (e) {
+      return 0;
+    }
+  };
 
-  const handleConsumableQuantityChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setCurrentConsumable(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }));
-  }, []);
+  const handleOpenChat = async (reservation: Reservation) => {
+    setSelectedReservationForChat(reservation);
+    setMessageDialogOpen(true);
+    setMessageText('');
 
-  const handleNonConsumableNameChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setCurrentNonConsumable(prev => ({ ...prev, item_name: e.target.value }));
-  }, []);
+    // mark messages seen on server and refresh the reservation locally
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const userEmail = user.email || user.name || 'Unknown';
+      await axios.post(`${API_BASE_URL}/reservations/${reservation._id}/messages-seen`, {
+        user_email: userEmail
+      });
 
-  const handleNonConsumableQuantityChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setCurrentNonConsumable(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }));
-  }, []);
+      // fetch updated reservation to update messages/seen_by immediately
+      const resp = await axios.get(`${API_BASE_URL}/reservations/${reservation._id}`);
+      const updated = resp.data as Reservation;
 
+      // update chat state and inbox (replace or append)
+      setSelectedReservationForChat(updated);
+      setMyReservations(prev => {
+        const exists = prev.some(r => r._id === updated._id);
+        return exists ? prev.map(r => r._id === updated._id ? updated : r) : [updated, ...prev];
+      });
+
+      // ensure scroll after render
+      setTimeout(() => {
+        try { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); } catch(e){}
+      }, 50);
+    } catch (err) {
+      console.error('Mark messages seen error:', err);
+    }
+    
+    startChatPolling(reservation._id);
+  };
+
+  const handleSendMessage = async () => {
+    if (!selectedReservationForChat || !messageText.trim()) {
+      return;
+    }
+
+    setSendingMessage(true);
+    try {
+      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const userIdentifier = currentUser.email || currentUser.name || 'Unknown';
+      const userName = currentUser.name || userIdentifier;
+
+      // use server response (should return updated reservation)
+      const resp = await axios.post(`${API_BASE_URL}/reservations/${selectedReservationForChat._id}/message`, {
+        sender: userIdentifier,
+        sender_name: userName,
+        message: messageText
+      });
+
+      const updated = resp.data as Reservation;
+
+      // mark messages as seen for this user (best-effort, server emits updates)
+      try {
+        await axios.post(`${API_BASE_URL}/reservations/${selectedReservationForChat._id}/messages-seen`, {
+          user_email: userIdentifier
+        });
+      } catch (e) {
+        // non-fatal
+      }
+
+      // update local state immediately from response
+      setSelectedReservationForChat(updated);
+      // ensure polling remains active for near real-time
+      startChatPolling(updated._id);
+
+      // clear input then scroll to bottom after DOM paints
+      setMessageText('');
+      setTimeout(() => {
+        try { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); } catch(e){}
+      }, 50);
+    } catch (error) {
+      console.error('Send message error:', error);
+      alert('Failed to send message');
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  const scrollToBottom = () => {
+    try {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    } catch (e) {}
+  };
+
+  // Ensure we scroll when chat opens or when messages change
+  useLayoutEffect(() => {
+    if (messageDialogOpen && selectedReservationForChat) {
+      scrollToBottom();
+    }
+  }, [messageDialogOpen, selectedReservationForChat?.messages?.length]);
+
+  /* Insert ItemsTable component here */
   const ItemsTable = ({ items, onRemove, type }: { 
     items: RequestedItem[]; 
     onRemove: (index: number) => void;
     type: 'consumable' | 'non-consumable';
   }) => (
     <TableContainer>
-      <Table>
+      <Table size="small">
         <TableHead>
           <TableRow>
-            <TableCell>Item Name</TableCell>
-            <TableCell align="center">Qty per Group</TableCell>
-            <TableCell align="center">Total Qty ({reservationForm.group_count} groups)</TableCell>
-            <TableCell align="center">Type</TableCell>
-            <TableCell align="center">Action</TableCell>
+            <TableCell><strong>Item Name</strong></TableCell>
+            <TableCell align="center"><strong>Qty per Group</strong></TableCell>
+            <TableCell align="center"><strong>Total Qty</strong></TableCell>
+            <TableCell align="center"><strong>Type</strong></TableCell>
+            <TableCell align="center"><strong>Action</strong></TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -210,11 +479,7 @@ export default function FacultyReservationPage() {
                 />
               </TableCell>
               <TableCell align="center">
-                <IconButton
-                  color="error"
-                  onClick={() => onRemove(index)}
-                  size="small"
-                >
+                <IconButton color="error" size="small" onClick={() => onRemove(index)}>
                   <DeleteIcon />
                 </IconButton>
               </TableCell>
@@ -227,256 +492,532 @@ export default function FacultyReservationPage() {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Card sx={{ p: 4, borderRadius: 3 }}>
-        <Box sx={{ mb: 4 }}>
-          <Typography variant="h4" fontWeight="bold" color="#b91c1c" gutterBottom>
-            Faculty Reservation
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
-            Reserve equipment for your classes
-          </Typography>
-        </Box>
+      <Backdrop sx={{ color: "#fff", zIndex: (theme) => theme.zIndex.modal + 1 }} open={saving}>
+        <Stack alignItems="center" spacing={2}>
+          <CircularProgress size={60} thickness={4} sx={{ color: theme.palette.primary.main }} />
+          <Typography variant="h6" sx={{ color: "#fff" }}>Submitting...</Typography>
+        </Stack>
+      </Backdrop>
 
-        <Stack spacing={3}>
-          {/* Class Information */}
-          <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.primary.main, 0.04) }}>
-            <Typography variant="h6" gutterBottom color="primary">
-              Class Information
-            </Typography>
-            <Stack spacing={2}>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                <TextField
-                  label="Subject *"
-                  value={reservationForm.subject}
-                  onChange={(e) => setReservationForm(prev => ({ ...prev, subject: e.target.value }))}
-                  fullWidth
-                />
-                <TextField
-                  label="Course *"
-                  value={reservationForm.course}
-                  onChange={(e) => setReservationForm(prev => ({ ...prev, course: e.target.value }))}
-                  fullWidth
-                />
-              </Stack>
-              
-              <TextField
-                label="Instructor *"
-                value={reservationForm.instructor}
-                onChange={(e) => setReservationForm(prev => ({ ...prev, instructor: e.target.value }))}
-                fullWidth
-              />
-              
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                <TextField
-                  label="Schedule *"
-                  value={reservationForm.schedule}
-                  onChange={(e) => setReservationForm(prev => ({ ...prev, schedule: e.target.value }))}
-                  fullWidth
-                />
-                <TextField
-                  label="Room *"
-                  value={reservationForm.room}
-                  onChange={(e) => setReservationForm(prev => ({ ...prev, room: e.target.value }))}
-                  fullWidth
-                />
-              </Stack>
-              
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                <TextField
-                  label="Number of Groups"
-                  type="number"
-                  value={reservationForm.group_count}
-                  onChange={(e) => setReservationForm(prev => ({ ...prev, group_count: parseInt(e.target.value) || 1 }))}
-                  sx={{ flex: 1 }}
-                  inputProps={{ min: 1 }}
-                />
-                <Box sx={{ flex: 1 }} />
-              </Stack>
-              
-              <TextField
-                label="Additional Notes (Optional)"
-                value={reservationForm.notes}
-                onChange={(e) => setReservationForm(prev => ({ ...prev, notes: e.target.value }))}
-                fullWidth
-                multiline
-                rows={2}
-                placeholder="Any additional information about your reservation"
-              />
-            </Stack>
-          </Paper>
+      {/* Header */}
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h4" fontWeight="bold" color={brandRed} gutterBottom>
+          Faculty Reservation Portal
+        </Typography>
+        <Typography variant="body1" color="text.secondary">
+          {facultyName ? `Welcome, ${facultyName}` : 'Create and manage equipment reservations'}
+        </Typography>
+      </Box>
 
-          {/* Requested Items - Two Sections */}
-          <Stack direction={{ xs: 'column', md: 'row' }} spacing={3}>
-            {/* Consumable Items */}
-            <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.success.main, 0.04), flex: 1 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <ScienceIcon color="success" />
-                  <Typography variant="h6" color="success.main">
-                    Consumable Items
-                  </Typography>
-                </Box>
-                <Chip 
-                  label={`Total: ${totalConsumableItems}`} 
-                  color="success" 
-                  variant="filled"
-                />
-              </Box>
-              
-              {/* Consumable Item Form */}
-              <Stack spacing={2} sx={{ mb: 3 }}>
+      {/* Tabs */}
+      <Card sx={{ mb: 3 }}>
+        <Tabs 
+          value={currentTab} 
+          onChange={(_, newValue) => setCurrentTab(newValue)}
+          sx={{ borderBottom: 1, borderColor: 'divider' }}
+        >
+          <Tab label="My Reservation" icon={<InboxIcon />} iconPosition="start" />
+          <Tab label="New Reservation" icon={<AddIcon />} iconPosition="start" />
+        </Tabs>
+      </Card>
+
+      {/* Tab Content */}
+      {currentTab === 1 && (
+        // New Reservation Form
+        <Card sx={{ p: 4, borderRadius: 3 }}>
+          <Stack spacing={3}>
+            {/* Class Information */}
+            <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.primary.main, 0.04) }}>
+              <Typography variant="h6" gutterBottom color="primary">
+                Class Information
+              </Typography>
+              <Stack spacing={2}>
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
                   <TextField
-                    label="Item Name *"
-                    value={currentConsumable.item_name}
-                    onChange={handleConsumableNameChange}
+                    label="Subject *"
+                    value={reservationForm.subject}
+                    onChange={(e) => setReservationForm(prev => ({ ...prev, subject: e.target.value }))}
                     fullWidth
-                    placeholder="e.g., Resistors, Capacitors, Wires"
                   />
                   <TextField
-                    label="Qty per Group *"
+                    label="Course *"
+                    value={reservationForm.course}
+                    onChange={(e) => setReservationForm(prev => ({ ...prev, course: e.target.value }))}
+                    fullWidth
+                  />
+                </Stack>
+                
+                <TextField
+                  label="Instructor *"
+                  value={reservationForm.instructor}
+                  disabled
+                  fullWidth
+                  helperText="Automatically filled from your profile"
+                />
+                
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                  <TextField
+                    label="Room *"
+                    value={reservationForm.room}
+                    onChange={(e) => setReservationForm(prev => ({ ...prev, room: e.target.value }))}
+                    fullWidth
+                  />
+                  <TextField
+                    label="Number of Groups"
                     type="number"
-                    value={currentConsumable.quantity}
-                    onChange={handleConsumableQuantityChange}
-                    sx={{ minWidth: 140 }}
+                    value={reservationForm.group_count}
+                    onChange={(e) => setReservationForm(prev => ({ ...prev, group_count: parseInt(e.target.value) || 1 }))}
+                    fullWidth
                     inputProps={{ min: 1 }}
                   />
                 </Stack>
-                <Button
-                  startIcon={<AddIcon />}
-                  onClick={handleAddConsumable}
-                  variant="outlined"
-                  disabled={!currentConsumable.item_name.trim() || currentConsumable.quantity < 1}
-                >
-                  Add Consumable Item
-                </Button>
-              </Stack>
 
-              {consumableItems.length > 0 ? (
-                <ItemsTable 
-                  items={consumableItems} 
-                  onRemove={handleRemoveConsumable} 
-                  type="consumable"
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                  <TextField
+                    label="Start Time *"
+                    type="time"
+                    value={reservationForm.startTime}
+                    onChange={(e) => setReservationForm(prev => ({ ...prev, startTime: e.target.value }))}
+                    fullWidth
+                    InputLabelProps={{ shrink: true }}
+                  />
+                  <TextField
+                    label="End Time *"
+                    type="time"
+                    value={reservationForm.endTime}
+                    onChange={(e) => setReservationForm(prev => ({ ...prev, endTime: e.target.value }))}
+                    fullWidth
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Stack>
+
+                {/* Schedule Section */}
+                <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.warning.main, 0.05), borderRadius: 2 }}>
+                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <EventIcon fontSize="small" /> Schedule
+                  </Typography>
+                  
+                  <FormControl fullWidth sx={{ mb: 2 }}>
+                    <InputLabel>Schedule Type</InputLabel>
+                    <Select
+                      value={reservationForm.scheduleType}
+                      onChange={(e) => setReservationForm(prev => ({ 
+                        ...prev, 
+                        scheduleType: e.target.value as 'single' | 'recurring'
+                      }))}
+                      label="Schedule Type"
+                    >
+                      <MenuItem value="single">Single Date</MenuItem>
+                      <MenuItem value="recurring">Recurring (Weekly)</MenuItem>
+                    </Select>
+                  </FormControl>
+
+                  {reservationForm.scheduleType === 'single' ? (
+                    <TextField
+                      type="date"
+                      label="Date *"
+                      value={reservationForm.scheduleDate}
+                      onChange={(e) => setReservationForm(prev => ({ ...prev, scheduleDate: e.target.value }))}
+                      fullWidth
+                      InputLabelProps={{ shrink: true }}
+                    />
+                  ) : (
+                    <Stack spacing={2}>
+                      <Typography variant="subtitle2" fontWeight="bold">Select Days of Week *</Typography>
+                      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 1 }}>
+                        {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => (
+                          <Box
+                            key={day}
+                            onClick={() => {
+                              setReservationForm(prev => {
+                                const days = prev.recurringDays.includes(day)
+                                  ? prev.recurringDays.filter(d => d !== day)
+                                  : [...prev.recurringDays, day];
+                                return { ...prev, recurringDays: days };
+                              });
+                            }}
+                            sx={{
+                              p: 1.5,
+                              border: '2px solid',
+                              borderColor: reservationForm.recurringDays.includes(day) ? 'primary.main' : 'divider',
+                              borderRadius: 2,
+                              cursor: 'pointer',
+                              textAlign: 'center',
+                              transition: 'all 0.2s',
+                              bgcolor: reservationForm.recurringDays.includes(day) ? alpha(theme.palette.primary.main, 0.1) : 'transparent',
+                              '&:hover': {
+                                borderColor: 'primary.main',
+                                bgcolor: alpha(theme.palette.primary.main, 0.05)
+                              }
+                            }}
+                          >
+                            <Typography 
+                              variant="body2" 
+                              fontWeight={reservationForm.recurringDays.includes(day) ? 'bold' : 'medium'}
+                              color={reservationForm.recurringDays.includes(day) ? 'primary' : 'text.primary'}
+                            >
+                              {day}
+                            </Typography>
+                          </Box>
+                        ))}
+                      </Box>
+                      <TextField
+                        type="date"
+                        label="End Date (Optional)"
+                        value={reservationForm.recurringEndDate}
+                        onChange={(e) => setReservationForm(prev => ({ ...prev, recurringEndDate: e.target.value }))}
+                        fullWidth
+                        InputLabelProps={{ shrink: true }}
+                        helperText="Leave empty for no end date"
+                      />
+                      {reservationForm.recurringDays.length > 0 && (
+                        <Typography variant="caption" color="text.secondary" sx={{ p: 1, bgcolor: alpha(theme.palette.info.main, 0.1), borderRadius: 1 }}>
+                          📅 Recurring: Every {reservationForm.recurringDays.join(', ')}{reservationForm.recurringEndDate ? ` until ${reservationForm.recurringEndDate}` : ' (ongoing)'}
+                        </Typography>
+                      )}
+                      {reservationForm.recurringDays.length === 0 && (
+                        <Typography variant="caption" color="error" sx={{ p: 1, bgcolor: alpha(theme.palette.error.main, 0.1), borderRadius: 1 }}>
+                          ⚠️ Please select at least one day of the week
+                        </Typography>
+                      )}
+                    </Stack>
+                  )}
+                </Paper>
+                
+                <TextField
+                  label="Additional Notes (Optional)"
+                  value={reservationForm.notes}
+                  onChange={(e) => setReservationForm(prev => ({ ...prev, notes: e.target.value }))}
+                  fullWidth
+                  multiline
+                  rows={2}
+                  placeholder="Any additional information about your reservation"
                 />
-              ) : (
-                <Typography variant="body2" color="text.secondary" textAlign="center" py={3}>
-                  No consumable items added yet.
-                </Typography>
-              )}
+              </Stack>
             </Paper>
 
-            {/* Non-Consumable Items */}
-            <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.info.main, 0.04), flex: 1 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <BuildIcon color="info" />
-                  <Typography variant="h6" color="info.main">
-                    Non-Consumable Items
+            {/* Items Needed Toggle */}
+            <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.success.main, 0.04) }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Box
+                  onClick={() => setReservationForm(prev => ({ ...prev, needsItems: !prev.needsItems }))}
+                  sx={{
+                    p: 1.5,
+                    border: '2px solid',
+                    borderColor: reservationForm.needsItems ? 'success.main' : 'divider',
+                    borderRadius: 2,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    bgcolor: reservationForm.needsItems ? alpha(theme.palette.success.main, 0.1) : 'transparent',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minWidth: 50,
+                    minHeight: 50
+                  }}
+                >
+                  <Typography variant="h6" color={reservationForm.needsItems ? 'success.main' : 'text.disabled'}>
+                    {reservationForm.needsItems ? '✓' : '○'}
                   </Typography>
                 </Box>
+                <Box>
+                  <Typography variant="subtitle1" fontWeight="bold">
+                    Do you need equipment items for this reservation?
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {reservationForm.needsItems 
+                      ? 'Click below to add consumable and non-consumable items' 
+                      : 'No items will be requested for this reservation'}
+                  </Typography>
+                </Box>
+              </Box>
+            </Paper>
+
+            {/* Requested Items - Two Sections (Only show if needsItems is true) */}
+            {reservationForm.needsItems && (
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={3}>
+              {/* Consumable Items */}
+              <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.success.main, 0.04), flex: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <ScienceIcon color="success" />
+                    <Typography variant="h6" color="success.main">
+                      Consumable Items
+                    </Typography>
+                  </Box>
+                  <Chip 
+                    label={`Total: ${totalConsumableItems}`} 
+                    color="success" 
+                    variant="filled"
+                  />
+                </Box>
+                
+                {/* Consumable Item Form */}
+                <Stack spacing={2} sx={{ mb: 3 }}>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                    <TextField
+                      label="Item Name *"
+                      value={currentConsumable.item_name}
+                      onChange={(e) => setCurrentConsumable(prev => ({ ...prev, item_name: e.target.value }))}
+                      fullWidth
+                      placeholder="e.g., Resistors, Capacitors, Wires"
+                    />
+                    <TextField
+                      label="Qty per Group *"
+                      type="number"
+                      value={currentConsumable.quantity}
+                      onChange={(e) => setCurrentConsumable(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
+                      sx={{ minWidth: 140 }}
+                      inputProps={{ min: 1 }}
+                    />
+                  </Stack>
+                  <Button
+                    startIcon={<AddIcon />}
+                    onClick={handleAddConsumable}
+                    variant="outlined"
+                    disabled={!currentConsumable.item_name.trim() || currentConsumable.quantity < 1}
+                  >
+                    Add Consumable Item
+                  </Button>
+                </Stack>
+
+                {consumableItems.length > 0 ? (
+                  <ItemsTable 
+                    items={consumableItems} 
+                    onRemove={handleRemoveConsumable} 
+                    type="consumable"
+                  />
+                ) : (
+                  <Typography variant="body2" color="text.secondary" textAlign="center" py={3}>
+                    No consumable items added yet.
+                  </Typography>
+                )}
+              </Paper>
+
+              {/* Non-Consumable Items */}
+              <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.info.main, 0.04), flex: 1 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <BuildIcon color="info" />
+                    <Typography variant="h6" color="info.main">
+                      Non-Consumable Items
+                    </Typography>
+                  </Box>
+                  <Chip 
+                    label={`Total: ${totalNonConsumableItems}`} 
+                    color="info" 
+                    variant="filled"
+                  />
+                </Box>
+                
+                {/* Non-Consumable Item Form */}
+                <Stack spacing={2} sx={{ mb: 3 }}>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                    <TextField
+                      label="Item Name *"
+                      value={currentNonConsumable.item_name}
+                      onChange={(e) => setCurrentNonConsumable(prev => ({ ...prev, item_name: e.target.value }))}
+                      fullWidth
+                      placeholder="e.g., Multimeter, Oscilloscope, Power Supply"
+                    />
+                    <TextField
+                      label="Qty per Group *"
+                      type="number"
+                      value={currentNonConsumable.quantity}
+                      onChange={(e) => setCurrentNonConsumable(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
+                      sx={{ minWidth: 140 }}
+                      inputProps={{ min: 1 }}
+                    />
+                  </Stack>
+                  <Button
+                    startIcon={<AddIcon />}
+                    onClick={handleAddNonConsumable}
+                    variant="outlined"
+                    disabled={!currentNonConsumable.item_name.trim() || currentNonConsumable.quantity < 1}
+                  >
+                    Add Non-Consumable Item
+                  </Button>
+                </Stack>
+
+                {nonConsumableItems.length > 0 ? (
+                  <ItemsTable 
+                    items={nonConsumableItems} 
+                    onRemove={handleRemoveNonConsumable} 
+                    type="non-consumable"
+                  />
+                ) : (
+                  <Typography variant="body2" color="text.secondary" textAlign="center" py={3}>
+                    No non-consumable items added yet.
+                  </Typography>
+                )}
+              </Paper>
+            </Stack>
+            )}
+
+            {/* Summary and Submit */}
+            <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.warning.main, 0.04) }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" color="warning.main">
+                  Reservation Summary
+                </Typography>
                 <Chip 
-                  label={`Total: ${totalNonConsumableItems}`} 
-                  color="info" 
+                  label={`Grand Total: ${totalAllItems} items`} 
+                  color="warning" 
                   variant="filled"
+                  sx={{ fontSize: '1rem', py: 1 }}
                 />
               </Box>
-              
-              {/* Non-Consumable Item Form */}
-              <Stack spacing={2} sx={{ mb: 3 }}>
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                  <TextField
-                    label="Item Name *"
-                    value={currentNonConsumable.item_name}
-                    onChange={handleNonConsumableNameChange}
-                    fullWidth
-                    placeholder="e.g., Multimeter, Oscilloscope, Power Supply"
-                  />
-                  <TextField
-                    label="Qty per Group *"
-                    type="number"
-                    value={currentNonConsumable.quantity}
-                    onChange={handleNonConsumableQuantityChange}
-                    sx={{ minWidth: 140 }}
-                    inputProps={{ min: 1 }}
-                  />
-                </Stack>
-                <Button
-                  startIcon={<AddIcon />}
-                  onClick={handleAddNonConsumable}
-                  variant="outlined"
-                  disabled={!currentNonConsumable.item_name.trim() || currentNonConsumable.quantity < 1}
-                >
-                  Add Non-Consumable Item
-                </Button>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="body2">
+                    Consumable Items: <strong>{totalConsumableItems}</strong> total items
+                  </Typography>
+                  <Typography variant="body2">
+                    Non-Consumable Items: <strong>{totalNonConsumableItems}</strong> total items
+                  </Typography>
+                </Box>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="body2">
+                    Number of Groups: <strong>{reservationForm.group_count}</strong>
+                  </Typography>
+                  <Typography variant="body2">
+                    Total Items Needed: <strong>{totalAllItems}</strong>
+                  </Typography>
+                </Box>
               </Stack>
-
-              {nonConsumableItems.length > 0 ? (
-                <ItemsTable 
-                  items={nonConsumableItems} 
-                  onRemove={handleRemoveNonConsumable} 
-                  type="non-consumable"
-                />
-              ) : (
-                <Typography variant="body2" color="text.secondary" textAlign="center" py={3}>
-                  No non-consumable items added yet.
-                </Typography>
-              )}
+              
+              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+                <Button
+                  variant="contained"
+                  size="large"
+                  onClick={handleSubmit}
+                  disabled={saving || (reservationForm.needsItems && consumableItems.length === 0 && nonConsumableItems.length === 0)}
+                  sx={{
+                    bgcolor: brandRed,
+                    "&:hover": { bgcolor: "#9f1515" },
+                    borderRadius: 2,
+                    px: 4,
+                    py: 1.5,
+                    fontSize: '1.1rem'
+                  }}
+                >
+                  {saving ? 'Submitting...' : 'Submit Reservation'}
+                </Button>
+              </Box>
             </Paper>
           </Stack>
+        </Card>
+      )}
 
-          {/* Summary and Submit */}
-          <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.warning.main, 0.04) }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6" color="warning.main">
-                Reservation Summary
-              </Typography>
-              <Chip 
-                label={`Grand Total: ${totalAllItems} items`} 
-                color="warning" 
-                variant="filled"
-                sx={{ fontSize: '1rem', py: 1 }}
-              />
+      {currentTab === 0 && (
+        // Reservation Inbox
+        <Card sx={{ p: 3, borderRadius: 3 }}>
+          {loadingReservations ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
+              <CircularProgress />
             </Box>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="body2">
-                  Consumable Items: <strong>{totalConsumableItems}</strong> total items
+          ) : myReservations.length === 0 ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
+              <Stack alignItems="center" spacing={2}>
+                <InboxIcon sx={{ fontSize: 60, color: 'text.disabled' }} />
+                <Typography variant="h6" color="text.secondary">
+                  No reservations yet
                 </Typography>
-                <Typography variant="body2">
-                  Non-Consumable Items: <strong>{totalNonConsumableItems}</strong> total items
+                <Typography variant="body2" color="text.secondary">
+                  Create a new reservation to get started
                 </Typography>
-              </Box>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="body2">
-                  Number of Groups: <strong>{reservationForm.group_count}</strong>
-                </Typography>
-                <Typography variant="body2">
-                  Total Items Needed: <strong>{totalAllItems}</strong>
-                </Typography>
-              </Box>
-            </Stack>
-            
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-              <Button
-                variant="contained"
-                size="large"
-                onClick={handleSubmit}
-                disabled={saving || (consumableItems.length === 0 && nonConsumableItems.length === 0)}
-                sx={{
-                  bgcolor: "#b91c1c",
-                  "&:hover": { bgcolor: "#b91c1c.dark" },
-                  borderRadius: 2,
-                  px: 4,
-                  py: 1.5,
-                  fontSize: '1.1rem'
-                }}
-              >
-                {saving ? 'Submitting...' : 'Submit Reservation'}
-              </Button>
+              </Stack>
             </Box>
-          </Paper>
-        </Stack>
-      </Card>
+          ) : (
+            <TableContainer sx={{ borderRadius: 2 }}>
+              <Table>
+                <TableHead>
+                  <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.08) }}>
+                    <TableCell><Typography fontWeight="bold">Code</Typography></TableCell>
+                    <TableCell><Typography fontWeight="bold">Subject</Typography></TableCell>
+                    <TableCell><Typography fontWeight="bold">Course</Typography></TableCell>
+                    <TableCell><Typography fontWeight="bold">Schedule</Typography></TableCell>
+                    <TableCell><Typography fontWeight="bold">Status</Typography></TableCell>
+                    <TableCell align="center"><Typography fontWeight="bold">Actions</Typography></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {myReservations.map((reservation) => (
+                    <TableRow 
+                      key={reservation._id}
+                      sx={{ 
+                        '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.05) },
+                        borderBottom: '1px solid',
+                        borderColor: 'divider'
+                      }}
+                    >
+                      <TableCell>
+                        <Chip 
+                          label={reservation.reservation_code} 
+                          color="primary" 
+                          variant="outlined"
+                          size="small"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Typography fontWeight="medium">{reservation.subject}</Typography>
+                      </TableCell>
+                      <TableCell>{reservation.course}</TableCell>
+                      <TableCell>
+                        <Typography variant="body2" color="text.secondary">
+                          {reservation.schedule}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>
+                        <Chip 
+                          label={reservation.status}
+                          color={
+                            reservation.status === 'Pending' ? 'warning' :
+                            reservation.status === 'Assigned' ? 'success' :
+                            reservation.status === 'Rejected' ? 'error' :
+                            'default'
+                          }
+                          size="small"
+                          variant="filled"
+                        />
+                      </TableCell>
+                      <TableCell align="center">
+                        <Stack direction="row" spacing={1} justifyContent="center">
+                          <IconButton
+                            size="small"
+                            onClick={() => {
+                              setSelectedReservation(reservation);
+                              setViewDialogOpen(true);
+                            }}
+                            color="primary"
+                          >
+                            <VisibilityIcon />
+                          </IconButton>
+
+                          {/* Chat button with unseen badge */}
+                          <IconButton
+                            size="small"
+                            onClick={() => handleOpenChat(reservation)}
+                            color="info"
+                          >
+                            <Badge
+                              badgeContent={unseenCount(reservation)}
+                              color="error"
+                              invisible={unseenCount(reservation) === 0}
+                            >
+                              <ChatBubbleIcon />
+                            </Badge>
+                          </IconButton>
+                        </Stack>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </Card>
+      )}
 
       {/* Success Dialog */}
       <Dialog open={successDialog} onClose={() => setSuccessDialog(false)}>
@@ -521,6 +1062,223 @@ export default function FacultyReservationPage() {
           <Button onClick={() => setSuccessDialog(false)} variant="contained">
             OK
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* View Details Dialog */}
+      <Dialog open={viewDialogOpen} onClose={() => setViewDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <VisibilityIcon sx={{ color: brandRed }} />
+            <Typography variant="h6" sx={{ color: brandRed }}>Reservation Details</Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          {selectedReservation && (
+            <Stack spacing={3} sx={{ pt: 2 }}>
+              <Box>
+                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                  Basic Information
+                </Typography>
+                <Stack spacing={2}>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>Code:</Typography>
+                    <Chip label={selectedReservation.reservation_code} size="small" />
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>Status:</Typography>
+                    <Chip 
+                      label={selectedReservation.status}
+                      color={
+                        selectedReservation.status === 'Pending' ? 'warning' :
+                        selectedReservation.status === 'Assigned' ? 'success' :
+                        selectedReservation.status === 'Rejected' ? 'error' :
+                        'default'
+                      }
+                      size="small"
+                    />
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>Subject:</Typography>
+                    <Typography variant="body2">{selectedReservation.subject}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>Course:</Typography>
+                    <Typography variant="body2">{selectedReservation.course}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>Schedule:</Typography>
+                    <Typography variant="body2">{selectedReservation.schedule}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>Room:</Typography>
+                    <Typography variant="body2">{selectedReservation.room}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>Groups:</Typography>
+                    <Chip label={selectedReservation.group_count} size="small" />
+                  </Box>
+                </Stack>
+              </Box>
+
+              <Box>
+                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                  Requested Items ({selectedReservation.requested_items.length})
+                </Typography>
+                <Stack spacing={1}>
+                  {selectedReservation.requested_items.map((item, idx) => (
+                    <Box 
+                      key={idx}
+                      sx={{ 
+                        p: 2, 
+                        bgcolor: alpha(theme.palette.primary.main, 0.05),
+                        borderRadius: 1,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <Box>
+                        <Typography variant="body2" fontWeight="medium">{item.item_name}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {item.item_type === 'consumable' ? '🧪 Consumable' : '🔧 Non-Consumable'}
+                        </Typography>
+                      </Box>
+                      <Chip label={`${item.quantity} per group`} size="small" />
+                    </Box>
+                  ))}
+                </Stack>
+              </Box>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setViewDialogOpen(false)} sx={{ textTransform: 'none' }}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Message Chat Dialog */}
+      <Dialog open={messageDialogOpen} onClose={() => { setMessageDialogOpen(false); stopChatPolling(); }} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <ChatBubbleIcon sx={{ color: theme.palette.info.main }} />
+            <Box>
+              <Typography variant="h6" sx={{ color: theme.palette.info.main }}>
+                Reservation Chat
+              </Typography>
+              {selectedReservationForChat && (
+                <Typography variant="caption" color="text.secondary">
+                  {selectedReservationForChat.reservation_code} - {selectedReservationForChat.subject}
+                </Typography>
+              )}
+            </Box>
+          </Box>
+        </DialogTitle>
+        <DialogContent dividers>
+          {selectedReservationForChat && (
+            <Box sx={{ minHeight: 400 }}>
+              {/* Messages container with scrollbar */}
+              <Paper
+                ref={messageListRef}
+                sx={{
+                  p: 2,
+                  bgcolor: alpha(theme.palette.info.main, 0.04),
+                  overflowY: 'auto',
+                  maxHeight: 420,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 1.5,
+                  borderRadius: 3,
+                  boxShadow: 1,
+                }}
+              >
+                {selectedReservationForChat.messages && selectedReservationForChat.messages.length > 0 ? (
+                  selectedReservationForChat.messages.map((msg, index) => {
+                    const isCurrentUser = msg.sender === JSON.parse(localStorage.getItem('user') || '{}').email;
+                    return (
+                      <Box key={index} sx={{ display: 'flex', justifyContent: isCurrentUser ? 'flex-end' : 'flex-start' }}>
+                        <Paper sx={{
+                          p: 1.5,
+                          maxWidth: '70%',
+                          bgcolor: isCurrentUser ? alpha(theme.palette.primary.main, 0.15) : alpha(theme.palette.grey[300], 0.5),
+                          borderRadius: 2,
+                          boxShadow: 1
+                        }}>
+                          <Typography variant="subtitle2" fontWeight="bold" sx={{ color: isCurrentUser ? theme.palette.primary.main : theme.palette.text.primary }}>
+                            {(msg as any).sender_name || msg.sender}
+                          </Typography>
+                          <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
+                            {msg.message}
+                          </Typography>
+                          <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 0.5 }}>
+                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </Typography>
+                        </Paper>
+                      </Box>
+                    );
+                  })
+                ) : (
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200 }}>
+                    <Typography variant="body2" color="textSecondary">No messages yet. Start the conversation!</Typography>
+                  </Box>
+                )}
+                <div ref={messagesEndRef} />
+              </Paper>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ flexDirection: 'column', gap: 1, py: 2 }}>
+          {/* Composer fixed below the scrollable messages container */}
+          <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+            <Paper
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                p: 1,
+                borderRadius: 3,
+                boxShadow: 3,
+                width: { xs: '100%', sm: 520 },
+                maxWidth: '100%',
+                bgcolor: '#fff'
+              }}
+            >
+              <TextField
+                placeholder="Type a message..."
+                value={messageText}
+                onChange={(e) => setMessageText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && messageText.trim()) { e.preventDefault(); handleSendMessage(); } }}
+                multiline
+                maxRows={4}
+                fullWidth
+                size="small"
+                disabled={sendingMessage}
+              />
+              <Button
+                variant="contained"
+                color="info"
+                onClick={handleSendMessage}
+                disabled={!messageText.trim() || sendingMessage}
+                sx={{ borderRadius: 2, minWidth: 48, minHeight: 48 }}
+              >
+                <SendIcon />
+              </Button>
+            </Paper>
+          </Box>
+          
+          <Box sx={{ width: '100%', display: 'flex', justifyContent: 'flex-end' }}>
+           <Button
+  onClick={() => {
+    setMessageDialogOpen(false);
+    stopChatPolling();
+    window.location.reload(); // ← reloads the page
+  }}
+  sx={{ textTransform: 'none' }}
+>
+  Close
+</Button>
+
+          </Box>
         </DialogActions>
       </Dialog>
     </Container>

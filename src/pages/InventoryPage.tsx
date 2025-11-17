@@ -53,7 +53,7 @@ import SearchIcon from "@mui/icons-material/Search";
 import AddIcon from '@mui/icons-material/Add';
 const API_URL =
   "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
-const API_BASE_URL = "https://elams-server.onrender.com/api";
+const API_BASE_URL = "http://localhost:5000/api";
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const userRole = user?.role || "Custodian";
 
@@ -1116,7 +1116,7 @@ const handleUpdateItem = async () => {
   </Stack>
         
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-           {userRole === "Custodian" || userRole === "Admin" && (
+           {(userRole === "Custodian" || userRole === "Admin") && (
           <Button
             variant="contained"
             onClick={() => {
@@ -1137,7 +1137,7 @@ const handleUpdateItem = async () => {
           </Button>
            )}
 
-{userRole === "Custodian" || userRole === "Admin" && (
+{(userRole === "Custodian" || userRole === "Admin") && (
           <Button
             variant="outlined"
             color="error"
@@ -1185,7 +1185,7 @@ await Promise.all(
             Delete Selected ({selectedItems.length})
           </Button> )}
            {/* Add this AI Button */}
-           {userRole === "Custodian" || userRole === "Admin" && (
+           {(userRole === "Custodian" || userRole === "Admin") && (
   <Button
     variant="outlined"
     color="primary"
@@ -1207,7 +1207,7 @@ await Promise.all(
     AI Report
   </Button> )}
    {/* NEW: Generate Report Button */}
-  {userRole === "Custodian" || userRole === "Admin" && (
+  {(userRole === "Custodian" || userRole === "Admin") && (
     <Button
       variant="outlined"
       color="secondary"
@@ -1368,7 +1368,7 @@ await Promise.all(
     <Inventory2Icon fontSize="small" />
   </IconButton>
 </Tooltip>
-{userRole === "Custodian" || userRole === "Admin" && (
+{(userRole === "Custodian" || userRole === "Admin") && (
   <Tooltip title="Update">
     <IconButton
       color="primary"
@@ -1384,7 +1384,7 @@ await Promise.all(
   </Tooltip>
 )}
 
-{userRole === "Custodian" || userRole === "Admin" && (
+{(userRole === "Custodian" || userRole === "Admin") && (
 
   <Tooltip title="Delete">
     <IconButton

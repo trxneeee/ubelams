@@ -1,5 +1,5 @@
 // src/pages/ReservationPage.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import {
   Container,
   Card,
@@ -29,7 +29,8 @@ import {
   TablePagination,
   InputAdornment,
   Backdrop,
-  CircularProgress
+  CircularProgress,
+  Badge
 } from '@mui/material';
 import AssignmentTurnedInIcon from "@mui/icons-material/AssignmentTurnedIn";
 import SearchIcon from "@mui/icons-material/Search";
@@ -39,10 +40,12 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import DeleteIcon from "@mui/icons-material/Delete";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import FilterListIcon from "@mui/icons-material/FilterList";
+import ChatBubbleIcon from "@mui/icons-material/ChatBubble";
+import SendIcon from "@mui/icons-material/Send";
 import axios from 'axios';
 import { alpha, useTheme } from '@mui/material/styles';
 
-const API_BASE_URL = "https://elams-server.onrender.com/api";
+const API_BASE_URL = "http://localhost:5000/api";
 
 interface RequestedItem {
   item_name: string;
@@ -63,12 +66,22 @@ interface Reservation {
   reservation_code: string;
   subject: string;
   instructor: string;
+  instructor_email: string;
   course: string;
+  room: string;
+  schedule: string;
+  startTime?: string;
+  endTime?: string;
   group_count: number;
+  needsItems: boolean;
   requested_items: RequestedItem[];
   assigned_items: AssignedItem[];
   status: string;
   date_created?: string;
+  date_approved?: string;
+  date_assigned?: string;
+  notes?: string;
+  messages?: Array<{ sender: string; message: string; timestamp: string }>;
 }
 
 interface InventoryItem {
@@ -97,11 +110,42 @@ export default function ReservationPage() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [selectedReservationDetails, setSelectedReservationDetails] = useState<Reservation | null>(null);
+  const [messageDialogOpen, setMessageDialogOpen] = useState(false);
+  const [selectedReservationForChat, setSelectedReservationForChat] = useState<Reservation | null>(null);
+  const [messageText, setMessageText] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [chatRefreshInterval, setChatRefreshInterval] = useState<NodeJS.Timeout | null>(null);
+
+  // ref for messages container to auto-scroll
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+  // anchor for last message
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const COMPOSER_HEIGHT = 96;
+
+  const scrollToBottom = () => {
+    try {
+      if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        return;
+      }
+      if (messageListRef.current) {
+        setTimeout(() => {
+          messageListRef.current!.scrollTop = messageListRef.current!.scrollHeight;
+        }, 50);
+      }
+    } catch (e) {}
+  };
 
   useEffect(() => {
     fetchReservations();
     fetchInventory();
   }, []);
+
+  useLayoutEffect(() => {
+    if (messageDialogOpen && selectedReservationForChat) {
+      scrollToBottom();
+    }
+  }, [messageDialogOpen, selectedReservationForChat?.messages?.length]);
 
   const fetchReservations = async () => {
     setLoading(true);
@@ -192,6 +236,139 @@ export default function ReservationPage() {
       alert('Failed to assign items');
     } finally {
       setProcessing(false);
+    }
+  };
+
+  const handleApproveReservation = async (reservation: Reservation) => {
+    if (reservation.status !== 'Pending') {
+      alert('Only Pending reservations can be approved');
+      return;
+    }
+
+    setProcessing(true);
+    try {
+      await axios.post(`${API_BASE_URL}/reservations/${reservation._id}/approve`, {
+        approved_by: JSON.parse(localStorage.getItem('user') || '{}').email || 'Unknown'
+      });
+      
+      await fetchReservations();
+      alert('Reservation approved successfully');
+    } catch (error) {
+      console.error('Approve reservation error:', error);
+      alert('Failed to approve reservation');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // helper: count unseen messages for current user
+  const unseenCount = (reservation: Reservation) => {
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const email = (user && (user.email || user.name)) || '';
+      if (!email) return 0;
+      return (reservation.messages || []).filter(m => !(m as any).seen_by || !(m as any).seen_by.includes(email)).length;
+    } catch (e) {
+      return 0;
+    }
+  };
+
+  const handleOpenChat = async (reservation: Reservation) => {
+    setSelectedReservationForChat(reservation);
+    setMessageDialogOpen(true);
+    setMessageText('');
+
+    // mark messages seen and fetch updated reservation
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const userEmail = user.email || user.name || 'Unknown';
+      await axios.post(`${API_BASE_URL}/reservations/${reservation._id}/messages-seen`, {
+        user_email: userEmail
+      });
+      const resp = await axios.get(`${API_BASE_URL}/reservations/${reservation._id}`);
+      const updatedRes = resp.data as Reservation;
+
+      // update states (replace or append)
+      setSelectedReservationForChat(updatedRes);
+      setReservations(prev => {
+        const exists = prev.some(r => r._id === updatedRes._id);
+        return exists ? prev.map(r => r._id === updatedRes._id ? updatedRes : r) : [updatedRes, ...prev];
+      });
+
+      // ensure scroll after DOM update
+      setTimeout(() => {
+        try { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); } catch(e){}
+      }, 50);
+    } catch (err) {
+      console.error('Mark messages seen error:', err);
+    }
+  
+    // start polling (or SSE if you later switch)
+    startChatPolling(reservation._id);
+  };
+
+  const handleSendMessage = async () => {
+    if (!selectedReservationForChat || !messageText.trim()) return;
+
+    setSendingMessage(true);
+    try {
+      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+      const userIdentifier = currentUser.email || currentUser.name || 'Unknown';
+      const userName = currentUser.name || userIdentifier;
+
+      const resp = await axios.post(`${API_BASE_URL}/reservations/${selectedReservationForChat._id}/message`, {
+        sender: userIdentifier,
+        sender_name: userName,
+        message: messageText
+      });
+
+      const updated = resp.data as Reservation;
+
+      // mark seen (best-effort)
+      try {
+        await axios.post(`${API_BASE_URL}/reservations/${selectedReservationForChat._id}/messages-seen`, {
+          user_email: userIdentifier
+        });
+      } catch (e) {}
+
+      // update local state immediately
+      setSelectedReservationForChat(updated);
+
+      // ensure polling continues
+      startChatPolling(updated._id);
+
+      setMessageText('');
+      setTimeout(() => {
+        try { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); } catch(e){}
+      }, 50);
+    } catch (error) {
+      console.error('Send message error:', error);
+      alert('Failed to send message');
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  // Polling helpers for real-time updates
+  const startChatPolling = (reservationId: string) => {
+    stopChatPolling();
+    const interval = setInterval(async () => {
+      try {
+        const resp = await axios.get(`${API_BASE_URL}/reservations/${reservationId}`);
+        const updated = resp.data as Reservation;
+        setReservations(prev => prev.map(r => r._id === updated._id ? updated : r));
+        setSelectedReservationForChat(prev => prev && prev._id === updated._id ? updated : prev);
+      } catch (err) {
+        console.error('Chat polling error:', err);
+      }
+    }, 1000); // faster polling
+    setChatRefreshInterval(interval as unknown as NodeJS.Timeout);
+  };
+
+  const stopChatPolling = () => {
+    if (chatRefreshInterval) {
+      clearInterval(chatRefreshInterval as unknown as any);
+      setChatRefreshInterval(null);
     }
   };
 
@@ -576,18 +753,54 @@ export default function ReservationPage() {
                               </IconButton>
                             </Tooltip>
 
+                            {reservation.status === 'Pending' && (
+                              <Tooltip title="Approve Reservation">
+                                <IconButton
+                                  color="success"
+                                  onClick={() => handleApproveReservation(reservation)}
+                                  sx={{
+                                    bgcolor: "#e8f5e9",
+                                    "&:hover": { bgcolor: "#81c784" },
+                                    p: 1,
+                                  }}
+                                >
+                                  <CheckCircleIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+
                             <Tooltip title="Assign Items">
                               <IconButton
                                 color="primary"
                                 onClick={() => handleAssign(reservation)}
-                                disabled={reservation.status === 'Assigned'}
+                                disabled={reservation.status !== 'Approved'}
                                 sx={{
                                   bgcolor: "#e3f2fd",
-                                  "&:hover": { bgcolor: "#90caf9" },
+                                  "&:hover": { bgcolor: reservation.status === 'Approved' ? "#90caf9" : "inherit" },
                                   p: 1,
                                 }}
                               >
                                 <AssignmentTurnedInIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+
+                            <Tooltip title="Messages">
+                              <IconButton
+                                color="info"
+                                onClick={() => handleOpenChat(reservation)}
+                                sx={{
+                                  bgcolor: "#e0f2f1",
+                                  "&:hover": { bgcolor: "#4db6ac" },
+                                  p: 1,
+                                }}
+                              >
+                                <Badge
+                                  badgeContent={unseenCount(reservation)}
+                                  color="error"
+                                  invisible={unseenCount(reservation) === 0}
+                                >
+                                  <ChatBubbleIcon fontSize="small" />
+                                </Badge>
                               </IconButton>
                             </Tooltip>
 
@@ -824,13 +1037,47 @@ export default function ReservationPage() {
                     <Typography variant="body2">{selectedReservationDetails.instructor}</Typography>
                   </Box>
                   <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Typography variant="body2" sx={{ minWidth: 120, fontWeight: 'bold' }}>Email:</Typography>
+                    <Typography variant="body2">{selectedReservationDetails.instructor_email}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
                     <Typography variant="body2" sx={{ minWidth: 120, fontWeight: 'bold' }}>Course:</Typography>
                     <Typography variant="body2">{selectedReservationDetails.course}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Typography variant="body2" sx={{ minWidth: 120, fontWeight: 'bold' }}>Room:</Typography>
+                    <Typography variant="body2">{selectedReservationDetails.room}</Typography>
                   </Box>
                   <Box sx={{ display: 'flex', gap: 2 }}>
                     <Typography variant="body2" sx={{ minWidth: 120, fontWeight: 'bold' }}>Groups:</Typography>
                     <Typography variant="body2">{selectedReservationDetails.group_count}</Typography>
                   </Box>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Typography variant="body2" sx={{ minWidth: 120, fontWeight: 'bold' }}>Schedule:</Typography>
+                    <Typography variant="body2">{selectedReservationDetails.schedule}</Typography>
+                  </Box>
+                  {selectedReservationDetails.startTime && (
+                    <Box sx={{ display: 'flex', gap: 2 }}>
+                      <Typography variant="body2" sx={{ minWidth: 120, fontWeight: 'bold' }}>Start Time:</Typography>
+                      <Typography variant="body2">{selectedReservationDetails.startTime}</Typography>
+                    </Box>
+                  )}
+                  {selectedReservationDetails.endTime && (
+                    <Box sx={{ display: 'flex', gap: 2 }}>
+                      <Typography variant="body2" sx={{ minWidth: 120, fontWeight: 'bold' }}>End Time:</Typography>
+                      <Typography variant="body2">{selectedReservationDetails.endTime}</Typography>
+                    </Box>
+                  )}
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Typography variant="body2" sx={{ minWidth: 120, fontWeight: 'bold' }}>Items Needed:</Typography>
+                    <Typography variant="body2">{selectedReservationDetails.needsItems ? '✓ Yes' : '○ No'}</Typography>
+                  </Box>
+                  {selectedReservationDetails.notes && (
+                    <Box sx={{ display: 'flex', gap: 2 }}>
+                      <Typography variant="body2" sx={{ minWidth: 120, fontWeight: 'bold' }}>Notes:</Typography>
+                      <Typography variant="body2">{selectedReservationDetails.notes}</Typography>
+                    </Box>
+                  )}
                   <Box sx={{ display: 'flex', gap: 2 }}>
                     <Typography variant="body2" sx={{ minWidth: 120, fontWeight: 'bold' }}>Status:</Typography>
                     <Chip
@@ -902,11 +1149,106 @@ export default function ReservationPage() {
                   })}
                 </Stack>
               </Box>
+
+              {selectedReservationDetails.messages && selectedReservationDetails.messages.length > 0 && (
+                <Box>
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                    Communication History
+                  </Typography>
+                  <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.info.main, 0.04), maxHeight: 300, overflowY: 'auto' }}>
+                    <Stack spacing={1.5}>
+                      {selectedReservationDetails.messages.map((msg, index) => (
+                        <Box key={index} sx={{ pb: 1.5, borderBottom: index < selectedReservationDetails.messages!.length - 1 ? `1px solid ${alpha(theme.palette.divider, 0.5)}` : 'none' }}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                            <Typography variant="body2" fontWeight="bold" sx={{ color: theme.palette.primary.main }}>
+                              {msg.sender}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {new Date(msg.timestamp).toLocaleString()}
+                            </Typography>
+                          </Box>
+                          <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
+                            {msg.message}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Stack>
+                  </Paper>
+                </Box>
+              )}
             </Stack>
           )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setViewDialogOpen(false)} sx={{ textTransform: 'none' }}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Message Chat Dialog */}
+      <Dialog open={messageDialogOpen} onClose={() => { setMessageDialogOpen(false); stopChatPolling(); }} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <ChatBubbleIcon sx={{ color: theme.palette.info.main }} />
+            <Box>
+              <Typography variant="h6" sx={{ color: theme.palette.info.main }}>
+                Reservation Chat
+              </Typography>
+              {selectedReservationForChat && (
+                <Typography variant="caption" color="text.secondary">
+                  {selectedReservationForChat.reservation_code} - {selectedReservationForChat.subject}
+                </Typography>
+              )}
+            </Box>
+          </Box>
+        </DialogTitle>
+        <DialogContent dividers>
+          {selectedReservationForChat && (
+            <Box sx={{ position: 'relative', minHeight: 400 }}>
+              <Paper ref={messageListRef} sx={{
+                p: 2,
+                bgcolor: alpha(theme.palette.info.main, 0.04),
+                overflowY: 'auto',
+                maxHeight: 520,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 1.5,
+                pb: `${COMPOSER_HEIGHT + 16}px`
+              }}>
+                {selectedReservationForChat.messages && selectedReservationForChat.messages.length > 0 ? (
+                  selectedReservationForChat.messages.map((msg, index) => {
+                    const isCurrentUser = msg.sender === JSON.parse(localStorage.getItem('user') || '{}').email;
+                    return (
+                      <Box key={index} sx={{ display: 'flex', justifyContent: isCurrentUser ? 'flex-end' : 'flex-start' }}>
+                        <Paper sx={{ p: 1.5, maxWidth: '70%', bgcolor: isCurrentUser ? alpha(theme.palette.primary.main, 0.15) : alpha(theme.palette.grey[300], 0.5), borderRadius: 2, boxShadow: 1 }}>
+                          <Typography variant="subtitle2" fontWeight="bold" sx={{ color: isCurrentUser ? theme.palette.primary.main : theme.palette.text.primary }}>{(msg as any).sender_name || msg.sender}</Typography>
+                          <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>{msg.message}</Typography>
+                          <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 0.5 }}>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Typography>
+                        </Paper>
+                      </Box>
+                    );
+                  })
+                ) : (
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200 }}>
+                    <Typography variant="body2" color="textSecondary">No messages yet. Start the conversation!</Typography>
+                  </Box>
+                )}
+                <div ref={messagesEndRef} />
+              </Paper>
+
+              {/* removed inline composer here - moved to DialogActions */}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ flexDirection: 'column', gap: 1, py: 2 }}>
+          <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+            <Paper sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1, borderRadius: 3, boxShadow: 3, width: { xs: '100%', sm: 520 } }}>
+              <TextField placeholder="Type a message..." value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && messageText.trim()) { e.preventDefault(); handleSendMessage(); } }} multiline maxRows={4} fullWidth size="small" disabled={sendingMessage} />
+              <Button variant="contained" color="info" onClick={handleSendMessage} disabled={!messageText.trim() || sendingMessage} sx={{ borderRadius: 2, minWidth: 48, minHeight: 48 }}><SendIcon /></Button>
+            </Paper>
+          </Box>
+          <Box sx={{ width: '100%', display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => { setMessageDialogOpen(false); stopChatPolling(); }} sx={{ textTransform: 'none' }}>Close</Button>
+          </Box>
         </DialogActions>
       </Dialog>
     </Container>
