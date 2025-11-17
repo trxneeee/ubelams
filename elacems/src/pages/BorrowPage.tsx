@@ -1,0 +1,2756 @@
+// src/pages/BorrowPage.tsx
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import DeleteIcon from "@mui/icons-material/Delete";
+import EditIcon from "@mui/icons-material/Edit";
+import EventIcon from "@mui/icons-material/Event";
+import PersonIcon from "@mui/icons-material/Person";
+import SearchIcon from "@mui/icons-material/Search";
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
+import ShoppingCartIcon from "@mui/icons-material/ShoppingCart";
+import CircularProgress from "@mui/material/CircularProgress";
+import ClearIcon from '@mui/icons-material/Clear';
+import GroupIcon from '@mui/icons-material/Group';
+import SchoolIcon from '@mui/icons-material/School';
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
+import FilterListIcon from "@mui/icons-material/FilterList";
+import AddIcon from '@mui/icons-material/Add';
+import {
+  Box,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  ListItemButton,
+  Button,
+  Card,
+  List,
+  Checkbox,
+  Chip,
+  Container,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  IconButton,
+  InputAdornment,
+  Popover,
+  Paper,
+  Step,
+  StepLabel,
+  Stepper,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TablePagination,
+  TableRow,
+  TextField,
+  Tooltip,
+  Typography,
+  alpha,
+  useTheme,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Select,
+  DialogActions,
+} from "@mui/material";
+import axios from "axios";
+import { useEffect, useMemo, useState, useRef } from "react";
+import Loader from "../components/Loader";
+
+const API_BASE_URL = "https://elams-server.onrender.com/api";
+const user = JSON.parse(localStorage.getItem("user") || "{}");
+const userRole = user?.role || "";
+
+interface BorrowRecord {
+  _id?: string;
+  borrow_id: string;
+  borrow_type: 'Walk-In' | 'Reservation';
+  user_type: 'Individual' | 'Group' | 'Faculty';
+  borrow_user: string;
+  course: string;
+  group_number?: string;
+  group_leader?: string;
+  group_leader_id?: string;
+  instructor: string;
+  subject: string;
+  schedule: string;
+  items: BorrowItem[];
+  status: string;
+  date_borrowed: string;
+  date_returned?: string;
+  reservation_code?: string;
+}
+
+interface BorrowItem {
+  _id?: string; // ADD THIS LINE
+  item_id: string;
+  item_name: string;
+  item_type: 'consumable' | 'non-consumable';
+  quantity: number;
+  status: string;
+  identifiers?: {
+    identifier: string;
+    status: string;
+  }[];
+  date_borrowed?: string;
+  date_returned?: string;
+  notes?: string;
+  return_condition?: string; // ADD THIS FOR RETURN FUNCTIONALITY
+  damage_report?: string; // ADD THIS FOR RETURN FUNCTIONALITY
+  lacking_items?: string; // ADD THIS FOR RETURN FUNCTIONALITY
+}
+interface InventoryItem {
+  _id?: string;
+  num: string;
+  equipment_name: string;
+  total_qty: number;
+  borrowed: number;
+  available: number;
+  brand_model?: string;
+  location?: string;
+  identifier_type?: string;
+  identifiers?: string[];
+  statuses?: string[];
+  is_consumable?: boolean;
+  description?: string;
+  quantity_opened?: number;
+  quantity_unopened?: number;
+  item_type: 'consumable' | 'non-consumable';
+}
+
+interface SelectedItem {
+  num: string;
+  name: string;
+  qty: number;
+  available: number;
+  is_consumable: boolean;
+  selected_identifiers?: string[];
+  identifier_type?: string;
+  item_type: 'consumable' | 'non-consumable';
+}
+
+interface Reservation {
+  _id: string;
+  reservation_id: number;
+  reservation_code: string;
+  user_type: 'Individual' | 'Group' | 'Faculty';
+  borrow_user: string;
+  course: string;
+  group_number?: string;
+  group_leader?: string;
+  group_leader_id?: string;
+  instructor: string;
+  subject: string;
+  schedule: string;
+  room: string;
+  group_count: number;
+  requested_items: {
+    item_name: string;
+    quantity: number;
+    item_type: 'consumable' | 'non-consumable';
+  }[];
+  assigned_items: {
+    requested_item_index: number;
+    item_id: string;
+    item_name: string;
+    item_type: 'consumable' | 'non-consumable';
+    identifier?: string;
+    quantity: number;
+    assigned_by: string;
+    date_assigned: string;
+  }[];
+  status: string;
+  date_created: string;
+  date_approved?: string;
+  date_assigned?: string;
+  date_completed?: string;
+  notes?: string;
+}
+
+interface ReportField {
+  field: string;
+  label: string;
+  type: 'string' | 'number' | 'date';
+}
+
+interface ReportFilter {
+  field: string;
+  operator: 'equals' | 'contains' | 'greaterThan' | 'lessThan' | 'greaterThanOrEqual' | 'lessThanOrEqual';
+  value: string;
+}
+
+export default function BorrowPage() {
+  const theme = useTheme();
+  
+  // records & inventory
+  const [records, setRecords] = useState<BorrowRecord[]>([]);
+  const [recordsLoading, setRecordsLoading] = useState(false);
+  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([]);
+  const [aiDialogOpen, setAiDialogOpen] = useState(false);
+  const [question, setQuestion] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [barcodeSearch, setBarcodeSearch] = useState("");
+  const [reportTable, setReportTable] = useState<{ columns: string[]; rows: string[][] } | null>(null);
+  const [itemType, setItemType] = useState<"all" | "non-consumable" | "consumable">("all");
+  
+  // selected items
+  const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([]);
+  const [identifierDialogOpen, setIdentifierDialogOpen] = useState(false);
+  const [currentItem, setCurrentItem] = useState<InventoryItem | null>(null);
+  const [selectedIdentifiers, setSelectedIdentifiers] = useState<string[]>([]);
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+  
+  // dialog + stepper
+  const [open, setOpen] = useState(false);
+  const [activeStep, setActiveStep] = useState(0);
+  const [borrowType, setBorrowType] = useState<'Walk-In' | 'Reservation' | ''>('');
+  const [userType, setUserType] = useState<'Individual' | 'Group' | 'Faculty' | ''>('');
+  const [reservationCode, setReservationCode] = useState("");
+  const [reservationLoading, setReservationLoading] = useState(false);
+  const [currentReservation, setCurrentReservation] = useState<Reservation | null>(null);
+  const steps = ["Select Type", "Borrower Info", "Select Item(s)", "Confirmation"];
+  
+  
+  
+  // Request form
+  const [requestForm, setRequestForm] = useState({
+    borrow_id: "",
+    borrow_type: "",
+    user_type: "",
+    borrow_user: "",
+    course: "",
+    group_number: "",
+    group_leader: "",
+    group_leader_id: "",
+    instructor: "",
+    subject: "",
+    schedule: "",
+    status: "Borrowed",
+    date_borrowed: new Date().toISOString(),
+    reservation_code: "",
+  });
+
+  // Report Dialog State
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [selectedFields, setSelectedFields] = useState<string[]>([]);
+  const [reportFilters, setReportFilters] = useState<ReportFilter[]>([]);
+  const [availableFields, setAvailableFields] = useState<ReportField[]>([]);
+
+  const [search, setSearch] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+
+  // Date filter state
+  const [dateFilterAnchor, setDateFilterAnchor] = useState<null | HTMLElement>(null);
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
+
+  // Add these states
+const [returnDialogOpen, setReturnDialogOpen] = useState(false);
+const [selectedBorrowForReturn, setSelectedBorrowForReturn] = useState<BorrowRecord | null>(null);
+const [returnForm, setReturnForm] = useState<{
+  items: {
+    itemId: string;
+    itemName: string;
+    itemType: string;
+    borrowedQty: number;
+    returnedQty: number;
+    condition: string;
+    damageReport: string;
+    lackingItems: string;
+    notes: string;
+    returnedIdentifiers?: string[];
+  }[];
+}>({ items: [] });
+
+// Add this function to handle return initiation
+const handleInitiateReturn = (record: BorrowRecord) => {
+  setSelectedBorrowForReturn(record);
+  
+  // Initialize return form with current items - FIXED ID ACCESS
+  const returnItems = record.items.map(item => ({
+    itemId: item._id || `${item.item_id}-${Date.now()}`, // Use _id if available, fallback to composite ID
+    itemName: item.item_name,
+    itemType: item.item_type,
+    borrowedQty: item.quantity,
+    returnedQty: item.quantity, // Default to full return
+    condition: item.return_condition || 'Good', // Use existing condition if available
+    damageReport: item.damage_report || '',
+    lackingItems: item.lacking_items || '',
+    notes: item.notes || '',
+    returnedIdentifiers: item.identifiers?.map(id => id.identifier) || []
+  }));
+  
+  setReturnForm({ items: returnItems });
+  setReturnDialogOpen(true);
+};
+
+// Add this function to handle return submission
+const handleSubmitReturn = async () => {
+  try {
+    if (!selectedBorrowForReturn) return;
+
+    console.log('Submitting return for borrow:', selectedBorrowForReturn._id);
+    console.log('Return form items:', returnForm.items);
+
+    // Update each item individually
+    const updatePromises = returnForm.items.map(item => {
+      const status = item.returnedQty === item.borrowedQty ? 'Returned' : 
+                    item.returnedQty > 0 ? 'Partially Returned' : 'Borrowed';
+      
+      console.log(`Updating item ${item.itemId}:`, {
+        status,
+        condition: item.condition,
+        returnedQty: item.returnedQty,
+        borrowedQty: item.borrowedQty
+      });
+
+      return axios.put(
+        `${API_BASE_URL}/borrow-records/${selectedBorrowForReturn._id}/items/${item.itemId}`,
+        {
+          status: status,
+          condition: item.condition,
+          damageReport: item.damageReport,
+          lackingItems: item.lackingItems,
+          notes: item.notes
+        }
+      );
+    });
+
+    const results = await Promise.all(updatePromises);
+    console.log('Return API responses:', results);
+    
+    setReturnDialogOpen(false);
+    await fetchRecords(); // Refresh the records
+    await fetchItems(); // Refresh inventory
+    alert('Items returned successfully!');
+  } catch (error: any) {
+    console.error('Return submission error:', error);
+    console.error('Error details:', error.response?.data);
+    alert('Failed to return items: ' + (error.response?.data?.error || error.message));
+  }
+};
+
+// Update the condition of a specific item in return form
+const updateReturnItemCondition = (itemIndex: number, updates: any) => {
+  setReturnForm(prev => ({
+    items: prev.items.map((item, index) => 
+      index === itemIndex ? { ...item, ...updates } : item
+    )
+  }));
+};
+
+// Fix the View function to only view, not update
+const handleViewBorrow = (record: BorrowRecord) => {
+  setSelectedBorrowForReturn(record);
+  setBorrowType(record.borrow_type);
+  setUserType(record.user_type);
+  setRequestForm({
+    borrow_id: record._id || "",
+    borrow_type: record.borrow_type,
+    user_type: record.user_type,
+    borrow_user: record.borrow_user,
+    course: record.course,
+    group_number: record.group_number || "",
+    group_leader: record.group_leader || "",
+    group_leader_id: record.group_leader_id || "",
+    instructor: record.instructor,
+    subject: record.subject,
+    schedule: record.schedule,
+    status: record.status,
+    date_borrowed: record.date_borrowed,
+    reservation_code: record.reservation_code || "",
+  });
+
+  const itemsArr = record.items.map((item) => ({
+    num: item.item_id,
+    name: item.item_name,
+    qty: item.quantity,
+    available: 0,
+    is_consumable: item.item_type === 'consumable',
+    selected_identifiers: item.identifiers?.map(i => i.identifier),
+    item_type: item.item_type
+  }));
+  
+  setSelectedItems(itemsArr);
+  setActiveStep(3); // jump to summary (view only)
+  setOpen(true);
+};
+
+  const handleChangePage = (_: unknown, newPage: number) => {
+    setPage(newPage);
+  };
+
+  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
+  };
+
+  useEffect(() => {
+    if (barcodeSearch === "" && barcodeInputRef.current) {
+      barcodeInputRef.current.focus();
+    }
+  }, [barcodeSearch]);
+
+    // Get available fields for borrow records
+  const getAvailableFields = (): ReportField[] => {
+    return [
+      { field: 'borrow_id', label: 'Borrow ID', type: 'string' },
+      { field: 'borrow_type', label: 'Borrow Type', type: 'string' },
+      { field: 'user_type', label: 'User Type', type: 'string' },
+      { field: 'borrow_user', label: 'Borrower Name', type: 'string' },
+      { field: 'course', label: 'Course', type: 'string' },
+      { field: 'group_number', label: 'Group Number', type: 'string' },
+      { field: 'group_leader', label: 'Group Leader', type: 'string' },
+      { field: 'group_leader_id', label: 'Leader ID', type: 'string' },
+      { field: 'instructor', label: 'Instructor', type: 'string' },
+      { field: 'subject', label: 'Subject', type: 'string' },
+      { field: 'schedule', label: 'Schedule', type: 'string' },
+      { field: 'status', label: 'Status', type: 'string' },
+      { field: 'date_borrowed', label: 'Date Borrowed', type: 'date' },
+      { field: 'date_returned', label: 'Date Returned', type: 'date' },
+      { field: 'reservation_code', label: 'Reservation Code', type: 'string' },
+      { field: 'items_count', label: 'Items Count', type: 'number' },
+      { field: 'total_quantity', label: 'Total Quantity', type: 'number' },
+    ];
+  };
+
+  // Initialize available fields
+  useEffect(() => {
+    setAvailableFields(getAvailableFields());
+  }, []);
+
+  // Handle field selection
+  const handleFieldSelection = (field: string) => {
+    setSelectedFields(prev => 
+      prev.includes(field) 
+        ? prev.filter(f => f !== field)
+        : [...prev, field]
+    );
+  };
+
+  // Add filter
+  const addFilter = () => {
+    setReportFilters(prev => [...prev, { field: '', operator: 'equals', value: '' }]);
+  };
+
+  // Remove filter
+  const removeFilter = (index: number) => {
+    setReportFilters(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Update filter
+  const updateFilter = (index: number, updates: Partial<ReportFilter>) => {
+    setReportFilters(prev => prev.map((filter, i) => 
+      i === index ? { ...filter, ...updates } : filter
+    ));
+  };
+
+  // Get operators for field type
+  const getOperatorsForField = (fieldType: string) => {
+    if (fieldType === 'number') {
+      return [
+        { value: 'equals', label: 'Equals' },
+        { value: 'greaterThan', label: 'Greater Than' },
+        { value: 'lessThan', label: 'Less Than' },
+        { value: 'greaterThanOrEqual', label: 'Greater Than or Equal' },
+        { value: 'lessThanOrEqual', label: 'Less Than or Equal' }
+      ];
+    } else {
+      return [
+        { value: 'equals', label: 'Equals' },
+        { value: 'contains', label: 'Contains' }
+      ];
+    }
+  };
+
+  // Generate custom report for borrow records
+  const generateCustomReport = () => {
+    let filteredData = records.map(record => ({
+      ...record,
+      items_count: record.items.length,
+      total_quantity: record.items.reduce((sum, item) => sum + item.quantity, 0)
+    }));
+    
+    // Apply filters
+    filteredData = filteredData.filter(record => {
+      return reportFilters.every(filter => {
+        if (!filter.field || !filter.value) return true;
+        
+        const fieldValue = record[filter.field as keyof typeof record];
+        const stringValue = String(fieldValue || '').toLowerCase();
+        const numValue = Number(fieldValue) || 0;
+        const filterValue = filter.value.toLowerCase();
+        const numFilterValue = Number(filter.value) || 0;
+        
+        switch (filter.operator) {
+          case 'equals':
+            return stringValue === filterValue;
+          case 'contains':
+            return stringValue.includes(filterValue);
+          case 'greaterThan':
+            return numValue > numFilterValue;
+          case 'lessThan':
+            return numValue < numFilterValue;
+          case 'greaterThanOrEqual':
+            return numValue >= numFilterValue;
+          case 'lessThanOrEqual':
+            return numValue <= numFilterValue;
+          default:
+            return true;
+        }
+      });
+    });
+
+    // Select only chosen fields
+    const columns = selectedFields.map(field => {
+      const fieldInfo = availableFields.find(f => f.field === field);
+      return fieldInfo?.label || field;
+    });
+
+    const rows = filteredData.map(record => 
+      selectedFields.map(field => {
+        const value = record[field as keyof typeof record];
+        return value === null || value === undefined ? '' : String(value);
+      })
+    );
+
+    setReportTable({ columns, rows });
+    setReportDialogOpen(false);
+    
+    // Generate PDF automatically
+    setTimeout(() => {
+      handleGeneratePDF();
+    }, 500);
+  };
+
+  // Generate PDF function
+  const handleGeneratePDF = () => {
+    if (!reportTable) return;
+    
+    const printContent = `
+      <html>
+        <head>
+          <title>Borrow Records Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            th { background-color: #f2f2f2; }
+            h1 { color: #b91c1c; }
+            .report-info { margin-bottom: 20px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <h1>Borrow Records Report</h1>
+          <div class="report-info">
+            <p>Generated on: ${new Date().toLocaleString()}</p>
+            <p>Total Records: ${reportTable.rows.length}</p>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                ${reportTable.columns.map(col => `<th>${col}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${reportTable.rows.map(row => `
+                <tr>
+                  ${row.map(cell => `<td>${cell}</td>`).join('')}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `;
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(printContent);
+      printWindow.document.close();
+      printWindow.print();
+    }
+  };
+
+  useEffect(() => {
+    if (barcodeSearch === "" && barcodeInputRef.current) {
+      barcodeInputRef.current.focus();
+    }
+  }, [barcodeSearch]);
+
+
+  // Fetch borrow records from MongoDB
+  const fetchRecords = async () => {
+    setRecordsLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE_URL}/borrow-records`);
+      setRecords(res.data);
+    } catch (err) {
+      console.error("fetchRecords error:", err);
+    } finally {
+      setRecordsLoading(false);
+    }
+  };
+
+  // Fetch inventory from MongoDB
+  const fetchItems = async () => {
+    setItemsLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE_URL}/inventory`);
+      setItems(res.data);
+    } catch (err) {
+      console.error("fetchItems error:", err);
+    } finally {
+      setItemsLoading(false);
+    }
+  };
+
+  // Fetch reservation by code
+  const fetchReservationByCode = async (code: string) => {
+    setReservationLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE_URL}/reservations/code/${code}`);
+      const reservation: Reservation = res.data;
+      
+      console.log('=== RESERVATION DATA DEBUG ===');
+      console.log('Full reservation:', reservation);
+      console.log('Assigned items:', reservation.assigned_items);
+      console.log('Requested items:', reservation.requested_items);
+      console.log('=== END DEBUG ===');
+      
+      if (reservation.status !== 'Approved' && reservation.status !== 'Assigned' && reservation.status !== 'Completed') {
+        setError("This reservation is not approved or assigned yet");
+        return null;
+      }
+      
+      setCurrentReservation(reservation);
+      
+      // Infer user_type based on group_count
+      const inferredUserType = reservation.group_count > 1 ? 'Group' : 'Individual';
+      
+      setUserType(inferredUserType);
+      setRequestForm(prev => ({
+        ...prev,
+        borrow_type: "Reservation",
+        user_type: inferredUserType,
+        borrow_user: `Reservation-${reservation.reservation_code}`,
+        course: reservation.course,
+        group_number: reservation.group_count > 1 ? `Group ${reservation.group_count}` : "",
+        group_leader: "",
+        group_leader_id: "",
+        instructor: reservation.instructor,
+        subject: reservation.subject,
+        schedule: reservation.schedule,
+        reservation_code: reservation.reservation_code,
+      }));
+      
+      // Load reservation items into selected items
+      loadReservationItems(reservation);
+      
+      setError(null);
+      
+      // AUTO PROCEED TO STEP 2 (Select Items) for reservation
+      setActiveStep(2);
+      
+      return reservation;
+    } catch (err: any) {
+      console.error("fetchReservation error:", err);
+      if (err.response?.status === 404) {
+        setError("Reservation not found");
+      } else {
+        setError("Failed to fetch reservation");
+      }
+      return null;
+    } finally {
+      setReservationLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRecords();
+    fetchItems();
+  }, []);
+
+  // Add debug useEffect for inventory items
+  useEffect(() => {
+    if (items.length > 0) {
+      console.log('=== INVENTORY ITEMS DEBUG ===');
+      console.log('Total items:', items.length);
+      console.log('Non-consumable items:', items.filter(item => !item.is_consumable).length);
+      console.log('Consumable items:', items.filter(item => item.is_consumable).length);
+      console.log('Sample items:', items.slice(0, 5));
+      console.log('=== END INVENTORY DEBUG ===');
+    }
+  }, [items]);
+
+  // Add debug useEffect for selected items
+  useEffect(() => {
+    console.log('=== SELECTED ITEMS STATE UPDATE ===');
+    console.log('Selected items:', selectedItems);
+    console.log('Selected items count:', selectedItems.length);
+    if (selectedItems.length > 0) {
+      console.log('First item details:', selectedItems[0]);
+    }
+  }, [selectedItems]);
+
+  // filter items
+  const filteredItems = useMemo(
+    () =>
+      items.filter(item => {
+        // Filter by type
+        if (itemType !== "all") {
+          if (itemType === "non-consumable" && item.is_consumable) return false;
+          if (itemType === "consumable" && !item.is_consumable) return false;
+        }
+
+        // Filter by search
+        return (
+          item.equipment_name.toLowerCase().includes(search.toLowerCase()) ||
+          (item.brand_model ?? "").toLowerCase().includes(search.toLowerCase()) ||
+          (item.location ?? "").toLowerCase().includes(search.toLowerCase()) ||
+          (item.description ?? "").toLowerCase().includes(search.toLowerCase()) ||
+          (item.identifiers?.some(id => id.toLowerCase().includes(search.toLowerCase())) ?? false)
+        );
+      }),
+    [items, search, itemType]
+  );
+
+  // filter records
+  const filteredRecords = useMemo(
+    () =>
+      records.filter(
+        (r) =>
+          (r.course?.toLowerCase().includes(search.toLowerCase()) ||
+          r.group_leader?.toLowerCase().includes(search.toLowerCase()) ||
+          r.instructor?.toLowerCase().includes(search.toLowerCase()) ||
+          r.subject?.toLowerCase().includes(search.toLowerCase()) ||
+          r.reservation_code?.toLowerCase().includes(search.toLowerCase())) &&
+          // Date filter
+          (!startDate || !r.date_borrowed || new Date(r.date_borrowed) >= new Date(startDate)) &&
+          (!endDate || !r.date_borrowed || new Date(r.date_borrowed) <= new Date(endDate))
+      ),
+    [records, search, startDate, endDate]
+  );
+
+  // Apply date filter
+  const applyDateFilter = () => {
+    setDateFilterAnchor(null);
+  };
+
+  // Clear date filter
+  const clearDateFilter = () => {
+    setStartDate("");
+    setEndDate("");
+    setDateFilterAnchor(null);
+  };
+
+  // Open identifier selection dialog
+  const handleOpenIdentifierDialog = (item: InventoryItem) => {
+    setCurrentItem(item);
+    setSelectedIdentifiers([]);
+    setIdentifierDialogOpen(true);
+  };
+
+  // Add item with selected identifiers - FIXED
+  const handleAddWithIdentifiers = () => {
+    if (!currentItem) return;
+
+    const newItem: SelectedItem = {
+      num: currentItem.num,
+      name: currentItem.equipment_name,
+      qty: selectedIdentifiers.length,
+      available: currentItem.available,
+      is_consumable: currentItem.is_consumable || false,
+      selected_identifiers: [...selectedIdentifiers],
+      identifier_type: currentItem.identifier_type,
+      item_type: currentItem.item_type // ADDED: Include item_type
+    };
+
+    setSelectedItems(prev => [...prev, newItem]);
+    setIdentifierDialogOpen(false);
+    setCurrentItem(null);
+    setSelectedIdentifiers([]);
+  };
+
+  // update item qty - COMPLETELY FIXED VERSION
+  const updateItemQty = (
+    num: string,
+    delta: number,
+    available: number,
+    name: string,
+    is_consumable: boolean = false
+  ) => {
+    const item_type = is_consumable ? 'consumable' : 'non-consumable';
+    
+    setSelectedItems((prev) => {
+      const existing = prev.find((i) => i.num === num && i.item_type === item_type);
+      
+      if (!existing) {
+        // For non-consumable items with identifiers, open the dialog
+        if (!is_consumable && delta > 0) {
+          const item = items.find(i => i.num === num && i.item_type === item_type);
+          if (item && item.identifiers && item.identifiers.length > 0) {
+            handleOpenIdentifierDialog(item);
+            return prev;
+          }
+        }
+        
+        if (delta > 0) {
+          const newItem: SelectedItem = { 
+            num, 
+            name, 
+            qty: 1, 
+            available,
+            is_consumable,
+            item_type // ADDED: Include item_type
+          };
+          return [...prev, newItem];
+        }
+        return prev;
+      }
+      
+      // Calculate new quantity
+      const newQty = Math.max(0, Math.min(existing.qty + delta, available));
+      
+      if (newQty === 0) {
+        return prev.filter((i) => !(i.num === num && i.item_type === item_type));
+      }
+      
+      // Return new array with updated item
+      return prev.map((i) => 
+        (i.num === num && i.item_type === item_type) ? { ...i, qty: newQty } : i
+      );
+    });
+  };
+
+  // Remove item from cart - FIXED
+  const removeFromCart = (num: string, item_type: 'consumable' | 'non-consumable') => {
+    setSelectedItems(prev => prev.filter(item => !(item.num === num && item.item_type === item_type)));
+  };
+
+  // Load reservation items into selected items - FIXED
+  const loadReservationItems = (reservation: Reservation) => {
+    const reservationItems: SelectedItem[] = [];
+    
+    if (!reservation.assigned_items || !Array.isArray(reservation.assigned_items)) {
+      console.error('No assigned items found in reservation:', reservation);
+      setSelectedItems([]);
+      return;
+    }
+    
+    console.log('=== LOADING RESERVATION ITEMS DEBUG ===');
+    console.log('Assigned items from reservation:', reservation.assigned_items);
+    console.log('Available inventory items:', items);
+    
+// In loadReservationItems function - IMPROVED MATCHING LOGIC
+reservation.assigned_items.forEach(assignedItem => {
+  console.log('Processing assigned item:', assignedItem);
+  console.log('Item type:', assignedItem.item_type);
+  
+  let inventoryItem = null;
+  
+  // For consumables, try to match by description/name AND type
+  if (assignedItem.item_type === 'consumable') {
+    // Try to find consumable by name/description AND type
+    inventoryItem = items.find(item => 
+      item.item_type === 'consumable' &&
+      (item.equipment_name?.toLowerCase().includes(assignedItem.item_name.toLowerCase()) ||
+       item.description?.toLowerCase().includes(assignedItem.item_name.toLowerCase()) ||
+       assignedItem.item_name.toLowerCase().includes(item.equipment_name?.toLowerCase() || '') ||
+       assignedItem.item_name.toLowerCase().includes(item.description?.toLowerCase() || ''))
+    );
+    
+    console.log('Consumable match result:', inventoryItem);
+  } 
+  // For non-consumables, try exact ID match first, then name match WITH TYPE
+  else {
+    // Try exact ID match with type
+    inventoryItem = items.find(item => 
+      item.num === assignedItem.item_id && 
+      item.item_type === 'non-consumable'
+    );
+    
+    // If no ID match, try name match with type
+    if (!inventoryItem) {
+      inventoryItem = items.find(item => 
+        item.item_type === 'non-consumable' &&
+        item.equipment_name?.toLowerCase().includes(assignedItem.item_name.toLowerCase())
+      );
+    }
+  }
+  
+  if (inventoryItem) {
+    console.log('✅ Found matching inventory item:', inventoryItem);
+    
+    const selectedItem: SelectedItem = {
+      num: inventoryItem.num,
+      name: inventoryItem.equipment_name,
+      qty: assignedItem.quantity,
+      available: inventoryItem.available,
+      is_consumable: assignedItem.item_type === 'consumable',
+      selected_identifiers: assignedItem.identifier ? [assignedItem.identifier] : [],
+      identifier_type: inventoryItem.identifier_type,
+      item_type: assignedItem.item_type // This should be correct now
+    };
+    
+    reservationItems.push(selectedItem);
+  } else {
+    console.log('❌ No inventory match found for:', assignedItem.item_name);
+    console.log('Creating basic item with reservation data');
+    
+    // Create basic item using reservation data
+    const basicItem: SelectedItem = {
+      num: assignedItem.item_id || `temp-${Date.now()}-${Math.random()}`,
+      name: assignedItem.item_name,
+      qty: assignedItem.quantity,
+      available: assignedItem.quantity, // Use assigned quantity as available
+      is_consumable: assignedItem.item_type === 'consumable',
+      selected_identifiers: assignedItem.identifier ? [assignedItem.identifier] : [],
+      item_type: assignedItem.item_type // This should be correct now
+    };
+    
+    reservationItems.push(basicItem);
+  }
+});
+    console.log('Final reservation items to set:', reservationItems);
+    console.log('Consumable items count:', reservationItems.filter(item => item.is_consumable).length);
+    console.log('Non-consumable items count:', reservationItems.filter(item => !item.is_consumable).length);
+    console.log('=== END DEBUG ===');
+    
+    setSelectedItems(reservationItems);
+  };
+
+  // stepper nav
+  const handleNext = () => {
+    if (activeStep === 0) {
+      if (!borrowType) {
+        setError("Please select borrow type");
+        return;
+      }
+      
+      if (borrowType === 'Reservation') {
+        // For reservation, we need a reservation code
+        if (!reservationCode.trim()) {
+          setError("Please enter reservation code");
+          return;
+        }
+        
+        // Fetch reservation data - this will auto-navigate to step 2
+        fetchReservationByCode(reservationCode);
+        return; // Don't proceed to next step yet - wait for data fetch
+      } else {
+        // For Walk-In, require user type
+        if (!userType) {
+          setError("Please select user type");
+          return;
+        }
+        setError(null);
+        setActiveStep(1);
+      }
+    } else if (activeStep === 1) {
+      const req = requestForm;
+      if (
+        !req.course ||
+        !req.instructor ||
+        !req.subject ||
+        !req.schedule ||
+        (userType === 'Group' && (!req.group_number || !req.group_leader || !req.group_leader_id))
+      ) {
+        setError("Please complete all required fields.");
+        return;
+      }
+      setError(null);
+      setActiveStep(2);
+    } else if (activeStep === 2) {
+      if (selectedItems.length === 0) {
+        setError("Please select at least one item.");
+        return;
+      }
+      setError(null);
+      setActiveStep(3);
+    }
+  };
+
+  // Update Borrow: similar to New Borrow but populate stepper for editing - FIXED
+  const handleUpdateBorrow = (record: BorrowRecord) => {
+    setBorrowType(record.borrow_type);
+    setUserType(record.user_type);
+    setRequestForm({
+      borrow_id: record._id || "",
+      borrow_type: record.borrow_type,
+      user_type: record.user_type,
+      borrow_user: record.borrow_user,
+      course: record.course,
+      group_number: record.group_number || "",
+      group_leader: record.group_leader || "",
+      group_leader_id: record.group_leader_id || "",
+      instructor: record.instructor,
+      subject: record.subject,
+      schedule: record.schedule,
+      status: record.status,
+      date_borrowed: record.date_borrowed,
+      reservation_code: record.reservation_code || "",
+    });
+
+    const itemsArr = record.items.map((item) => ({
+      num: item.item_id,
+      name: item.item_name,
+      qty: item.quantity,
+      available: 999, // allow editing
+      is_consumable: item.item_type === 'consumable',
+      selected_identifiers: item.identifiers?.map(i => i.identifier),
+      item_type: item.item_type // ADDED: Include item_type
+    }));
+
+    setSelectedItems(itemsArr);
+    setActiveStep(2); // jump to item selection
+    setOpen(true);
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedRecordIds.length === 0) return;
+    if (!confirm(`Delete ${selectedRecordIds.length} borrow record(s)?`)) return;
+
+    try {
+      for (const id of selectedRecordIds) {
+        await axios.delete(`${API_BASE_URL}/borrow-records/${id}`);
+      }
+      await fetchRecords();
+      setSelectedRecordIds([]);
+    } catch (err) {
+      console.error("delete selected error:", err);
+      alert("Failed to delete some records.");
+    }
+  };
+
+  // Delete Borrow
+  const handleDeleteBorrow = async (borrowId: string) => {
+    if (!confirm("Are you sure you want to delete this borrow request?")) return;
+    try {
+      await axios.delete(`${API_BASE_URL}/borrow-records/${borrowId}`);
+      await fetchRecords();
+    } catch (err) {
+      console.error("deleteBorrow error:", err);
+      alert("Failed to delete the record.");
+    }
+  };
+
+  const handleBack = () => {
+    setError(null);
+    setActiveStep((s) => Math.max(0, s - 1));
+  };
+
+  const handleBarcodeSearch = (barcode: string) => {
+    const searchTerm = barcode.trim();
+    setBarcodeSearch(searchTerm);
+    
+    if (searchTerm) {
+      // Find item with matching identifier (exact match)
+      const foundItem = items.find(item => 
+        item.identifiers?.some(identifier => 
+          identifier.toLowerCase() === searchTerm.toLowerCase()
+        )
+      );
+      
+      if (foundItem) {
+        // Check if item is already in cart - FIXED: Use both num and item_type
+        const existingItem = selectedItems.find(i => i.num === foundItem.num && i.item_type === foundItem.item_type);
+        
+        if (!existingItem && foundItem.available > 0) {
+          // Instead of automatically adding, open the dialog to show ALL identifiers
+          setCurrentItem(foundItem);
+          
+          // Pre-select the scanned identifier if it exists
+          const matchedIdentifier = foundItem.identifiers?.find(identifier => 
+            identifier.toLowerCase() === searchTerm.toLowerCase()
+          );
+          
+          if (matchedIdentifier) {
+            setSelectedIdentifiers([matchedIdentifier]);
+          } else {
+            setSelectedIdentifiers([]);
+          }
+          
+          setIdentifierDialogOpen(true);
+        } else if (existingItem) {
+          // Item already in cart, you could show a message or update quantity
+          console.log("Item already in cart");
+        }
+        setBarcodeSearch(""); // Clear the search after successful match
+      } else {
+        // If no exact match, try partial match for manual typing
+        const partiallyMatchedItem = items.find(item => 
+          item.identifiers?.some(identifier => 
+            identifier.toLowerCase().includes(searchTerm.toLowerCase())
+          )
+        );
+        
+        if (partiallyMatchedItem) {
+          setCurrentItem(partiallyMatchedItem);
+          setSelectedIdentifiers([]);
+          setIdentifierDialogOpen(true);
+          setBarcodeSearch(""); // Clear the search
+        }
+      }
+    }
+  };
+
+  const resetDialog = () => {
+    setOpen(false);
+    setActiveStep(0);
+    setBorrowType('');
+    setUserType('');
+    setReservationCode("");
+    setCurrentReservation(null);
+    setRequestForm({
+      borrow_id: "",
+      borrow_type: "",
+      user_type: "",
+      borrow_user: "",
+      course: "",
+      group_number: "",
+      group_leader: "",
+      group_leader_id: "",
+      instructor: "",
+      subject: "",
+      schedule: "",
+      status: "Borrowed",
+      date_borrowed: new Date().toISOString(),
+      reservation_code: "",
+    });
+    setSelectedItems([]);
+    setError(null);
+  };
+
+  // save borrow
+  const handleConfirmBorrow = async () => {
+    if (selectedItems.length === 0) return;
+    setSaving(true);
+    try {
+      const borrowData = {
+        ...requestForm,
+        borrow_type: borrowType,
+        user_type: userType,
+        items: selectedItems.map(item => ({
+          item_id: item.num,
+          item_name: item.name,
+          item_type: item.is_consumable ? 'consumable' : 'non-consumable',
+          quantity: item.qty,
+          status: 'Borrowed',
+          identifiers: item.selected_identifiers ? item.selected_identifiers.map(id => ({
+            identifier: id,
+            status: 'Borrowed'
+          })) : []
+        }))
+      };
+
+      if (requestForm.borrow_id) {
+        // Update existing record
+        await axios.put(`${API_BASE_URL}/borrow-records/${requestForm.borrow_id}`, borrowData);
+      } else {
+        // Create new record
+        await axios.post(`${API_BASE_URL}/borrow-records`, borrowData);
+        
+        // If this was a reservation, mark it as completed
+        if (borrowType === 'Reservation' && currentReservation) {
+          await axios.put(`${API_BASE_URL}/reservations/${currentReservation._id}`, {
+            status: 'Completed'
+          });
+        }
+      }
+
+      await fetchRecords();
+      await fetchItems();
+      resetDialog();
+    } catch (err) {
+      console.error("save borrow error:", err);
+      setError("Failed to save borrow record.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // summary calc
+  const totalRequestedCount = records.reduce((acc, r) => {
+    return acc + r.items.reduce((itemAcc, item) => itemAcc + item.quantity, 0);
+  }, 0);
+
+  
+
+  return (
+    <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
+      {/* Summary cards */}
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h4" fontWeight="bold" color="#b91c1c" gutterBottom>
+          Borrow Management
+        </Typography>
+        <Typography variant="body1" color="text.secondary">
+          Manage equipment and consumable inventory
+        </Typography>
+      </Box>
+      
+      <Stack direction={{ xs: "column", md: "row" }} spacing={3} mb={4}>
+        <Card sx={{ 
+          flex: 1, 
+          p: 3, 
+          borderRadius: 3, 
+          display: "flex", 
+          alignItems: "center", 
+          gap: 2,
+          background: `linear-gradient(135deg, rgba(185,28,28,0.1) 0%, rgba(185,28,28,0.2) 100%)`,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.08)"
+        }}>
+          <Box sx={{ 
+            p: 1.5, 
+            borderRadius: "50%", 
+            bgcolor: "rgba(185,28,28,0.1)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+          }}>
+            <PersonIcon sx={{ fontSize: 30, color: "#b91c1c" }} />
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary" fontWeight="medium">Borrow Requests</Typography>
+            <Typography variant="h4" sx={{ fontWeight: "bold", color: "#b91c1c" }}>
+              {records.length}
+            </Typography>
+          </Box>
+        </Card>
+
+        <Card sx={{ 
+          flex: 1, 
+          p: 3, 
+          borderRadius: 3, 
+          display: "flex", 
+          alignItems: "center", 
+          gap: 2,
+          background: `linear-gradient(135deg, ${alpha(theme.palette.success.main, 0.1)} 0%, ${alpha(theme.palette.success.main, 0.2)} 100%)`,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.08)"
+        }}>
+          <Box sx={{ 
+            p: 1.5, 
+            borderRadius: "50%", 
+            bgcolor: alpha(theme.palette.success.main, 0.1),
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+          }}>
+            <CheckCircleIcon sx={{ fontSize: 30, color: theme.palette.success.main }} />
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary" fontWeight="medium">Total Items Borrowed</Typography>
+            <Typography variant="h4" sx={{ fontWeight: "bold", color: theme.palette.success.main }}>
+              {totalRequestedCount}
+            </Typography>
+          </Box>
+        </Card>
+      </Stack>
+
+      {/* Action Bar */}
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={3} justifyContent="space-between" alignItems="center">
+        <Stack direction="row" spacing={1} sx={{ flex: 1, maxWidth: 600 }} alignItems="center">
+          <TextField
+            placeholder="Search course, leader, instructor, subject, reservation code..."
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(0);
+            }}
+            variant="outlined"
+            size="small"
+            sx={{
+              flex: 1,
+              bgcolor: "background.paper",
+              borderRadius: 3,
+              "& .MuiOutlinedInput-root": {
+                borderRadius: 3,
+                "& fieldset": {
+                  borderRadius: 3,
+                },
+                "&:hover fieldset": {
+                  borderColor: "#b91c1c",
+                },
+                "&.Mui-focused fieldset": {
+                  borderColor: "#b91c1c",
+                },
+              },
+            }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon color="action" />
+                </InputAdornment>
+              ),
+            }}
+          />
+          
+          {/* Date Filter Button */}
+          <Button
+            variant="outlined"
+            onClick={(e) => setDateFilterAnchor(e.currentTarget)}
+            startIcon={<FilterListIcon />}
+            sx={{
+              borderRadius: 3,
+              textTransform: "none",
+              px: 2,
+              borderColor: "#b91c1c",
+              color: "#b91c1c",
+              "&:hover": {
+                borderColor: "#b91c1c",
+                bgcolor: "rgba(185, 28, 28, 0.04)"
+              }
+            }}
+          >
+            Date Filter
+          </Button>
+
+          {/* Date Filter Popover */}
+          <Popover
+            open={Boolean(dateFilterAnchor)}
+            anchorEl={dateFilterAnchor}
+            onClose={() => setDateFilterAnchor(null)}
+            anchorOrigin={{
+              vertical: 'bottom',
+              horizontal: 'left',
+            }}
+            transformOrigin={{
+              vertical: 'top',
+              horizontal: 'left',
+            }}
+          >
+            <Box sx={{ p: 2, minWidth: 300 }}>
+              <Typography variant="subtitle1" gutterBottom>
+                Filter by Borrow Date
+              </Typography>
+              <Stack spacing={2}>
+                <TextField
+                  label="Start Date"
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  fullWidth
+                />
+                <TextField
+                  label="End Date"
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                  fullWidth
+                />
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    variant="contained"
+                    onClick={applyDateFilter}
+                    sx={{ flex: 1 }}
+                  >
+                    Apply
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    onClick={clearDateFilter}
+                    sx={{ flex: 1 }}
+                  >
+                    Clear
+                  </Button>
+                </Stack>
+              </Stack>
+            </Box>
+          </Popover>
+        </Stack>
+        
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+          <Button
+            variant="contained"
+            onClick={() => setOpen(true)}
+            sx={{
+              bgcolor: "#b91c1c",
+              "&:hover": { bgcolor: "#b91c1c.dark" },
+              borderRadius: 2,
+              textTransform: "none",
+              px: 3,
+              fontWeight: "bold",
+              boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
+            }}
+          >
+            + New Borrow
+          </Button>
+
+          {userRole === "Custodian" || userRole === "Admin"  && (
+            <Button
+              variant="outlined"
+              color="error"
+              sx={{
+                borderRadius: 2,
+                textTransform: "none",
+                px: 3,
+                fontWeight: "bold",
+              }}
+              disabled={selectedRecordIds.length === 0}
+              onClick={handleDeleteSelected}
+            >
+              Delete Selected ({selectedRecordIds.length})
+            </Button>
+          )}
+
+          {/* AI Report Button - Only show for Custodian */}
+          {userRole === "Custodian" || userRole === "Admin"  && (
+            <Button
+              variant="outlined"
+              color="primary"
+              onClick={() => setAiDialogOpen(true)}
+              sx={{
+                borderRadius: 2,
+                textTransform: "none",
+                px: 3,
+                fontWeight: "bold",
+                borderColor: "#1976d2",
+                color: "#1976d2",
+                "&:hover": {
+                  borderColor: "#1565c0",
+                  bgcolor: "rgba(25, 118, 210, 0.04)"
+                }
+              }}
+              startIcon={<AutoAwesomeIcon />}
+            >
+              AI Report
+            </Button>
+          )}
+
+              {/* ADD THIS NEW BUTTON - Generate Report */}
+          {userRole === "Custodian" || userRole === "Admin" && (
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={() => setReportDialogOpen(true)}
+              sx={{
+                borderRadius: 2,
+                textTransform: "none",
+                px: 3,
+                fontWeight: "bold",
+                borderColor: theme.palette.secondary.main,
+                color: theme.palette.secondary.main,
+                "&:hover": {
+                  borderColor: theme.palette.secondary.dark,
+                  bgcolor: alpha(theme.palette.secondary.main, 0.04)
+                }
+              }}
+              startIcon={<PictureAsPdfIcon />}
+            >
+              Generate Report
+            </Button>
+          )}
+        </Stack>
+      </Stack>
+
+      {/* Borrow Records Table */}
+      <Card
+        sx={{
+          p: 3,
+          borderRadius: 3,
+          backgroundColor: "background.paper",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
+          overflow: "hidden",
+        }}
+      >
+        {recordsLoading ? (
+          <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 400 }}>
+            <Loader />
+          </Box>
+        ) : records.length === 0 ? (
+          <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 400 }}>
+            <Typography variant="body2" color="text.secondary">
+              No borrow records found.
+            </Typography>
+          </Box>
+        ) : (
+          <>
+            <TableContainer sx={{ maxHeight: 600, borderRadius: 2 }}>
+              <Table stickyHeader sx={{ minWidth: 950 }}>
+                <TableHead>
+                  <TableRow>
+                    <TableCell padding="checkbox" sx={{ bgcolor: "grey.50" }}>
+                      <Checkbox
+                        indeterminate={
+                          selectedRecordIds.length > 0 &&
+                          selectedRecordIds.length < records.length
+                        }
+                        checked={
+                          records.length > 0 &&
+                          selectedRecordIds.length === records.length
+                        }
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedRecordIds(records.map((r) => r._id!));
+                          } else {
+                            setSelectedRecordIds([]);
+                          }
+                        }}
+                        sx={{ color: "#b91c1c" }}
+                      />
+                    </TableCell>
+                    <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Date</TableCell>
+                    <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Type</TableCell>
+                    <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Course</TableCell>
+                    <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Group</TableCell>
+                    <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Leader</TableCell>
+                    <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Instructor</TableCell>
+                    <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Schedule</TableCell>
+                    <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Status</TableCell>
+                    <TableCell align="center" sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Action</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {filteredRecords
+                    .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+                    .map((r) => (
+                      <TableRow key={r._id} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            checked={selectedRecordIds.includes(r._id!)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedRecordIds((prev) => [...prev, r._id!]);
+                              } else {
+                                setSelectedRecordIds((prev) =>
+                                  prev.filter((id) => id !== r._id)
+                                );
+                              }
+                            }}
+                            sx={{ color: "#b91c1c" }}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          {r.date_borrowed
+                            ? new Date(r.date_borrowed).toLocaleString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                                hour: "numeric",
+                                minute: "2-digit",
+                                hour12: true,
+                              })
+                            : "-"}
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={`${r.borrow_type} - ${r.user_type}`} 
+                            size="small" 
+                            color="primary"
+                            variant="outlined"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2" fontWeight="medium">
+                            {r.course}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>{r.group_number || '-'}</TableCell>
+                        <TableCell>
+                          <Box>
+                            <Typography variant="body2" fontWeight="medium">
+                              {r.group_leader || r.borrow_user}
+                            </Typography>
+                            {r.group_leader_id && (
+                              <Typography variant="caption" color="text.secondary">
+                                {r.group_leader_id}
+                              </Typography>
+                            )}
+                          </Box>
+                        </TableCell>
+                        <TableCell>{r.instructor}</TableCell>
+                        <TableCell>{r.schedule}</TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={r.status} 
+                            size="small" 
+                            color={r.status === "Returned" ? "success" : "error"} 
+                            variant={r.status === "Returned" ? "filled" : "outlined"} 
+                          />
+                        </TableCell>
+                       <TableCell>
+  <Stack direction="row" spacing={1} justifyContent="center">
+    {/* View Button - Only for viewing */}
+    <Tooltip title="View Details">
+      <IconButton
+        color="info"
+        onClick={() => handleViewBorrow(r)}
+        sx={{
+          bgcolor: "info.light",
+          "&:hover": { bgcolor: "info.main", color: "#fff" },
+        }}
+      >
+        <EventIcon fontSize="small" />
+      </IconButton>
+    </Tooltip>
+
+    {/* Update Button - Only for Borrowed status */}
+    {r.status === 'Borrowed' && (
+      <Tooltip title="Update/Return">
+        <IconButton
+          color="primary"
+          onClick={() => handleUpdateBorrow(r)}
+          sx={{
+            bgcolor: "#e3f2fd",
+            "&:hover": { bgcolor: "#90caf9" },
+            p: 1,
+          }}
+        >
+          <EditIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+    )}
+
+    {/* Return Button - Only for Borrowed status */}
+    {r.status === 'Borrowed' && (
+      <Tooltip title="Return Items">
+        <IconButton
+          color="success"
+          onClick={() => handleInitiateReturn(r)}
+          sx={{
+            bgcolor: "success.light",
+            "&:hover": { bgcolor: "success.main", color: "#fff" },
+            p: 1,
+          }}
+        >
+          <CheckCircleIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+    )}
+
+    {userRole === "Custodian" || userRole === "Admin" && (
+      <Tooltip title="Delete">
+        <IconButton
+          color="error"
+          onClick={() => handleDeleteBorrow(r._id!)}
+          sx={{
+            bgcolor: "#ffebee",
+            "&:hover": { bgcolor: "#f44336", color: "#fff" },
+            p: 1,
+          }}
+        >
+          <DeleteIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+    )}
+  </Stack>
+</TableCell>
+                      </TableRow>
+                    ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+
+            {/* Pagination */}
+            <TablePagination
+              rowsPerPageOptions={[5, 10, 25]}
+              component="div"
+              count={filteredRecords.length}
+              rowsPerPage={rowsPerPage}
+              page={page}
+              onPageChange={handleChangePage}
+              onRowsPerPageChange={handleChangeRowsPerPage}
+              sx={{ borderTop: "1px solid", borderColor: "divider" }}
+            />
+          </>
+        )}
+      </Card>
+
+      {/* Dialog (Stepper Form) */}
+      <Dialog open={open} onClose={resetDialog} fullWidth maxWidth="md" PaperProps={{ sx: { borderRadius: 3 } }}>
+        <DialogTitle
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            fontWeight: "bold",
+            color: "#b91c1c",
+            bgcolor: "grey.50",
+            borderBottom: "1px solid",
+            borderColor: "divider",
+          }}
+        >
+          {requestForm.borrow_id ? "Update Borrow Request" : "New Borrow Request"}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <EventIcon color="error" />
+            <Typography variant="caption" color="text.secondary">
+              Step {activeStep + 1} of {steps.length}
+            </Typography>
+          </Box>
+        </DialogTitle>
+        <DialogContent dividers sx={{ bgcolor: "background.default" }}>
+          <Box mb={3}>
+            <Stepper
+              activeStep={activeStep}
+              sx={{
+                "& .MuiStepLabel-root .Mui-active": { color: "#b91c1c" },
+                "& .MuiStepLabel-root .Mui-completed": { color: "success.main" },
+                "& .MuiStepConnector-root .Mui-active .MuiStepConnector-line": { borderColor: "#b91c1c" },
+                "& .MuiStepConnector-root .Mui-completed .MuiStepConnector-line": { borderColor: "success.main" },
+              }}
+            >
+              {steps.map((label) => (
+                <Step key={label}>
+                  <StepLabel>{label}</StepLabel>
+                </Step>
+              ))}
+            </Stepper>
+          </Box>
+
+          {/* Step 0: Select Type */}
+          {activeStep === 0 && (
+            <Stack spacing={3}>
+              <Typography variant="h6">Select Borrow Type</Typography>
+              
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                <Button
+                  variant={borrowType === 'Walk-In' ? "contained" : "outlined"}
+                  onClick={() => setBorrowType('Walk-In')}
+                  fullWidth
+                  sx={{ height: 80 }}
+                >
+                  <Stack alignItems="center">
+                    <PersonIcon />
+                    <Typography>Walk-in</Typography>
+                  </Stack>
+                </Button>
+                
+                <Button
+                  variant={borrowType === 'Reservation' ? "contained" : "outlined"}
+                  onClick={() => setBorrowType('Reservation')}
+                  fullWidth
+                  sx={{ height: 80 }}
+                >
+                  <Stack alignItems="center">
+                    <EventIcon />
+                    <Typography>Reservation</Typography>
+                  </Stack>
+                </Button>
+              </Stack>
+
+              {/* Walk-In User Type Selection */}
+              {borrowType === 'Walk-In' && (
+                <>
+                  <Typography variant="h6" sx={{ mt: 2 }}>Select User Type</Typography>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                    <Button
+                      variant={userType === 'Individual' ? "contained" : "outlined"}
+                      onClick={() => setUserType('Individual')}
+                      fullWidth
+                      sx={{ height: 80 }}
+                    >
+                      <Stack alignItems="center">
+                        <PersonIcon />
+                        <Typography>Individual</Typography>
+                      </Stack>
+                    </Button>
+                    
+                    <Button
+                      variant={userType === 'Group' ? "contained" : "outlined"}
+                      onClick={() => setUserType('Group')}
+                      fullWidth
+                      sx={{ height: 80 }}
+                    >
+                      <Stack alignItems="center">
+                        <GroupIcon />
+                        <Typography>Group</Typography>
+                      </Stack>
+                    </Button>
+                    
+                    <Button
+                      variant={userType === 'Faculty' ? "contained" : "outlined"}
+                      onClick={() => setUserType('Faculty')}
+                      fullWidth
+                      sx={{ height: 80 }}
+                    >
+                      <Stack alignItems="center">
+                        <SchoolIcon />
+                        <Typography>Faculty</Typography>
+                      </Stack>
+                    </Button>
+                  </Stack>
+                </>
+              )}
+
+              {/* Reservation Code Input */}
+              {borrowType === 'Reservation' && (
+                <Box>
+                  <Typography variant="h6" sx={{ mt: 2 }}>Enter Reservation Code</Typography>
+                  <TextField
+                    label="Reservation Code"
+                    value={reservationCode}
+                    onChange={(e) => setReservationCode(e.target.value)}
+                    fullWidth
+                    placeholder="Enter the reservation code"
+                    InputProps={{
+                      endAdornment: reservationLoading && (
+                        <InputAdornment position="end">
+                          <CircularProgress size={20} />
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                  {currentReservation && (
+                    <Paper sx={{ p: 2, mt: 2, bgcolor: "success.light" }}>
+                      <Stack spacing={1}>
+                        <Typography variant="body2" color="success.dark" fontWeight="medium">
+                          ✓ Reservation Found: {currentReservation.reservation_code}
+                        </Typography>
+                        <Typography variant="body2" color="success.dark">
+                          Course: {currentReservation.course} | Instructor: {currentReservation.instructor}
+                        </Typography>
+                        <Typography variant="body2" color="success.dark">
+                          Items: {currentReservation.assigned_items?.length || 0} assigned items
+                        </Typography>
+                        <Typography variant="body2" color="success.dark">
+                          Status: {currentReservation.status}
+                        </Typography>
+                      </Stack>
+                    </Paper>
+                  )}
+                </Box>
+              )}
+            </Stack>
+          )}
+
+          {/* Step 1: Borrower Info (Only for Walk-In) */}
+          {activeStep === 1 && borrowType === 'Walk-In' && (
+            <Stack spacing={2}>
+              <TextField
+                label="Borrower Name"
+                value={requestForm.borrow_user}
+                onChange={(e) => setRequestForm({ ...requestForm, borrow_user: e.target.value })}
+                fullWidth
+                variant="outlined"
+                required
+              />
+              
+              <TextField
+                label="Course"
+                value={requestForm.course}
+                onChange={(e) => setRequestForm({ ...requestForm, course: e.target.value })}
+                fullWidth
+                variant="outlined"
+                required
+              />
+              
+              <TextField
+                label="Instructor"
+                value={requestForm.instructor}
+                onChange={(e) => setRequestForm({ ...requestForm, instructor: e.target.value })}
+                fullWidth
+                required
+              />
+              
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                <TextField
+                  label="Subject"
+                  value={requestForm.subject}
+                  onChange={(e) => setRequestForm({ ...requestForm, subject: e.target.value })}
+                  fullWidth
+                  required
+                />
+                <TextField
+                  label="Schedule"
+                  value={requestForm.schedule}
+                  onChange={(e) => setRequestForm({ ...requestForm, schedule: e.target.value })}
+                  fullWidth
+                  required
+                />
+              </Stack>
+
+              {userType === 'Group' && (
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                  <TextField
+                    label="Group Number"
+                    value={requestForm.group_number}
+                    onChange={(e) => setRequestForm({ ...requestForm, group_number: e.target.value })}
+                    fullWidth
+                    required
+                  />
+                  <TextField
+                    label="Leader ID"
+                    value={requestForm.group_leader_id}
+                    onChange={(e) => setRequestForm({ ...requestForm, group_leader_id: e.target.value })}
+                    fullWidth
+                    required
+                  />
+                  <TextField
+                    label="Group Leader"
+                    value={requestForm.group_leader}
+                    onChange={(e) => setRequestForm({ ...requestForm, group_leader: e.target.value })}
+                    fullWidth
+                    required
+                  />
+                </Stack>
+              )}
+            </Stack>
+          )}
+
+          {/* Step 2: Item Selection (Same for both Walk-In and Reservation) */}
+          {activeStep === 2 && (
+            <Box>
+              {borrowType === 'Reservation' && currentReservation && (
+                <Paper sx={{ p: 2, mb: 3, bgcolor: "success.light" }}>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <CheckCircleIcon color="success" />
+                    <Typography variant="h6" color="success.dark">
+                      Reservation Items Pre-loaded
+                    </Typography>
+                  </Stack>
+                  <Typography variant="body2" color="success.dark" sx={{ mt: 1 }}>
+                    Items from your reservation have been pre-selected. You can modify quantities or add/remove items as needed.
+                  </Typography>
+                </Paper>
+              )}
+
+              <Stack direction="row" spacing={2} mb={3} alignItems="center">
+                <FormControl sx={{ minWidth: 180 }}>
+                  <InputLabel>Filter Items</InputLabel>
+                  <Select
+                    value={itemType}
+                    label="Filter Items"
+                    onChange={(e) => setItemType(e.target.value as any)}
+                  >
+                    <MenuItem value="all">All Items</MenuItem>
+                    <MenuItem value="non-consumable">Non-Consumable</MenuItem>
+                    <MenuItem value="consumable">Consumable</MenuItem>
+                  </Select>
+                </FormControl>
+                
+                <TextField
+                  placeholder="Search items..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  variant="outlined"
+                  size="small"
+                  sx={{ flex: 1 }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <SearchIcon />
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Stack>
+
+              {/* Barcode Scanner Search */}
+              <TextField
+                inputRef={barcodeInputRef}
+                placeholder="Scan barcode or type identifier..."
+                value={barcodeSearch}
+                onChange={(e) => setBarcodeSearch(e.target.value)}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter') {
+                    handleBarcodeSearch(barcodeSearch);
+                  }
+                }}
+                variant="outlined"
+                size="small"
+                fullWidth
+                sx={{ mb: 3 }}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon color="primary" />
+                    </InputAdornment>
+                  ),
+                  endAdornment: barcodeSearch && (
+                    <InputAdornment position="end">
+                      <IconButton
+                        size="small"
+                        onClick={() => setBarcodeSearch("")}
+                      >
+                        <ClearIcon />
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                }}
+              />
+
+              {/* Shopping Cart Summary - FIXED */}
+              {selectedItems.length > 0 && (
+                <Paper sx={{ p: 2, mb: 3, bgcolor: "grey.50" }}>
+                  <Stack direction="row" alignItems="center" spacing={1} mb={1}>
+                    <ShoppingCartIcon color="primary" />
+                    <Typography variant="h6">Selected Items</Typography>
+                    <Chip label={selectedItems.length} color="primary" size="small" />
+                  </Stack>
+                  
+                  <Stack spacing={1}>
+                    {selectedItems.map((item) => (
+                      <Box key={`${item.num}-${item.item_type}`} sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <Box>
+                          <Typography variant="body2" fontWeight="medium">
+                            {item.name}
+                            {item.selected_identifiers && ` (${item.selected_identifiers.join(", ")})`}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {item.is_consumable ? "Consumable" : "Non-Consumable"}
+                          </Typography>
+                        </Box>
+                        
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <IconButton
+                            size="small"
+                            onClick={() => updateItemQty(
+                              item.num, 
+                              -1, 
+                              item.available, 
+                              item.name,
+                              item.is_consumable
+                            )}
+                            disabled={item.qty <= 1}
+                          >
+                            -
+                          </IconButton>
+                          
+                          <Typography sx={{ minWidth: 30, textAlign: 'center' }}>
+                            {item.qty}
+                          </Typography>
+                          
+                          <IconButton
+                            size="small"
+                            onClick={() => updateItemQty(
+                              item.num, 
+                              1, 
+                              item.available, 
+                              item.name,
+                              item.is_consumable
+                            )}
+                            disabled={item.qty >= item.available}
+                          >
+                            +
+                          </IconButton>
+                          
+                          <IconButton 
+                            size="small" 
+                            color="error" 
+                            onClick={() => removeFromCart(item.num, item.item_type)}
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Stack>
+                      </Box>
+                    ))}
+                  </Stack>
+                </Paper>
+              )}
+
+              {/* Items List - FIXED */}
+              <Box sx={{ maxHeight: 400, overflow: "auto" }}>
+                {itemsLoading ? (
+                  <Box sx={{ display: "flex", justifyContent: "center", p: 3 }}>
+                    <CircularProgress size={24} />
+                  </Box>
+                ) : filteredItems.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary" textAlign="center" py={3}>
+                    No items found
+                  </Typography>
+                ) : (
+                  <Stack spacing={2}>
+                    {filteredItems.map((item) => {
+                      const cartItem = selectedItems.find(i => i.num === item.num && i.item_type === item.item_type);
+                      const currentQty = cartItem ? cartItem.qty : 0;
+                      
+                      return (
+                        <Paper key={`${item.num}-${item.item_type}`} sx={{ p: 2 }}>
+                          <Stack direction="row" spacing={2} alignItems="center">
+                            <Box sx={{ flex: 1 }}>
+                              <Typography variant="body1" fontWeight="medium">
+                                {item.equipment_name}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                {item.brand_model && `${item.brand_model} • `}
+                                {item.location && `Location: ${item.location} • `}
+                                Available: {item.available}
+                                {item.is_consumable && " • Consumable"}
+                              </Typography>
+                              
+                              {item.identifiers && item.identifiers.length > 0 && (
+                                <Typography variant="caption" display="block" color="text.secondary">
+                                  Identifiers: {item.identifiers.join(", ")}
+                                </Typography>
+                              )}
+                            </Box>
+                            
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <IconButton
+                                size="small"
+                                onClick={() => updateItemQty(
+                                  item.num, 
+                                  -1, 
+                                  item.available, 
+                                  item.equipment_name,
+                                  item.is_consumable
+                                )}
+                                disabled={currentQty === 0}
+                              >
+                                -
+                              </IconButton>
+                              
+                              <Typography sx={{ minWidth: 30, textAlign: 'center' }}>
+                                {currentQty}
+                              </Typography>
+                              
+                              <IconButton
+                                size="small"
+                                onClick={() => updateItemQty(
+                                  item.num, 
+                                  1, 
+                                  item.available, 
+                                  item.equipment_name,
+                                  item.is_consumable
+                                )}
+                                disabled={currentQty >= item.available}
+                              >
+                                +
+                              </IconButton>
+                            </Stack>
+                          </Stack>
+                        </Paper>
+                      );
+                    })}
+                  </Stack>
+                )}
+              </Box>
+            </Box>
+          )}
+
+          {/* Step 3: Confirmation */}
+{/* Step 3: Confirmation */}
+{activeStep === 3 && (
+  <Box>
+    <Typography variant="h6" gutterBottom>
+      {requestForm.borrow_id ? "Borrow Details" : "Borrow Request Summary"}
+    </Typography>
+    
+    <Paper sx={{ p: 2, mb: 3, bgcolor: "grey.50" }}>
+      <Typography variant="subtitle2" gutterBottom>Borrower Information</Typography>
+      <Stack spacing={1}>
+        <Box sx={{ display: "flex" }}>
+          <Typography variant="body2" sx={{ minWidth: 120 }}>Type:</Typography>
+          <Typography variant="body2" fontWeight="medium">{borrowType} - {userType}</Typography>
+        </Box>
+        {borrowType === 'Reservation' && (
+          <Box sx={{ display: "flex" }}>
+            <Typography variant="body2" sx={{ minWidth: 120 }}>Reservation Code:</Typography>
+            <Typography variant="body2" fontWeight="medium">{reservationCode}</Typography>
+          </Box>
+        )}
+        <Box sx={{ display: "flex" }}>
+          <Typography variant="body2" sx={{ minWidth: 120 }}>Borrower:</Typography>
+          <Typography variant="body2" fontWeight="medium">{requestForm.borrow_user}</Typography>
+        </Box>
+        <Box sx={{ display: "flex" }}>
+          <Typography variant="body2" sx={{ minWidth: 120 }}>Course:</Typography>
+          <Typography variant="body2" fontWeight="medium">{requestForm.course}</Typography>
+        </Box>
+        {userType === 'Group' && (
+          <>
+            <Box sx={{ display: "flex" }}>
+              <Typography variant="body2" sx={{ minWidth: 120 }}>Group:</Typography>
+              <Typography variant="body2" fontWeight="medium">{requestForm.group_number}</Typography>
+            </Box>
+            <Box sx={{ display: "flex" }}>
+              <Typography variant="body2" sx={{ minWidth: 120 }}>Leader:</Typography>
+              <Typography variant="body2" fontWeight="medium">{requestForm.group_leader}</Typography>
+            </Box>
+            <Box sx={{ display: "flex" }}>
+              <Typography variant="body2" sx={{ minWidth: 120 }}>Leader ID:</Typography>
+              <Typography variant="body2" fontWeight="medium">{requestForm.group_leader_id}</Typography>
+            </Box>
+          </>
+        )}
+        <Box sx={{ display: "flex" }}>
+          <Typography variant="body2" sx={{ minWidth: 120 }}>Instructor:</Typography>
+          <Typography variant="body2" fontWeight="medium">{requestForm.instructor}</Typography>
+        </Box>
+        <Box sx={{ display: "flex" }}>
+          <Typography variant="body2" sx={{ minWidth: 120 }}>Subject:</Typography>
+          <Typography variant="body2" fontWeight="medium">{requestForm.subject}</Typography>
+        </Box>
+        <Box sx={{ display: "flex" }}>
+          <Typography variant="body2" sx={{ minWidth: 120 }}>Schedule:</Typography>
+          <Typography variant="body2" fontWeight="medium">{requestForm.schedule}</Typography>
+        </Box>
+        {/* Add return status information */}
+        <Box sx={{ display: "flex" }}>
+          <Typography variant="body2" sx={{ minWidth: 120 }}>Status:</Typography>
+          <Chip 
+            label={requestForm.status} 
+            size="small" 
+            color={
+              requestForm.status === "Returned" ? "success" : 
+              requestForm.status === "Partially Returned" ? "warning" : "error"
+            } 
+          />
+        </Box>
+        {requestForm.status === "Returned" && selectedBorrowForReturn?.date_returned && (
+          <Box sx={{ display: "flex" }}>
+            <Typography variant="body2" sx={{ minWidth: 120 }}>Date Returned:</Typography>
+            <Typography variant="body2" fontWeight="medium">
+              {new Date(selectedBorrowForReturn.date_returned).toLocaleString()}
+            </Typography>
+          </Box>
+        )}
+      </Stack>
+    </Paper>
+    
+    <Paper sx={{ p: 2, bgcolor: "grey.50" }}>
+      <Typography variant="subtitle2" gutterBottom>
+        Items {requestForm.borrow_id ? "Details" : "to Borrow"}
+      </Typography>
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>Item</TableCell>
+            <TableCell align="right">Quantity</TableCell>
+            <TableCell>Type</TableCell>
+            <TableCell>Status</TableCell>
+            <TableCell>Condition</TableCell>
+            <TableCell>Notes</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {selectedItems.map((item: any) => (
+            <TableRow key={`${item.num}-${item.item_type}`}>
+              <TableCell>
+                <Typography variant="body2" fontWeight="medium">
+                  {item.name}
+                </Typography>
+                {item.selected_identifiers && item.selected_identifiers.length > 0 && (
+                  <Typography variant="caption" color="text.secondary">
+                    IDs: {item.selected_identifiers.join(", ")}
+                  </Typography>
+                )}
+              </TableCell>
+              <TableCell align="right">{item.qty}</TableCell>
+              <TableCell>
+                <Chip 
+                  label={item.is_consumable ? "Consumable" : "Non-Consumable"} 
+                  size="small" 
+                  color={item.is_consumable ? "secondary" : "primary"}
+                  variant="outlined"
+                />
+              </TableCell>
+              <TableCell>
+                <Chip 
+                  label={item.status || 'Borrowed'} 
+                  size="small" 
+                  color={
+                    item.status === "Returned" ? "success" : 
+                    item.status === "Partially Returned" ? "warning" : "default"
+                  }
+                />
+              </TableCell>
+              <TableCell>
+                {item.return_condition ? (
+                  <Chip 
+                    label={item.return_condition} 
+                    size="small" 
+                    color={
+                      item.return_condition === "Good" ? "success" : 
+                      item.return_condition === "Damaged" ? "warning" : 
+                      item.return_condition === "Broken" ? "error" : "default"
+                    }
+                  />
+                ) : (
+                  <Typography variant="body2" color="text.secondary">-</Typography>
+                )}
+              </TableCell>
+              <TableCell>
+                <Typography variant="body2" fontSize="0.75rem">
+                  {item.notes || '-'}
+                  {item.damage_report && ` Damage: ${item.damage_report}`}
+                  {item.lacking_items && ` Lacking: ${item.lacking_items}`}
+                </Typography>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Paper>
+  </Box>
+)}
+
+          {error && (
+            <Typography color="error" sx={{ mt: 2 }}>
+              {error}
+            </Typography>
+          )}
+
+          {/* Stepper Navigation */}
+          <Box sx={{ display: "flex", justifyContent: "space-between", mt: 3 }}>
+            <Button
+              onClick={handleBack}
+              disabled={activeStep === 0}
+              sx={{ borderRadius: 2 }}
+            >
+              Back
+            </Button>
+
+            {activeStep === steps.length - 1 ? (
+              <Button
+                variant="contained"
+                onClick={handleConfirmBorrow}
+                disabled={saving}
+                sx={{
+                  bgcolor: "#b91c1c",
+                  "&:hover": { bgcolor: "#b91c1c.dark" },
+                  borderRadius: 2,
+                  minWidth: 120,
+                }}
+              >
+                {saving ? <CircularProgress size={24} /> : "Confirm"}
+              </Button>
+            ) : (
+              <Button
+                variant="contained"
+                onClick={handleNext}
+                sx={{
+                  bgcolor: "#b91c1c",
+                  "&:hover": { bgcolor: "#b91c1c.dark" },
+                  borderRadius: 2,
+                  minWidth: 120,
+                }}
+              >
+                Next
+              </Button>
+            )}
+          </Box>
+        </DialogContent>
+      </Dialog>
+
+      {/* Identifier Selection Dialog */}
+      <Dialog 
+        open={identifierDialogOpen} 
+        onClose={() => setIdentifierDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          Select Identifiers for {currentItem?.equipment_name}
+          <Typography variant="body2" color="text.secondary">
+            Available: {currentItem?.available} identifiers
+          </Typography>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Select one or more identifiers (use Ctrl/Cmd for multiple selection):
+          </Typography>
+          
+          <List sx={{ mt: 2, maxHeight: 300, overflow: "auto" }}>
+            {currentItem?.identifiers?.map((identifier) => (
+              <ListItem key={identifier} disablePadding sx={{ mb: 0.5 }}>
+                <ListItemButton
+                  selected={selectedIdentifiers.includes(identifier)}
+                  onClick={() => {
+                    if (selectedIdentifiers.includes(identifier)) {
+                      setSelectedIdentifiers(prev => prev.filter(id => id !== identifier));
+                    } else if (selectedIdentifiers.length < (currentItem?.available || 0)) {
+                      setSelectedIdentifiers(prev => [...prev, identifier]);
+                    }
+                  }}
+                  sx={{
+                    borderRadius: 1,
+                    width: '100%',
+                    "&.Mui-selected": {
+                      bgcolor: alpha(theme.palette.primary.main, 0.1),
+                      "&:hover": {
+                        bgcolor: alpha(theme.palette.primary.main, 0.2),
+                      }
+                    }
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 40 }}>
+                    <Checkbox
+                      edge="start"
+                      checked={selectedIdentifiers.includes(identifier)}
+                      tabIndex={-1}
+                      disableRipple
+                    />
+                  </ListItemIcon>
+                  <ListItemText 
+                    primary={identifier} 
+                    primaryTypographyProps={{ variant: "body2" }}
+                  />
+                </ListItemButton>
+              </ListItem>
+            ))}
+          </List>
+          
+          {selectedIdentifiers.length > 0 && (
+            <Paper sx={{ p: 2, mt: 2, bgcolor: "grey.50" }}>
+              <Typography variant="subtitle2" gutterBottom>
+                Selected ({selectedIdentifiers.length}):
+              </Typography>
+              <Typography variant="body2">
+                {selectedIdentifiers.join("; ")}
+              </Typography>
+            </Paper>
+          )}
+          
+          <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 3, gap: 1 }}>
+            <Button onClick={() => setIdentifierDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              variant="contained" 
+              onClick={handleAddWithIdentifiers}
+              disabled={selectedIdentifiers.length === 0}
+            >
+              Add {selectedIdentifiers.length} Item(s)
+            </Button>
+          </Box>
+        </DialogContent>
+      </Dialog>
+
+      {/* AI Dialog */}
+      <Dialog 
+        open={aiDialogOpen} 
+        onClose={() => setAiDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <AutoAwesomeIcon color="primary" />
+            <Typography variant="h6">AI Report</Typography>
+          </Stack>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Ask questions about borrow records, inventory status, or generate reports.
+          </Typography>
+          
+          <Stack spacing={2} sx={{ mt: 2 }}>
+            <TextField
+              multiline
+              rows={3}
+              placeholder="e.g., Show me all borrow requests for ECE students this month"
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              fullWidth
+              variant="outlined"
+            />
+            
+            <Button
+              variant="contained"
+              onClick={() => {setLoading(true);}}
+              disabled={loading || !question.trim()}
+              startIcon={loading ? <CircularProgress size={20} /> : <AutoAwesomeIcon />}
+            >
+              {loading ? "Generating..." : "Generate Report"}
+            </Button>
+          </Stack>
+        </DialogContent>
+      </Dialog>
+        <Dialog 
+        open={reportDialogOpen} 
+        onClose={() => setReportDialogOpen(false)}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <PictureAsPdfIcon color="secondary" />
+            <Typography variant="h6">Generate Borrow Records Report</Typography>
+          </Stack>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Select fields to include and apply filters to generate a custom borrow records report.
+          </Typography>
+          
+          {/* Field Selection Section */}
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+              Select Fields to Include
+            </Typography>
+            <Paper variant="outlined" sx={{ p: 2, maxHeight: 200, overflow: 'auto' }}>
+              <Stack spacing={1}>
+                {availableFields.map((field) => (
+                  <Box key={field.field} sx={{ display: 'flex', alignItems: 'center' }}>
+                    <Checkbox
+                      checked={selectedFields.includes(field.field)}
+                      onChange={() => handleFieldSelection(field.field)}
+                      color="secondary"
+                    />
+                    <Typography variant="body2">
+                      {field.label} ({field.type})
+                    </Typography>
+                  </Box>
+                ))}
+              </Stack>
+            </Paper>
+          </Box>
+
+          {/* Filters Section */}
+          <Box sx={{ mb: 3 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+              <Typography variant="subtitle1" fontWeight="bold">
+                Filters
+              </Typography>
+              <Button 
+                variant="outlined" 
+                size="small" 
+                onClick={addFilter}
+                startIcon={<AddIcon />}
+              >
+                Add Filter
+              </Button>
+            </Stack>
+
+            <Stack spacing={2}>
+              {reportFilters.map((filter, index) => (
+                <Paper key={index} variant="outlined" sx={{ p: 2 }}>
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    {/* Field Select */}
+                    <FormControl size="small" sx={{ minWidth: 150 }}>
+                      <InputLabel>Field</InputLabel>
+                      <Select
+                        value={filter.field}
+                        label="Field"
+                        onChange={(e) => updateFilter(index, { field: e.target.value })}
+                      >
+                        {availableFields.map((field) => (
+                          <MenuItem key={field.field} value={field.field}>
+                            {field.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+
+                    {/* Operator Select */}
+                    <FormControl size="small" sx={{ minWidth: 150 }}>
+                      <InputLabel>Operator</InputLabel>
+                      <Select
+                        value={filter.operator}
+                        label="Operator"
+                        onChange={(e) => updateFilter(index, { operator: e.target.value as any })}
+                      >
+                        {filter.field ? getOperatorsForField(
+                          availableFields.find(f => f.field === filter.field)?.type || 'string'
+                        ).map(op => (
+                          <MenuItem key={op.value} value={op.value}>
+                            {op.label}
+                          </MenuItem>
+                        )) : (
+                          <MenuItem value="equals">Equals</MenuItem>
+                        )}
+                      </Select>
+                    </FormControl>
+
+                    {/* Value Input */}
+                    <TextField
+                      size="small"
+                      label="Value"
+                      value={filter.value}
+                      onChange={(e) => updateFilter(index, { value: e.target.value })}
+                      sx={{ flex: 1 }}
+                      type={availableFields.find(f => f.field === filter.field)?.type === 'number' ? 'number' : 'text'}
+                    />
+
+                    {/* Remove Filter Button */}
+                    <IconButton 
+                      size="small" 
+                      onClick={() => removeFilter(index)}
+                      color="error"
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
+          </Box>
+        </DialogContent>
+        
+        <DialogActions>
+          <Button onClick={() => setReportDialogOpen(false)}>Cancel</Button>
+          <Button 
+            variant="contained" 
+            onClick={generateCustomReport}
+            disabled={selectedFields.length === 0}
+            color="secondary"
+            startIcon={<PictureAsPdfIcon />}
+          >
+            Generate PDF Report
+          </Button>
+        </DialogActions>
+      </Dialog>
+{/* Return Items Dialog */}
+<Dialog 
+  open={returnDialogOpen} 
+  onClose={() => setReturnDialogOpen(false)}
+  maxWidth="md"
+  fullWidth
+>
+  <DialogTitle>
+    <Stack direction="row" alignItems="center" spacing={1}>
+      <CheckCircleIcon color="success" />
+      <Typography variant="h6">Return Items</Typography>
+    </Stack>
+    <Typography variant="body2" color="text.secondary">
+      {selectedBorrowForReturn?.borrow_user} - {selectedBorrowForReturn?.course}
+    </Typography>
+  </DialogTitle>
+  
+  <DialogContent dividers>
+    <Typography variant="body2" color="text.secondary" gutterBottom>
+      Report the condition of returned items and fill out necessary forms for damaged/lost items.
+    </Typography>
+
+    {returnForm.items.map((item, index) => (
+      <Paper key={item.itemId} sx={{ p: 2, mb: 2 }}>
+        <Stack spacing={2}>
+          {/* Item Header */}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="subtitle1" fontWeight="bold">
+              {item.itemName}
+            </Typography>
+            <Chip 
+              label={item.itemType} 
+              size="small" 
+              color={item.itemType === 'consumable' ? 'secondary' : 'primary'}
+              variant="outlined"
+            />
+          </Box>
+
+          {/* Quantity Returned */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Typography variant="body2">Quantity to Return:</Typography>
+            <TextField
+              type="number"
+              size="small"
+              value={item.returnedQty}
+              onChange={(e) => updateReturnItemCondition(index, { 
+                returnedQty: Math.max(0, Math.min(item.borrowedQty, parseInt(e.target.value) || 0))
+              })}
+              inputProps={{ min: 0, max: item.borrowedQty }}
+              sx={{ width: 80 }}
+            />
+            <Typography variant="body2" color="text.secondary">
+              / {item.borrowedQty} borrowed
+            </Typography>
+          </Box>
+
+          {/* Condition Selection */}
+          <FormControl fullWidth size="small">
+            <InputLabel>Condition</InputLabel>
+            <Select
+              value={item.condition}
+              label="Condition"
+              onChange={(e) => updateReturnItemCondition(index, { condition: e.target.value })}
+            >
+              <MenuItem value="Good">Good</MenuItem>
+              <MenuItem value="Damaged">Damaged</MenuItem>
+              <MenuItem value="Broken">Broken</MenuItem>
+              <MenuItem value="Lost">Lost</MenuItem>
+              <MenuItem value="Lacking">Lacking</MenuItem>
+            </Select>
+          </FormControl>
+
+          {/* Condition-specific forms */}
+          {(item.condition === 'Damaged' || item.condition === 'Broken') && (
+            <TextField
+              label="Damage/Breakage Report"
+              multiline
+              rows={3}
+              value={item.damageReport}
+              onChange={(e) => updateReturnItemCondition(index, { damageReport: e.target.value })}
+              fullWidth
+              placeholder="Describe the damage or breakage in detail..."
+            />
+          )}
+
+          {item.condition === 'Lacking' && (
+            <TextField
+              label="Lacking Items Report"
+              multiline
+              rows={2}
+              value={item.lackingItems}
+              onChange={(e) => updateReturnItemCondition(index, { lackingItems: e.target.value })}
+              fullWidth
+              placeholder="Specify what items are missing or incomplete..."
+            />
+          )}
+
+          {item.condition === 'Lost' && (
+            <TextField
+              label="Loss Report"
+              multiline
+              rows={2}
+              value={item.damageReport}
+              onChange={(e) => updateReturnItemCondition(index, { damageReport: e.target.value })}
+              fullWidth
+              placeholder="Provide details about the loss..."
+            />
+          )}
+
+          {/* General Notes */}
+          <TextField
+            label="Additional Notes"
+            multiline
+            rows={2}
+            value={item.notes}
+            onChange={(e) => updateReturnItemCondition(index, { notes: e.target.value })}
+            fullWidth
+            placeholder="Any additional comments..."
+          />
+
+          {/* Identifier Selection for Non-Consumables */}
+          {item.itemType === 'non-consumable' && selectedBorrowForReturn && (
+            <FormControl fullWidth size="small">
+              <InputLabel>Returned Identifiers</InputLabel>
+              <Select
+                multiple
+                value={item.returnedIdentifiers || []}
+                label="Returned Identifiers"
+                onChange={(e) => updateReturnItemCondition(index, { 
+                  returnedIdentifiers: e.target.value 
+                })}
+                renderValue={(selected) => selected.join(', ')}
+              >
+                {selectedBorrowForReturn.items
+                  .find(borrowItem => borrowItem._id === item.itemId)
+                  ?.identifiers?.map(identifier => (
+                    <MenuItem key={identifier.identifier} value={identifier.identifier}>
+                      <Checkbox checked={item.returnedIdentifiers?.includes(identifier.identifier) || false} />
+                      <ListItemText primary={identifier.identifier} />
+                    </MenuItem>
+                  ))}
+              </Select>
+            </FormControl>
+          )}
+        </Stack>
+      </Paper>
+    ))}
+  </DialogContent>
+  
+  <DialogActions>
+    <Button onClick={() => setReturnDialogOpen(false)}>Cancel</Button>
+    <Button 
+      variant="contained" 
+      color="success" 
+      onClick={handleSubmitReturn}
+      startIcon={<CheckCircleIcon />}
+    >
+      Confirm Return
+    </Button>
+  </DialogActions>
+</Dialog>
+    </Container>
+  );
+}
