@@ -21,7 +21,6 @@ import Inventory2Icon from "@mui/icons-material/Inventory2";
 import NotificationsIcon from "@mui/icons-material/Notifications";
 import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
 import ReservationPage from "./pages/ReservationPage";
-import { alpha, useTheme } from "@mui/material/styles";
 import StudentPrepPage from "./pages/StudentPrepPage";
 import { Dialog, IconButton, ToggleButton, ToggleButtonGroup } from "@mui/material";
 
@@ -42,24 +41,20 @@ interface Notification {
   onClick?: () => void; // optional click handler
 }
 
-interface CInventoryItem {
-  num: string;
-  location: string;
-  description: string;
-  quantity_opened: string;
-  quantity_unopened: string;
-  quantity_on_order: string;
-  remarks: string;
-  experiment: string;
-  subject: string;
-  date_issued: string;
-  issuance_no: string;
-  stock_alert: string;
-}
-
-
-const API_URL =
-  "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
+//interface CInventoryItem {
+//  num: string;
+//  location: string;
+//  description: string;
+//  quantity_opened: string;
+//  quantity_unopened: string;
+//  quantity_on_order: string;
+//  remarks: string;
+//  experiment: string;
+//  subject: string;
+//  date_issued: string;
+//  issuance_no: string;
+//  stock_alert: string;
+// } 
 
 // Replace Google Sheets handlers with server-backed implementations
 const SERVER_API = "http://localhost:5000/api";
@@ -655,8 +650,15 @@ function AppLayout({ children }: { children: ReactNode }) {
   const [showCalendarMobile, setShowCalendarMobile] = useState(false);
   const [showNotifMobile, setShowNotifMobile] = useState(false);
 
+  // hide calendar/notifications for Student role
+  const storedUser = typeof window !== "undefined" ? localStorage.getItem("user") : null;
+  const currentUser = storedUser ? JSON.parse(storedUser || "{}") : {};
+  const currentRole = (currentUser?.role || "").toString();
+  const isStudent = currentRole === "Student";
+
   // Listen for header-dispatched mobile actions
   useEffect(() => {
+    if (isStudent) return; // students shouldn't open these panels
     const onOpenCalendar = () => setShowCalendarMobile(true);
     const onOpenNotifications = () => setShowNotifMobile(true);
     window.addEventListener('open-calendar', onOpenCalendar as EventListener);
@@ -672,7 +674,7 @@ function AppLayout({ children }: { children: ReactNode }) {
       <Header />
 
       {/* Mobile toolbar buttons (appear under Header when stacked) */}
-      {isStacked && (
+      {isStacked && !isStudent && (
         <div style={{ display: "flex", justifyContent: "flex-end", padding: 8, gap: 8 }}>
           <IconButton
             aria-label="Open calendar"
@@ -703,7 +705,7 @@ function AppLayout({ children }: { children: ReactNode }) {
         }}
       >
         {/* Desktop: inline left panel; Mobile: hidden (use dialog) */}
-        {!isStacked && <CalendarPanel />}
+        {!isStacked && !isStudent && <CalendarPanel />}
 
         <main
           className="main-content"
@@ -718,31 +720,35 @@ function AppLayout({ children }: { children: ReactNode }) {
         </main>
 
         {/* Desktop: inline right panel; Mobile: hidden (use dialog) */}
-        {!isStacked && <NotificationPanel />}
+        {!isStacked && !isStudent && <NotificationPanel />}
       </div>
 
       {/* Mobile dialogs for panels */}
-      <Dialog fullScreen open={showCalendarMobile} onClose={() => setShowCalendarMobile(false)}>
-        <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", justifyContent: "flex-end", padding: 8 }}>
-            <IconButton onClick={() => setShowCalendarMobile(false)} aria-label="close calendar">Close</IconButton>
-          </div>
-          <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
-            <CalendarPanel />
-          </div>
-        </div>
-      </Dialog>
+      {!isStudent && (
+        <Dialog fullScreen open={showCalendarMobile} onClose={() => setShowCalendarMobile(false)}>
+         <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+           <div style={{ display: "flex", justifyContent: "flex-end", padding: 8 }}>
+             <IconButton onClick={() => setShowCalendarMobile(false)} aria-label="close calendar">Close</IconButton>
+           </div>
+           <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
+             <CalendarPanel />
+           </div>
+         </div>
+        </Dialog>
+      )}
 
-      <Dialog fullScreen open={showNotifMobile} onClose={() => setShowNotifMobile(false)}>
-        <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-          <div style={{ display: "flex", justifyContent: "flex-end", padding: 8 }}>
-            <IconButton onClick={() => setShowNotifMobile(false)} aria-label="close notifications">Close</IconButton>
-          </div>
-          <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
-            <NotificationPanel />
-          </div>
-        </div>
-      </Dialog>
+      {!isStudent && (
+        <Dialog fullScreen open={showNotifMobile} onClose={() => setShowNotifMobile(false)}>
+         <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+           <div style={{ display: "flex", justifyContent: "flex-end", padding: 8 }}>
+             <IconButton onClick={() => setShowNotifMobile(false)} aria-label="close notifications">Close</IconButton>
+           </div>
+           <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
+             <NotificationPanel />
+           </div>
+         </div>
+        </Dialog>
+      )}
 
       <Footer />
     </>

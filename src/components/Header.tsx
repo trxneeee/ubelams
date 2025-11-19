@@ -223,54 +223,6 @@ const Header = () => {
   }
 };
 
-const handleSecurityUpdate = async () => {
-  try {
-    // Validate current password against stored user password
-    const storedUser = JSON.parse(localStorage.getItem("user") || "{}");
-    const storedPassword = storedUser?.password || "";
-    if (!storedPassword || userData.currentPassword !== storedPassword) {
-      setAlert({ open: true, message: "Current password is incorrect", severity: "error" });
-      return;
-    }
- 
-    if (userData.password !== userData.confirmPassword) {
-      setAlert({ open: true, message: "New passwords do not match", severity: "error" });
-      return;
-    }
- 
-    if (userData.password.length < 6) {
-      setAlert({ open: true, message: "New password must be at least 6 characters", severity: "error" });
-      return;
-    }
- 
-    // Update password
-    const response = await axios.get(
-       "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec",
-       {
-         params: {
-          sheet: "users",
-          action: "update",
-          email: storedUser.email,
-          password: userData.password,
-          firstname: storedUser.firstname,
-          lastname: storedUser.lastname,
-          role: storedUser.role
-         }
-       }
-     );
- 
-     if (response.data.success) {
-      const updatedUser = { ...storedUser, password: userData.password };
-      localStorage.setItem("user", JSON.stringify(updatedUser));
-       setAlert({ open: true, message: "Password updated successfully", severity: "success" });
-       setTimeout(() => {
-         setSecurityOpen(false);
-       }, 1000);
-     }
-   } catch (error) {
-     setAlert({ open: true, message: "Error updating password", severity: "error" });
-   }
-};
   // Drawer for mobile
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -288,8 +240,6 @@ const handleSecurityUpdate = async () => {
   // If role is "Admin", set lastname to "Admin", otherwise use the stored lastname
   const userLastName = userRole === "Admin" ? "Admin" : (user?.lastname || user?.family_name);
   
-  const userPassword = user?.password;
-
   // Safe initials extraction
   const getInitials = (first?: string, last?: string) => {
     const f = first?.charAt(0).toUpperCase() || "";
@@ -611,12 +561,7 @@ const handleSecurityUpdate = async () => {
             onChange={handleInputChange}
           />
         </DialogContent>
-        <DialogActions>
-          <Button onClick={handleSecurityClose} style={{color:'red'}}>Cancel</Button>
-          <Button onClick={handleSecurityUpdate} variant="contained" color="error">
-            Update Password
-          </Button>
-        </DialogActions>
+
       </Dialog>
     </>
   );

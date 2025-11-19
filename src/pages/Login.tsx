@@ -166,45 +166,6 @@ export default function Login() {
   };
 
   // Function to get user role from MongoDB and create user if doesn't exist
-  const getUserRoleFromDatabase = async (userData: GoogleUserData): Promise<string> => {
-    try {
-      console.log("Checking user in database:", userData.email);
-
-      // First, try to find the user in the database using your existing API endpoint
-      const findResponse = await axios.post(`${API_BASE_URL}/users`, {
-        action: "read",
-        email: userData.email
-      });
-
-      console.log("Find response:", findResponse.data);
-
-      if (findResponse.data.success && findResponse.data.data && findResponse.data.data.length > 0) {
-        // User exists, update their information with Google data and return their role
-        const existingUser = findResponse.data.data[0];
-        console.log("User found:", existingUser);
-        
-        // ✅ UPDATE: Update user information with latest Google data
-        await updateUserWithGoogleData(userData, existingUser);
-        
-        return existingUser.role;
-      } else {
-        // User doesn't exist, create a new user
-        console.log("User not found, creating new user...");
-        return await createNewUser(userData);
-      }
-    } catch (error: any) {
-      console.error("Error in getUserRoleFromDatabase:", error);
-      
-      // If there's an error, try to create the user anyway
-      if (error.response?.status === 404 || error.response?.data?.success === false) {
-        console.log("User not found via error, creating new user...");
-        return await createNewUser(userData);
-      }
-      
-      // If other error, return role based on email as fallback
-      return determineRoleFromEmail(userData.email);
-    }
-  };
 
   // ✅ NEW FUNCTION: Update existing user with Google data
   const updateUserWithGoogleData = async (userData: GoogleUserData, existingUser: any): Promise<void> => {

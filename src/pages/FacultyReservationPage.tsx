@@ -1,5 +1,5 @@
 // src/pages/FacultyReservationPage.tsx
-import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import {
   Container,
   Card,
@@ -143,8 +143,8 @@ export default function FacultyReservationPage() {
   const [successDialog, setSuccessDialog] = useState(false);
   const [reservationCode, setReservationCode] = useState('');
 
-  // Add user_type state (Individual | Group) — default to Group per request
-  const [userType, setUserType] = useState<'Individual' | 'Group'>('Group');
+  // Add user_type state (Individual | Group)
+  const [userType, setUserType] = useState<'Individual' | 'Group'>('Individual');
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -153,7 +153,6 @@ export default function FacultyReservationPage() {
   // ref to the messages container for automatic scrolling
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  const COMPOSER_HEIGHT = 96;
 
   // chat polling interval ref -> prevents "startChatPolling/stopChatPolling is not defined" errors
   const chatIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -607,37 +606,40 @@ export default function FacultyReservationPage() {
         // New Reservation Form
         <Card sx={{ p: 4, borderRadius: 3 }}>
           <Stack spacing={3}>
+            {/* USER TYPE: Individual / Group selector - choose before filling other info */}
+            <Paper sx={{ p: 2, display: 'flex', gap: 1, alignItems: 'center' }}>
+              <Typography variant="subtitle1" sx={{ mr: 2 }}>Reservation for</Typography>
+              <Button
+                variant={userType === 'Individual' ? 'contained' : 'outlined'}
+                onClick={() => {
+                  setUserType('Individual');
+                  // reset group-specific fields when switching to Individual
+                  setReservationForm(prev => ({ ...prev, group_count: 1 }));
+                  setConsumableItems([]);
+                  setNonConsumableItems([]);
+                  setReservationForm(prev => ({ ...prev, needsItems: prev.needsItems }));
+                }}
+              >
+                Individual
+              </Button>
+              <Button
+                variant={userType === 'Group' ? 'contained' : 'outlined'}
+                onClick={() => {
+                  setUserType('Group');
+                  // default to 2 groups if switching to Group and it's 1
+                  setReservationForm(prev => ({ ...prev, group_count: Math.max(2, prev.group_count || 2) }));
+                }}
+              >
+                Group
+              </Button>
+            </Paper>
+ 
             {/* Class Information */}
             <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.primary.main, 0.04) }}>
               <Typography variant="h6" gutterBottom color="primary">
                 Class Information
               </Typography>
               <Stack spacing={2}>
-                {/* USER TYPE selector placed INSIDE Class Information */}
-                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                  <Typography variant="subtitle2" sx={{ mr: 1 }}>Reservation for</Typography>
-                  <Button
-                    variant={userType === 'Individual' ? 'contained' : 'outlined'}
-                    onClick={() => {
-                      setUserType('Individual');
-                      // do not force group_count to 1 — allow faculty to enter number of individuals
-                    }}
-                    size="small"
-                  >
-                    Individual
-                  </Button>
-                  <Button
-                    variant={userType === 'Group' ? 'contained' : 'outlined'}
-                    onClick={() => {
-                      setUserType('Group');
-                      // do not override faculty-entered count when switching to Group
-                    }}
-                    size="small"
-                  >
-                    Group
-                  </Button>
-                </Box>
-
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
                   <TextField
                     label="Subject *"
@@ -669,13 +671,13 @@ export default function FacultyReservationPage() {
                     fullWidth
                   />
                   <TextField
-                    label={userType === 'Individual' ? 'Number of Individuals' : 'Number of Groups'}
+                    label="Number of Groups"
                     type="number"
                     value={reservationForm.group_count}
                     onChange={(e) => setReservationForm(prev => ({ ...prev, group_count: parseInt(e.target.value) || 1 }))}
                     fullWidth
                     inputProps={{ min: 1 }}
-                    // editable for both Individual and Group
+                    disabled={userType === 'Individual'} // disable when Individual selected
                   />
                 </Stack>
 

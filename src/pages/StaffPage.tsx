@@ -339,7 +339,7 @@ export default function StaffPage() {
             <TextField
               placeholder="Search name or email..."
               size="small"
-              onChange={(e) => { /* keep existing search behaviour if needed */ }}
+              onChange={() => { /* keep existing search behaviour if needed */ }}
               fullWidth
               InputProps={{
                 startAdornment: <InputAdornment position="start"><SearchIcon color="action" /></InputAdornment>,

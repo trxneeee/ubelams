@@ -275,7 +275,6 @@ export default function BorrowPage() {
 
   // Group members state & helpers (used for Group borrow/reservation flows)
   const [groupMembers, setGroupMembers] = useState<{ name: string; id: string }[]>([]);
-  const [studentPrep, setStudentPrep] = useState<any | null>(null);
 
   const addGroupMember = () => {
     setGroupMembers(prev => [...prev, { name: "", id: "" }]);
@@ -676,14 +675,12 @@ export default function BorrowPage() {
 
       if (!resObj) {
         setCurrentReservation(null);
-        setStudentPrep(null);
         setError("Reservation not found");
         return null;
       }
 
       // keep reservation state and studentPrep (if any)
       setCurrentReservation(resObj);
-      setStudentPrep(sp || null);
       setReservationCode(String(resObj.reservation_code || code));
 
       // Build merge logic safely (avoid mixing || and ??)
