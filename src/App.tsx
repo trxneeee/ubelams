@@ -57,7 +57,7 @@ interface Notification {
 // } 
 
 // Replace Google Sheets handlers with server-backed implementations
-const SERVER_API = "http://localhost:5000/api";
+const SERVER_API = "https://elams-server.onrender.com/api";
 
 /* CalendarPanel: shows Approved/Assigned reservations with recurring expansion */
 function CalendarPanel() {

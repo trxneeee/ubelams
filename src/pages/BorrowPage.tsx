@@ -59,7 +59,7 @@ import axios from "axios";
 import { useEffect, useMemo, useState, useRef } from "react";
 import Loader from "../components/Loader";
 
-const API_BASE_URL = "http://localhost:5000/api";
+const API_BASE_URL = "https://elams-server.onrender.com/api";
 const user = JSON.parse(localStorage.getItem("user") || "{}");
 const userRole = user?.role || "";
 

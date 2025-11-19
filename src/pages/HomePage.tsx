@@ -21,7 +21,7 @@ import {
 import axios from "axios";
 import { alpha, useTheme } from "@mui/material/styles";
 
-const API_BASE_URL = "http://localhost:5000/api";
+const API_BASE_URL = "https://elams-server.onrender.com/api";
 
 interface User {
   email: string;

@@ -37,7 +37,7 @@ import { useNavigate } from "react-router-dom";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import SearchIcon from "@mui/icons-material/Search";
 
-const API_BASE_URL = "http://localhost:5000/api";
+const API_BASE_URL = "https://elams-server.onrender.com/api";
 
 interface Staff {
   email: string;
