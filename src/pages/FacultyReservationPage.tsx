@@ -42,6 +42,8 @@ import InboxIcon from "@mui/icons-material/Inbox";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import ChatBubbleIcon from "@mui/icons-material/ChatBubble";
 import SendIcon from "@mui/icons-material/Send";
+import EditIcon from '@mui/icons-material/Edit';
+import ListIcon from '@mui/icons-material/List';
 import axios from 'axios';
 
 const API_BASE_URL = "http://localhost:5000/api";
@@ -85,6 +87,9 @@ interface Reservation {
   status: string;
   date_created: string;
   messages?: Array<{ sender: string; sender_name?: string; message: string; timestamp: string }>;
+  user_type?: 'Individual' | 'Group';
+  edits?: any[]; // edit history from server (keeps flexible shape)
+  notes?: string; // <-- added so references to reservation.notes compile
 }
 
 export default function FacultyReservationPage() {
@@ -137,6 +142,13 @@ export default function FacultyReservationPage() {
   const [saving, setSaving] = useState(false);
   const [successDialog, setSuccessDialog] = useState(false);
   const [reservationCode, setReservationCode] = useState('');
+
+  // Add user_type state (Individual | Group) — default to Group per request
+  const [userType, setUserType] = useState<'Individual' | 'Group'>('Group');
+  const [isEditing, setIsEditing] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [currentLogs, setCurrentLogs] = useState<any[]>([]);
 
   // ref to the messages container for automatic scrolling
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -199,9 +211,13 @@ export default function FacultyReservationPage() {
       const response = await axios.get(`${API_BASE_URL}/reservations`);
       const allReservations = response.data;
       // Filter by current faculty member's email
-      const filtered = allReservations.filter((res: Reservation) => 
-        res.instructor_email && res.instructor_email.toLowerCase() === user.email.toLowerCase()
-      );
+      const filtered = allReservations
+        .filter((res: Reservation) => res.instructor_email && res.instructor_email.toLowerCase() === user.email.toLowerCase())
+        .sort((a: Reservation, b: Reservation) => {
+          const da = a.date_created ? new Date(a.date_created).getTime() : 0;
+          const db = b.date_created ? new Date(b.date_created).getTime() : 0;
+          return db - da; // newest first
+        });
       setMyReservations(filtered);
     } catch (error) {
       console.error('Fetch reservations error:', error);
@@ -255,6 +271,46 @@ export default function FacultyReservationPage() {
   const totalNonConsumableItems = nonConsumableItems.reduce((sum, item) => sum + (item.quantity * reservationForm.group_count), 0);
   const totalAllItems = totalConsumableItems + totalNonConsumableItems;
 
+  // When opening the New Reservation form for edit, populate states
+  const openEditForm = (res: Reservation) => {
+    setIsEditing(true);
+    setEditingId(res._id);
+    setReservationForm(prev => ({
+      ...prev,
+      subject: res.subject || '',
+      instructor: res.instructor || facultyName,
+      schedule: res.schedule || '',
+      // detect recurring vs single
+      scheduleType: String(res.schedule || "").toLowerCase().startsWith("every") ? 'recurring' : 'single',
+      scheduleDate: String(res.schedule || "").match(/^\d{4}-\d{2}-\d{2}/) ? String(res.schedule) : new Date().toISOString().split('T')[0],
+      recurringDays: [], // leave as-is for simplicity
+      recurringEndDate: '',
+      course: res.course || '',
+      room: res.room || '',
+      startTime: res.startTime || '09:00',
+      endTime: res.endTime || '10:00',
+      group_count: res.group_count || 1,
+      needsItems: res.requested_items && res.requested_items.length > 0,
+      notes: res.notes || ''
+    }));
+    // split requested items back into consumable/non-consumable
+    // server may send item_type as string; cast to the narrow union so TypeScript accepts it
+    const consumables: RequestedItem[] = (res.requested_items || [])
+      .filter(i => String(i.item_type).toLowerCase() === 'consumable')
+      .map(i => ({ item_name: i.item_name, quantity: i.quantity, item_type: 'consumable' }));
+    const noncons: RequestedItem[] = (res.requested_items || [])
+      .filter(i => String(i.item_type).toLowerCase() === 'non-consumable')
+      .map(i => ({ item_name: i.item_name, quantity: i.quantity, item_type: 'non-consumable' }));
+    setConsumableItems(consumables);
+    setNonConsumableItems(noncons);
+    // if group sets userType
+    setUserType(res.group_count && res.group_count > 1 ? 'Group' : 'Individual');
+
+    // switch to New Reservation tab
+    setCurrentTab(1);
+  };
+
+  // Submit handler (create or edit)
   const handleSubmit = async () => {
     if (!reservationForm.subject || !reservationForm.instructor || 
         !reservationForm.course || !reservationForm.room) {
@@ -289,15 +345,33 @@ export default function FacultyReservationPage() {
     try {
       const user = JSON.parse(localStorage.getItem('user') || '{}');
       const allItems = reservationForm.needsItems ? [...consumableItems, ...nonConsumableItems] : [];
-      const response = await axios.post(`${API_BASE_URL}/reservations`, {
+      const payload = {
         ...reservationForm,
         instructor_email: user.email,
         schedule: generateScheduleString(),
-        requested_items: allItems
-      });
+        requested_items: allItems,
+        user_type: userType,
+      };
 
-      setReservationCode(response.data.reservation_code);
-      setSuccessDialog(true);
+      if (isEditing && editingId) {
+        // call PUT to update reservation and include editor info
+        const resp = await axios.put(`${API_BASE_URL}/reservations/${editingId}`, {
+          ...payload,
+          editedBy: user.email,
+          editedName: user.name || user.firstname || user.email,
+          editReason: 'Edited by faculty' // optional; could prompt
+        });
+        // refresh and reset
+        await fetchMyReservations();
+        setIsEditing(false);
+        setEditingId(null);
+        setReservationCode(resp.data.reservation_code || resp.data.reservation_code);
+        setSuccessDialog(true);
+      } else {
+        const response = await axios.post(`${API_BASE_URL}/reservations`, payload);
+        setReservationCode(response.data.reservation_code);
+        setSuccessDialog(true);
+      }
       
       // Reset form
       setReservationForm({
@@ -322,8 +396,8 @@ export default function FacultyReservationPage() {
       // Refresh reservations inbox
       await fetchMyReservations();
     } catch (error) {
-      console.error('Create reservation error:', error);
-      alert('Failed to create reservation');
+      console.error('Create/update reservation error:', error);
+      alert('Failed to save reservation');
     } finally {
       setSaving(false);
     }
@@ -421,6 +495,13 @@ export default function FacultyReservationPage() {
     } finally {
       setSendingMessage(false);
     }
+  };
+
+  // Open edit logs dialog for a reservation (safe if edits is undefined)
+  const openLogs = (res: Reservation) => {
+    const logs = Array.isArray((res as any).edits) ? (res as any).edits : [];
+    setCurrentLogs(logs);
+    setLogsOpen(true);
   };
 
   const scrollToBottom = () => {
@@ -532,6 +613,31 @@ export default function FacultyReservationPage() {
                 Class Information
               </Typography>
               <Stack spacing={2}>
+                {/* USER TYPE selector placed INSIDE Class Information */}
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <Typography variant="subtitle2" sx={{ mr: 1 }}>Reservation for</Typography>
+                  <Button
+                    variant={userType === 'Individual' ? 'contained' : 'outlined'}
+                    onClick={() => {
+                      setUserType('Individual');
+                      // do not force group_count to 1 — allow faculty to enter number of individuals
+                    }}
+                    size="small"
+                  >
+                    Individual
+                  </Button>
+                  <Button
+                    variant={userType === 'Group' ? 'contained' : 'outlined'}
+                    onClick={() => {
+                      setUserType('Group');
+                      // do not override faculty-entered count when switching to Group
+                    }}
+                    size="small"
+                  >
+                    Group
+                  </Button>
+                </Box>
+
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
                   <TextField
                     label="Subject *"
@@ -563,12 +669,13 @@ export default function FacultyReservationPage() {
                     fullWidth
                   />
                   <TextField
-                    label="Number of Groups"
+                    label={userType === 'Individual' ? 'Number of Individuals' : 'Number of Groups'}
                     type="number"
                     value={reservationForm.group_count}
                     onChange={(e) => setReservationForm(prev => ({ ...prev, group_count: parseInt(e.target.value) || 1 }))}
                     fullWidth
                     inputProps={{ min: 1 }}
+                    // editable for both Individual and Group
                   />
                 </Stack>
 
@@ -840,9 +947,9 @@ export default function FacultyReservationPage() {
                 </Stack>
 
                 {nonConsumableItems.length > 0 ? (
-                  <ItemsTable 
-                    items={nonConsumableItems} 
-                    onRemove={handleRemoveNonConsumable} 
+                  <ItemsTable
+                    items={nonConsumableItems}
+                    onRemove={handleRemoveNonConsumable}
                     type="non-consumable"
                   />
                 ) : (
@@ -850,7 +957,7 @@ export default function FacultyReservationPage() {
                     No non-consumable items added yet.
                   </Typography>
                 )}
-              </Paper>
+                </Paper> {/* <-- missing closing tag fixed */}
             </Stack>
             )}
 
@@ -1007,6 +1114,14 @@ export default function FacultyReservationPage() {
                             >
                               <ChatBubbleIcon />
                             </Badge>
+                          </IconButton>
+
+                          <IconButton size="small" onClick={() => openEditForm(reservation)} color="primary" title="Edit reservation">
+                            <EditIcon />
+                          </IconButton>
+
+                          <IconButton size="small" onClick={() => openLogs(reservation)} color="default" title="View Edit Logs">
+                            <ListIcon />
                           </IconButton>
                         </Stack>
                       </TableCell>
@@ -1279,6 +1394,30 @@ export default function FacultyReservationPage() {
 </Button>
 
           </Box>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Logs Dialog */}
+      <Dialog open={logsOpen} onClose={() => setLogsOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>Reservation Edit History</DialogTitle>
+        <DialogContent dividers>
+          {currentLogs.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">No edits recorded.</Typography>
+          ) : (
+            currentLogs.map((log, idx) => (
+              <Paper key={idx} sx={{ p: 2, mb: 2 }}>
+                <Typography variant="subtitle2">{log.editedName || log.editedBy} — {new Date(log.editedAt).toLocaleString()}</Typography>
+                {log.reason && <Typography variant="caption" color="text.secondary">Reason: {log.reason}</Typography>}
+                <details style={{ marginTop: 8 }}>
+                  <summary>View previous snapshot</summary>
+                  <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(log.previous, null, 2)}</pre>
+                </details>
+              </Paper>
+            ))
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setLogsOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
     </Container>

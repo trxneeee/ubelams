@@ -35,11 +35,35 @@ interface UserData {
 export default function Login() {
   const [error, setError] = useState("");
   const navigate = useNavigate();
+  // helper for routing decisions
+  const routeAfterLogin = (email: string, role: string) => {
+    const lowerEmail = (email || "").toLowerCase();
+    if (role === "Instructor" || role === "Program Chair") {
+      navigate("/facultyreserve");
+      return;
+    }
+    if (role === "Student" && lowerEmail.endsWith("@s.ubaguio.edu")) {
+      navigate("/studentprep");
+      return;
+    }
+    if (role === "Admin" || role === "Student Assistant" || role === "Custodian") {
+      navigate("/dashboard");;
+      return;
+    }
+  };
 
   useEffect(() => {
     const storedUser = localStorage.getItem("user");
     if (storedUser) {
-      navigate("/dashboard", { replace: true });
+      // route based on stored role/email
+      try {
+        const u = JSON.parse(storedUser || "{}");
+        const role = u.role || "";
+        const email = u.email || "";
+        routeAfterLogin(email, role);
+      } catch {
+        navigate("/dashboard", { replace: true });
+      }
       return;
     }
 
@@ -68,32 +92,52 @@ export default function Login() {
   const handleCredentialResponse = async (response: GoogleCredentialResponse) => {
     try {
       const userData = parseJwt(response.credential) as GoogleUserData;
-      
-      // ✅ DEBUG: Log the complete Google user data to see what's available
-      console.log("🔍 COMPLETE GOOGLE USER DATA:", userData);
-      console.log("🔍 Available fields:", Object.keys(userData));
-      console.log("🔍 given_name:", userData.given_name);
-      console.log("🔍 family_name:", userData.family_name);
-      console.log("🔍 name:", userData.name);
+      const email = (userData.email || "").toLowerCase();
 
-      // ✅ Check if email is allowed
-      if (!isAllowedEmail(userData.email)) {
+      if (!isAllowedEmail(email)) {
         setError("❌ Please use your UB school email (@s.ubaguio.edu, @e.ubaguio.edu) or the system admin email to log in.");
         return;
       }
 
-      // ✅ Get user role from MongoDB (and create user if doesn't exist)
-      const userRole = await getUserRoleFromDatabase(userData);
-      
-      // ✅ Combine Google user data with role
-      const completeUserData: UserData = {
-        ...userData,
-        role: userRole
-      };
+      // Try to find existing user in DB
+      try {
+        const findResp = await axios.post(`${API_BASE_URL}/users`, { action: "read", email: userData.email });
+        const found = findResp.data?.data && findResp.data.data.length > 0 ? findResp.data.data[0] : null;
 
-      // ✅ Store complete user data locally
-      localStorage.setItem("user", JSON.stringify(completeUserData));
-      navigate("/dashboard");
+        if (found) {
+          // existing account -> update names then route based on role
+          await updateUserWithGoogleData(userData, found).catch(() => {});
+          const role = found.role || determineRoleFromEmail(email);
+          const completeUserData: UserData = { ...userData, role };
+          localStorage.setItem("user", JSON.stringify(completeUserData));
+          routeAfterLogin(email, role);
+          return;
+        }
+      } catch (dbErr) {
+        // continue to fallback behavior if DB read fails
+        console.warn("User lookup failed, continuing to fallback:", (dbErr && (dbErr as any).message) || dbErr);
+      }
+
+      // Not found in DB:
+      // - If student domain: treat as Student and send to student fill-up (no DB required)
+      if (email.endsWith("@s.ubaguio.edu")) {
+        const completeUserData: UserData = { ...userData, role: "Student" };
+        localStorage.setItem("user", JSON.stringify(completeUserData));
+        navigate("/studentprep");
+        return;
+      }
+
+      // For others (e.g., faculty), attempt to create a DB user and route based on returned role
+      try {
+        const role = await createNewUser(userData); // returns role string
+        const completeUserData: UserData = { ...userData, role };
+        localStorage.setItem("user", JSON.stringify(completeUserData));
+        routeAfterLogin(email, role);
+        return;
+      } catch (createErr) {
+        console.error("Failed to create user:", createErr);
+        setError("Failed to complete login. Please contact administrator.");
+      }
     } catch (err) {
       console.error("Login error:", err);
       setError("Something went wrong during login");
@@ -202,6 +246,15 @@ export default function Login() {
     }
   };
 
+  // safe extractor for messages from axios responses / errors
+  const extractMessage = (obj: any) => {
+    if (!obj) return '';
+    // axios response shape: { data: { message: string } } or error.response?.data?.message
+    if (obj?.data && typeof obj.data === 'object' && ('message' in obj.data)) return String((obj.data as any).message || '');
+    if ('message' in obj) return String(obj.message || '');
+    return String(obj);
+  };
+
   // Function to create new user
   const createNewUser = async (userData: GoogleUserData): Promise<string> => {
     try {
@@ -227,17 +280,17 @@ export default function Login() {
 
       console.log("✅ Create response:", createResponse.data);
 
-      if (createResponse.data.success) {
+      if ((createResponse.data as any).success) {
         return role;
       } else {
-        throw new Error("Failed to create user: " + createResponse.data.message);
+        throw new Error("Failed to create user: " + extractMessage(createResponse));
       }
     } catch (error: any) {
       console.error("Error creating user:", error);
       
       // If it's a duplicate error, try to read the existing user
-      if (error.response?.data?.message?.includes("already exists") || 
-          error.response?.status === 400) {
+      const errMsg = extractMessage(error);
+      if (errMsg.includes("already exists") || error.response?.status === 400) {
         console.log("User already exists, fetching existing user...");
         const findResponse = await axios.post(`${API_BASE_URL}/users`, {
           action: "read",

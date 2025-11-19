@@ -27,12 +27,15 @@ import {
   Alert,
   Snackbar,
   Chip,
+  Card,
+  InputAdornment,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import Loader from "../components/Loader";
 import DeleteIcon from "@mui/icons-material/Delete";
 import { useNavigate } from "react-router-dom";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import SearchIcon from "@mui/icons-material/Search";
 
 const API_BASE_URL = "http://localhost:5000/api";
 
@@ -50,7 +53,7 @@ interface User {
   lastname?: string;
 }
 
-const StaffPage = () => {
+export default function StaffPage() {
   const [staffs, setStaffs] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -221,7 +224,11 @@ const StaffPage = () => {
     
     switch (user.role) {
       case "Admin":
-        return ["Custodian", "Student Assistant", "Program Chair"];
+        // Admin can create any role including Instructor
+        return ["Custodian", "Student Assistant", "Program Chair", "Instructor"];
+      case "Program Chair":
+        // Program Chair may create Student Assistants and Instructor
+        return ["Student Assistant", "Instructor"];
       case "Custodian":
         return ["Student Assistant"];
       default:
@@ -270,147 +277,188 @@ const StaffPage = () => {
         </Stack>
       </Backdrop>
 
-      <Stack direction="row" mb={3} spacing={2} alignItems="center">
-        <Typography variant="h5" sx={{ fontWeight: "bold", color: "#B71C1C" }}>
+      {/* Page header + summary cards */}
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h4" sx={{ fontWeight: "bold", color: "#B71C1C" }}>
           Account Management
         </Typography>
-        <Button
-          variant="contained"
-          onClick={() => {
-            setForm({ emails: [], currentEmail: "", role: getAvailableRoles()[0] });
-            setOpen(true);
-          }}
-          sx={{ 
-            bgcolor: "#f8a41a", 
-            "&:hover": { bgcolor: "#e5940e" }, 
-            textTransform: "none",
-            borderRadius: 2,
-            px: 3,
-            fontWeight: "bold"
-          }}
-        >
-          + Add Account
-        </Button>
-        <Button
-          variant="contained"
-          color="error"
-          disabled={selectedStaffs.length === 0}
-          onClick={handleBulkDelete}
-          sx={{
-            textTransform: "none",
-            borderRadius: 2,
-            px: 3,
-            fontWeight: "bold"
-          }}
-        >
-          Delete Selected ({selectedStaffs.length})
-        </Button>
+        <Typography variant="body2" color="text.secondary">
+          Manage user accounts and roles
+        </Typography>
+      </Box>
+
+      <Stack direction={{ xs: "column", md: "row" }} spacing={3} mb={3}>
+        <Card sx={{ flex: 1, p: 3, borderRadius: 3, display: "flex", alignItems: "center", gap: 2, background: `linear-gradient(135deg, rgba(185,28,28,0.06) 0%, rgba(185,28,28,0.12) 100%)` }}>
+          <Box sx={{ p: 1.5, borderRadius: "50%", bgcolor: "rgba(185,28,28,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <CheckCircleIcon sx={{ fontSize: 28, color: "#B71C1C" }} />
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary">Total Accounts</Typography>
+            <Typography variant="h4" sx={{ fontWeight: "bold", color: "#B71C1C" }}>{staffs.length}</Typography>
+          </Box>
+        </Card>
+
+        <Card sx={{ flex: 1, p: 3, borderRadius: 3, display: "flex", alignItems: "center", gap: 2, background: `linear-gradient(135deg, rgba(248,164,26,0.06) 0%, rgba(248,164,26,0.12) 100%)` }}>
+          <Box sx={{ p: 1.5, borderRadius: "50%", bgcolor: "rgba(248,164,26,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Typography sx={{ fontWeight: "bold", color: "#f8a41a" }}>SA</Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary">Student Assistants</Typography>
+            <Typography variant="h4" sx={{ fontWeight: "bold", color: "#f8a41a" }}>{staffs.filter(s => s.role === "Student Assistant").length}</Typography>
+          </Box>
+        </Card>
+
+        {/* Program Chair card */}
+        <Card sx={{ flex: 1, p: 3, borderRadius: 3, display: "flex", alignItems: "center", gap: 2, background: `linear-gradient(135deg, rgba(46,125,50,0.06) 0%, rgba(46,125,50,0.12) 100%)` }}>
+          <Box sx={{ p: 1.5, borderRadius: "50%", bgcolor: "rgba(46,125,50,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Typography sx={{ fontWeight: "bold", color: "#2E7D32" }}>PC</Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary">Program Chairs</Typography>
+            <Typography variant="h4" sx={{ fontWeight: "bold", color: "#2E7D32" }}>{staffs.filter(s => s.role === "Program Chair").length}</Typography>
+          </Box>
+        </Card>
+
+        {/* Instructor card */}
+        <Card sx={{ flex: 1, p: 3, borderRadius: 3, display: "flex", alignItems: "center", gap: 2, background: `linear-gradient(135deg, rgba(59,130,246,0.06) 0%, rgba(59,130,246,0.12) 100%)` }}>
+          <Box sx={{ p: 1.5, borderRadius: "50%", bgcolor: "rgba(59,130,246,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Typography sx={{ fontWeight: "bold", color: "#3B82F6" }}>I</Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary">Instructor</Typography>
+            <Typography variant="h4" sx={{ fontWeight: "bold", color: "#3B82F6" }}>{staffs.filter(s => s.role === "Instructor").length}</Typography>
+          </Box>
+        </Card>
+
       </Stack>
 
-      {loading ? (
-        <Loader />
-      ) : (
-        <TableContainer 
-          component={Paper} 
-          sx={{ 
-            borderRadius: 3, 
-            boxShadow: 3,
-            overflow: "hidden"
-          }}
-        >
-          <Table>
-            <TableHead>
-              <TableRow sx={{ bgcolor: "#B71C1C" }}>
-                <TableCell padding="checkbox">
-                  <Checkbox
-                    indeterminate={
-                      selectedStaffs.length > 0 && selectedStaffs.length < staffs.length
-                    }
-                    checked={staffs.length > 0 && selectedStaffs.length === staffs.length}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedStaffs(staffs.map(staff => staff.email));
-                      } else {
-                        setSelectedStaffs([]);
-                      }
-                    }}
-                    sx={{ color: "white", "&.Mui-checked": { color: "white" } }}
-                  />
-                </TableCell>
-                <TableCell sx={{ fontWeight: "bold", color: "white" }}>Name</TableCell>
-                <TableCell sx={{ fontWeight: "bold", color: "white" }}>Email</TableCell>
-                <TableCell sx={{ fontWeight: "bold", color: "white" }}>Role</TableCell>
-                <TableCell sx={{ fontWeight: "bold", color: "white" }}>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {staffs
-                .filter(staff => canSeeRole(staff.role)) // Filter staff based on visible roles
-                .map((staff) => (
-                <TableRow key={staff.email} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+      {/* Action bar inside a card for visual consistency */}
+      <Card sx={{ p: 2, mb: 3, borderRadius: 3, display: "flex", flexDirection: { xs: "column", sm: "row" }, alignItems: "center", gap: 2, justifyContent: "space-between" }}>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ flex: 1, alignItems: "center" }}>
+          <Box sx={{ maxWidth: 420, width: "100%" }}>
+            <TextField
+              placeholder="Search name or email..."
+              size="small"
+              onChange={(e) => { /* keep existing search behaviour if needed */ }}
+              fullWidth
+              InputProps={{
+                startAdornment: <InputAdornment position="start"><SearchIcon color="action" /></InputAdornment>,
+              }}
+            />
+          </Box>
+        </Stack>
+
+        <Stack direction="row" spacing={1}>
+          <Button variant="contained" onClick={() => { setForm({ emails: [], currentEmail: "", role: getAvailableRoles()[0] }); setOpen(true); }} sx={{ bgcolor: "#B71C1C", "&:hover": { bgcolor: "#9f1515" }, textTransform: "none" }}>
+            + Add Account
+          </Button>
+          <Button variant="contained" color="error" disabled={selectedStaffs.length === 0} onClick={handleBulkDelete} sx={{ textTransform: "none" }}>
+            Delete Selected ({selectedStaffs.length})
+          </Button>
+        </Stack>
+      </Card>
+
+      {/* Main table in a consistent card */}
+      <Card sx={{ p: 0, borderRadius: 3, boxShadow: 3, overflow: "hidden" }}>
+        {loading ? (
+          <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 280 }}><Loader /></Box>
+        ) : (
+          <TableContainer component={Paper} sx={{ maxHeight: 620 }}>
+            <Table stickyHeader>
+              <TableHead>
+                <TableRow sx={{ bgcolor: "#B71C1C" }}>
                   <TableCell padding="checkbox">
                     <Checkbox
-                      checked={selectedStaffs.includes(staff.email)}
+                      indeterminate={
+                        selectedStaffs.length > 0 && selectedStaffs.length < staffs.length
+                      }
+                      checked={staffs.length > 0 && selectedStaffs.length === staffs.length}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          setSelectedStaffs([...selectedStaffs, staff.email]);
+                          setSelectedStaffs(staffs.map(staff => staff.email));
                         } else {
-                          setSelectedStaffs(selectedStaffs.filter((email) => email !== staff.email));
+                          setSelectedStaffs([]);
                         }
                       }}
+                      sx={{ color: "white", "&.Mui-checked": { color: "white" } }}
                     />
                   </TableCell>
-                  <TableCell>
-                    <Typography variant="body1" fontWeight="medium">
-                      {staff.firstname && staff.lastname 
-                        ? `${staff.firstname} ${staff.lastname}`
-                        : "Not yet logged in"
-                      }
-                    </Typography>
-                    {!(staff.firstname && staff.lastname) && (
-                      <Typography variant="caption" color="text.secondary">
-                        Name will be filled after first login
-                      </Typography>
-                    )}
-                  </TableCell>
-                  <TableCell>{staff.email}</TableCell>
-                  <TableCell>
-                    <Box
-                      component="span"
-                      sx={{
-                        px: 2,
-                        py: 1,
-                        borderRadius: 3,
-                        fontSize: "0.75rem",
-                        fontWeight: "bold",
-                        bgcolor: staff.role === "Custodian" ? "#B71C1C" : 
-                                 staff.role === "Program Chair" ? "#2E7D32" : "#f8a41a",
-                        color: "white",
-                      }}
-                    >
-                      {staff.role}
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      size="small"
-                      onClick={() => handleDelete(staff.email)}
-                      startIcon={<DeleteIcon />}
-                      sx={{ 
-                        textTransform: "none", 
-                        color: "error.main",
-                        fontWeight: "bold"
-                      }}
-                    >
-                      Delete
-                    </Button>
-                  </TableCell>
+                  <TableCell sx={{ fontWeight: "bold", color: "white" }}>Name</TableCell>
+                  <TableCell sx={{ fontWeight: "bold", color: "white" }}>Email</TableCell>
+                  <TableCell sx={{ fontWeight: "bold", color: "white" }}>Role</TableCell>
+                  <TableCell sx={{ fontWeight: "bold", color: "white" }}>Actions</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
+              </TableHead>
+              <TableBody>
+                {staffs
+                  .filter(staff => canSeeRole(staff.role)) // Filter staff based on visible roles
+                  .map((staff) => (
+                  <TableRow key={staff.email} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        checked={selectedStaffs.includes(staff.email)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedStaffs([...selectedStaffs, staff.email]);
+                          } else {
+                            setSelectedStaffs(selectedStaffs.filter((email) => email !== staff.email));
+                          }
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body1" fontWeight="medium">
+                        {staff.firstname && staff.lastname 
+                          ? `${staff.firstname} ${staff.lastname}`
+                          : "Not yet logged in"
+                        }
+                      </Typography>
+                      {!(staff.firstname && staff.lastname) && (
+                        <Typography variant="caption" color="text.secondary">
+                          Name will be filled after first login
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>{staff.email}</TableCell>
+                    <TableCell>
+                      <Box
+                        component="span"
+                        sx={{
+                          px: 2,
+                          py: 1,
+                          borderRadius: 3,
+                          fontSize: "0.75rem",
+                          fontWeight: "bold",
+                          bgcolor: staff.role === "Custodian" ? "#B71C1C" :
+                                   staff.role === "Program Chair" ? "#2E7D32" :
+                                   staff.role === "Instructor" ? "#3B82F6" : "#f8a41a",
+                          color: "white",
+                        }}
+                      >
+                        {staff.role}
+                      </Box>
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="small"
+                        onClick={() => handleDelete(staff.email)}
+                        startIcon={<DeleteIcon />}
+                        sx={{ 
+                          textTransform: "none", 
+                          color: "error.main",
+                          fontWeight: "bold"
+                        }}
+                      >
+                        Delete
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </Card>
 
       {/* Add Staff Dialog */}
       <Dialog open={open} onClose={() => !processing && setOpen(false)} maxWidth="sm" fullWidth>
@@ -467,11 +515,13 @@ const StaffPage = () => {
                     flex: 1, 
                     "&.Mui-selected": { 
                       bgcolor: role === "Custodian" ? "#B71C1C" : 
-                               role === "Program Chair" ? "#2E7D32" : "#f8a41a", 
+                               role === "Program Chair" ? "#2E7D32" : 
+                               role === "Instructor" ? "#3B82F6" : "#f8a41a", 
                       color: "#FFF",
                       "&:hover": { 
                         bgcolor: role === "Custodian" ? "#D32F2F" : 
-                                 role === "Program Chair" ? "#388E3C" : "#e5940e" 
+                                 role === "Program Chair" ? "#388E3C" : 
+                                 role === "Instructor" ? "#2563EB" : "#e5940e" 
                       }
                     },
                     fontWeight: "bold"
@@ -537,6 +587,4 @@ const StaffPage = () => {
       </Snackbar>
     </Container>
   );
-};
-
-export default StaffPage;
+}

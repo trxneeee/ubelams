@@ -25,6 +25,8 @@ import {
   DialogActions,
   Alert,
 } from "@mui/material";
+import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+import NotificationsIcon from '@mui/icons-material/Notifications';
 import { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -60,20 +62,49 @@ const Header = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
 
-const pathToIndex: Record<string, number> = {
-  "/dashboard": 0,
-  ...(userRoles === "Custodian" || userRoles === "Admin"  ? { "/staff": 1 } : {}),
-  "/reservation": userRoles === "Custodian" || userRoles === "Admin" ? 2 : 1,
-  "/borrow": userRoles === "Custodian" || userRoles === "Admin" ? 3 : 2,
-  "/inventory": userRoles === "Custodian" || userRoles === "Admin" ? 4 : 3,
-  "/maintenance": userRoles === "Custodian" || userRoles === "Admin" ? 5 : 4,
-};
+  // build tabs based on role
+  let tabIcons = [];
+  const staffAllowed = ["Student Assistant", "Custodian", "Admin"];
 
-  const [value, setValue] = useState(pathToIndex[location.pathname] || 0);
-
+  if (userRoles === "Instructor" || userRoles === "Program Chair") {
+    // Instructors / Program Chairs: only faculty reservation tab
+    tabIcons = [
+      { to: "/facultyreserve", label: "Instructor Reservations", icon: <AiOutlineBook size={24} />, active: <AiFillBook size={24} /> }
+    ];
+  } else if (userRoles === "Student") {
+    // Students: direct to student flow only
+    tabIcons = [
+      { to: "/studentelams", label: "Student", icon: <AiOutlineBook size={24} />, active: <AiFillBook size={24} /> }
+    ];
+  } else if (staffAllowed.includes(userRoles)) {
+    // Student Assistants, Custodian, Admin -> full tabs
+    tabIcons = [
+      { to: "/dashboard", label: "Home", icon: <AiOutlineHome size={24} />, active: <AiFillHome size={24} /> },
+      ...(userRoles === "Custodian" || userRoles === "Admin" ? [{ to: "/staff", label: "Staff", icon: <AiOutlineUser size={24} />, active: <MdPerson size={24} /> }] : []),
+      { to: "/reservation", label: "Reservation", icon: <AiOutlineBook size={24} />, active: <AiFillBook size={24} /> },
+      { to: "/borrow", label: "Borrow", icon: <AiOutlineFileSearch size={24} />, active: <MdEditDocument size={24} /> },
+      { to: "/inventory", label: "Inventory", icon: <AiOutlineAppstore size={24} />, active: <AiFillAppstore size={24} /> },
+      { to: "/maintenance", label: "Maintenance", icon: <AiOutlineTool size={24} />, active: <AiFillTool size={24} /> },
+    ];
+  } else {
+    // Fallback: minimal home
+    tabIcons = [
+      { to: "/dashboard", label: "Home", icon: <AiOutlineHome size={24} />, active: <AiFillHome size={24} /> }
+    ];
+  }
+  
+  // derive path->index from tabIcons so indices remain correct for any role
+  const pathToIndex: Record<string, number> = tabIcons.reduce((acc, t, i) => {
+    acc[t.to] = i;
+    return acc;
+  }, {} as Record<string, number>);
+  
+  const [value, setValue] = useState<number>(pathToIndex[location.pathname] ?? 0);
+  
   useEffect(() => {
     setValue(pathToIndex[location.pathname] ?? 0);
-  }, [location.pathname]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, userRoles]); // update when role changes too
 
   const handleChange = (_: unknown, newValue: number) => {
     setValue(newValue);
@@ -194,51 +225,51 @@ const pathToIndex: Record<string, number> = {
 
 const handleSecurityUpdate = async () => {
   try {
-    // Validate current password
-    const user = JSON.parse(localStorage.getItem("user") || "{}");
-    
-    if (userData.currentPassword != userPassword) {
+    // Validate current password against stored user password
+    const storedUser = JSON.parse(localStorage.getItem("user") || "{}");
+    const storedPassword = storedUser?.password || "";
+    if (!storedPassword || userData.currentPassword !== storedPassword) {
       setAlert({ open: true, message: "Current password is incorrect", severity: "error" });
       return;
     }
-
+ 
     if (userData.password !== userData.confirmPassword) {
       setAlert({ open: true, message: "New passwords do not match", severity: "error" });
       return;
     }
-
+ 
     if (userData.password.length < 6) {
       setAlert({ open: true, message: "New password must be at least 6 characters", severity: "error" });
       return;
     }
-
+ 
     // Update password
     const response = await axios.get(
-      "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec",
-      {
-        params: {
+       "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec",
+       {
+         params: {
           sheet: "users",
           action: "update",
-          email: user.email,
+          email: storedUser.email,
           password: userData.password,
-          firstname: user.firstname,
-          lastname: user.lastname,
-          role: user.role
-        }
-      }
-    );
-
-    if (response.data.success) {
-            const updatedUser = { ...user, password: userData.password };
+          firstname: storedUser.firstname,
+          lastname: storedUser.lastname,
+          role: storedUser.role
+         }
+       }
+     );
+ 
+     if (response.data.success) {
+      const updatedUser = { ...storedUser, password: userData.password };
       localStorage.setItem("user", JSON.stringify(updatedUser));
-      setAlert({ open: true, message: "Password updated successfully", severity: "success" });
-      setTimeout(() => {
-        setSecurityOpen(false);
-      }, 1000);
-    }
-  } catch (error) {
-    setAlert({ open: true, message: "Error updating password", severity: "error" });
-  }
+       setAlert({ open: true, message: "Password updated successfully", severity: "success" });
+       setTimeout(() => {
+         setSecurityOpen(false);
+       }, 1000);
+     }
+   } catch (error) {
+     setAlert({ open: true, message: "Error updating password", severity: "error" });
+   }
 };
   // Drawer for mobile
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -247,14 +278,7 @@ const handleSecurityUpdate = async () => {
     setDrawerOpen(open);
   };
 
-const tabIcons = [
-  { to: "/dashboard", label: "Home", icon: <AiOutlineHome size={24} />, active: <AiFillHome size={24} /> },
-  ...(userRoles === "Custodian" || userRoles === "Admin" ? [{ to: "/staff", label: "Staff", icon: <AiOutlineUser size={24} />, active: <MdPerson size={24} /> }] : []),
-{ to: "/reservation", label: "Reservation", icon: <AiOutlineBook size={24} />, active: <AiFillBook size={24} /> },
-  { to: "/borrow", label: "Borrow", icon: <AiOutlineFileSearch size={24} />, active: <MdEditDocument size={24} /> },
-  { to: "/inventory", label: "Inventory", icon: <AiOutlineAppstore size={24} />, active: <AiFillAppstore size={24} /> },
-  { to: "/maintenance", label: "Maintenance", icon: <AiOutlineTool size={24} />, active: <AiFillTool size={24} /> },
-];
+ // (tabIcons defined above dynamically)
 
   // Get logged in user from localStorage
   const user = JSON.parse(localStorage.getItem("user") || "{}");
@@ -286,16 +310,70 @@ const tabIcons = [
         }}
       >
         <Toolbar sx={{ position: "relative", display: "flex", justifyContent: "space-between" }}>
-          {/* Mobile Menu Button */}
+          {/* LEFT: Branding - ECE Laboratory Asset Management System / University of Baguio */}
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mr: 2 }}>
+            <Box sx={{ display: { xs: "none", sm: "block" } }}>
+              <Typography variant="h6" sx={{ color: "white", fontWeight: "bold", lineHeight: 1 }}>
+                ECE Laboratory Asset Management System
+              </Typography>
+              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.9)" }}>
+                University of Baguio
+              </Typography>
+            </Box>
+            {/* compact brand for small screens */}
+            <Box sx={{ display: { xs: "block", sm: "none" } }}>
+              <Typography variant="subtitle2" sx={{ color: "white", fontWeight: "bold" }}>
+                ECE ELAMS
+              </Typography>
+              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.9)" }}>
+                Univ. of Baguio
+              </Typography>
+            </Box>
+          </Box>
+
+          {/* Mobile Menu + quick panel buttons */}
           {isMobile && (
-            <IconButton edge="start" color="inherit" onClick={toggleDrawer(true)}>
-              <MdMenu size={28} />
-            </IconButton>
+            <>
+              <IconButton edge="start" color="inherit" onClick={toggleDrawer(true)}>
+                <MdMenu size={28} />
+              </IconButton>
+              <Box sx={{ display: 'flex', gap: 0.5, ml: 1 }}>
+                <IconButton
+                  color="inherit"
+                  aria-label="open calendar"
+                  onClick={() => window.dispatchEvent(new CustomEvent('open-calendar'))}
+                  size="large"
+                >
+                  <CalendarTodayIcon />
+                </IconButton>
+                <IconButton
+                  color="inherit"
+                  aria-label="open notifications"
+                  onClick={() => window.dispatchEvent(new CustomEvent('open-notifications'))}
+                  size="large"
+                >
+                  <NotificationsIcon />
+                </IconButton>
+              </Box>
+            </>
           )}
 
           {/* Tabs - show only on desktop */}
           {!isMobile && (
-            <Box sx={{ flexGrow: 1, display: "flex", justifyContent: "center" }}>
+            // absolutely center tabs so they remain centered regardless of left/right content width
+            <Box
+              sx={{
+                position: "absolute",
+                left: "50%",
+                top: 0,
+                transform: "translateX(-50%)",
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                pointerEvents: "auto",
+                zIndex: 1
+              }}
+            >
               <Tabs
                 value={value}
                 onChange={handleChange}

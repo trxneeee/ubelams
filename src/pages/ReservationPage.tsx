@@ -42,6 +42,8 @@ import VisibilityIcon from "@mui/icons-material/Visibility";
 import FilterListIcon from "@mui/icons-material/FilterList";
 import ChatBubbleIcon from "@mui/icons-material/ChatBubble";
 import SendIcon from "@mui/icons-material/Send";
+import EditIcon from '@mui/icons-material/Edit';
+import CancelIcon from '@mui/icons-material/Cancel';
 import axios from 'axios';
 import { alpha, useTheme } from '@mui/material/styles';
 
@@ -82,6 +84,7 @@ interface Reservation {
   date_assigned?: string;
   notes?: string;
   messages?: Array<{ sender: string; message: string; timestamp: string }>;
+  edits?: any[]; // optional edit history stored by server
 }
 
 interface InventoryItem {
@@ -261,6 +264,24 @@ export default function ReservationPage() {
     }
   };
 
+  const handleRejectReservation = async (reservation: Reservation) => {
+    const reason = window.prompt('Enter rejection reason (optional):', '');
+    if (reason === null) return; // cancelled
+    try {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      await axios.post(`${API_BASE_URL}/reservations/${reservation._id}/reject`, {
+        reason,
+        rejected_by: user.email || user.name || 'Unknown',
+        rejected_name: user.name || user.firstname || user.email
+      });
+      await fetchReservations();
+      alert('Reservation rejected');
+    } catch (err) {
+      console.error('Reject error', err);
+      alert('Failed to reject reservation');
+    }
+  };
+
   // helper: count unseen messages for current user
   const unseenCount = (reservation: Reservation) => {
     try {
@@ -386,17 +407,23 @@ export default function ReservationPage() {
     }
   };
 
-  const filteredReservations = reservations.filter(reservation => {
-    const matchesSearch = 
-      reservation.reservation_code.toLowerCase().includes(search.toLowerCase()) ||
-      reservation.subject.toLowerCase().includes(search.toLowerCase()) ||
-      reservation.instructor.toLowerCase().includes(search.toLowerCase()) ||
-      reservation.course.toLowerCase().includes(search.toLowerCase());
+  // Filter then sort by date_created descending (newest first)
+  const filteredReservations = reservations
+    .filter(reservation => {
+      const matchesSearch = 
+        reservation.reservation_code.toLowerCase().includes(search.toLowerCase()) ||
+        reservation.subject.toLowerCase().includes(search.toLowerCase()) ||
+        reservation.instructor.toLowerCase().includes(search.toLowerCase()) ||
+        reservation.course.toLowerCase().includes(search.toLowerCase());
 
-    const matchesStatus = statusFilter === 'All' || reservation.status === statusFilter;
-    
-    return matchesSearch && matchesStatus;
-  });
+      const matchesStatus = statusFilter === 'All' || reservation.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    })
+    .sort((a, b) => {
+      const da = a.date_created ? new Date(a.date_created).getTime() : 0;
+      const db = b.date_created ? new Date(b.date_created).getTime() : 0;
+      return db - da; // descending
+    });
 
   const getAvailableItems = (requestedType: 'consumable' | 'non-consumable', searchTerm: string = '') => {
     return inventory
@@ -765,6 +792,23 @@ export default function ReservationPage() {
                                   }}
                                 >
                                   <CheckCircleIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+
+                            {/* Reject */}
+                            {reservation.status !== 'Rejected' && (
+                              <Tooltip title="Reject">
+                                <IconButton
+                                  color="warning"
+                                  onClick={() => handleRejectReservation(reservation)}
+                                  sx={{
+                                    bgcolor: "#fff6e6",
+                                    "&:hover": { bgcolor: "#ffcc80" },
+                                    p: 1,
+                                  }}
+                                >
+                                  <CancelIcon fontSize="small" />
                                 </IconButton>
                               </Tooltip>
                             )}
@@ -1176,6 +1220,25 @@ export default function ReservationPage() {
                   </Paper>
                 </Box>
               )}
+
+              {/* Edit History - new section */}
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle1" fontWeight="bold">Edit History</Typography>
+                {selectedReservationDetails.edits && selectedReservationDetails.edits.length > 0 ? (
+                  selectedReservationDetails.edits.map((log, i) => (
+                    <Paper key={i} sx={{ p: 2, mt: 1 }}>
+                      <Typography variant="body2" fontWeight="bold">{log.editedName || log.editedBy} • {new Date(log.editedAt).toLocaleString()}</Typography>
+                      {log.reason && <Typography variant="caption" color="text.secondary">Reason: {log.reason}</Typography>}
+                      <details style={{ marginTop: 8 }}>
+                        <summary style={{ cursor: 'pointer' }}>View previous snapshot</summary>
+                        <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(log.previous, null, 2)}</pre>
+                      </details>
+                    </Paper>
+                  ))
+                ) : (
+                  <Typography variant="body2" color="text.secondary">No edits recorded.</Typography>
+                )}
+              </Box>
             </Stack>
           )}
         </DialogContent>

@@ -81,6 +81,8 @@ interface BorrowRecord {
   date_borrowed: string;
   date_returned?: string;
   reservation_code?: string;
+  // Added to match server payload and usage in code
+  group_members?: { name: string; id: string }[];
 }
 
 interface BorrowItem {
@@ -167,6 +169,8 @@ interface Reservation {
   date_assigned?: string;
   date_completed?: string;
   notes?: string;
+  startTime?: string; // ADDITIONAL OPTIONAL FIELDS
+  endTime?: string;
 }
 
 interface ReportField {
@@ -268,6 +272,22 @@ export default function BorrowPage() {
       returnedIdentifiers?: string[];
     }[];
   }>({ items: [] });
+
+  // Group members state & helpers (used for Group borrow/reservation flows)
+  const [groupMembers, setGroupMembers] = useState<{ name: string; id: string }[]>([]);
+  const [studentPrep, setStudentPrep] = useState<any | null>(null);
+
+  const addGroupMember = () => {
+    setGroupMembers(prev => [...prev, { name: "", id: "" }]);
+  };
+
+  const removeGroupMember = (index: number) => {
+    setGroupMembers(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const updateGroupMember = (index: number, updates: Partial<{ name: string; id: string }>) => {
+    setGroupMembers(prev => prev.map((m, i) => i === index ? { ...m, ...updates } : m));
+  };
 
   // highlight newly added item (glow)
   const [newlyAddedItemNum, setNewlyAddedItemNum] = useState<string | null>(null);
@@ -610,54 +630,114 @@ export default function BorrowPage() {
     }
   };
 
-  // Fetch reservation by code
+  // Replace the existing fetchReservationByCode implementation with this (improves merging logic)
   const fetchReservationByCode = async (code: string) => {
     setReservationLoading(true);
     try {
-      const res = await axios.get(`${API_BASE_URL}/reservations/code/${code}`);
-      const reservation: Reservation = res.data;
-      
-      console.log('=== RESERVATION DATA DEBUG ===');
-      console.log('Full reservation:', reservation);
-      console.log('Assigned items:', reservation.assigned_items);
-      console.log('Requested items:', reservation.requested_items);
-      console.log('=== END DEBUG ===');
-      
-      if (reservation.status !== 'Approved' && reservation.status !== 'Assigned' && reservation.status !== 'Completed') {
-        setError("This reservation is not approved or assigned yet");
+      const res = await axios.get(`${API_BASE_URL}/reservations/code/${encodeURIComponent(code)}`);
+      const data = res.data;
+
+      // Normalize server shapes:
+      // 1) { reservation, student_prep } OR
+      // 2) reservation object at top-level (possibly with merged student_prep fields)
+      let resObj: any = null;
+      let sp: any = null;
+
+      if (data && typeof data === "object") {
+        if (data.reservation) {
+          resObj = data.reservation;
+          sp = data.student_prep || null;
+        } else {
+          // top-level reservation (may already include student_prep or merged fields)
+          resObj = data;
+          sp = data.student_prep || null;
+        }
+      }
+
+      // If still no studentPrep but reservation has group_barcode, try fetching student-prep explicitly
+      if (!sp && resObj && resObj.group_barcode) {
+        try {
+          const spResp = await axios.get(`${API_BASE_URL}/student-prep/barcode/${encodeURIComponent(String(resObj.group_barcode))}`);
+          sp = spResp.data || null;
+        } catch (e) {
+          sp = null;
+        }
+      }
+
+      // If server returned only student_prep (rare), try to load reservation from it
+      if (!resObj && data && data.student_prep) {
+        sp = data.student_prep;
+        if (sp.reservation_code) {
+          const rresp = await axios.get(`${API_BASE_URL}/reservations/code/${encodeURIComponent(sp.reservation_code)}`);
+          const rdata = rresp.data;
+          resObj = rdata.reservation ? rdata.reservation : rdata;
+        }
+      }
+
+      if (!resObj) {
+        setCurrentReservation(null);
+        setStudentPrep(null);
+        setError("Reservation not found");
         return null;
       }
-      
-      setCurrentReservation(reservation);
-      
-      // Infer user_type based on group_count
-      const inferredUserType = reservation.group_count > 1 ? 'Group' : 'Individual';
-      
-      setUserType(inferredUserType);
-      setRequestForm(prev => ({
-        ...prev,
-        borrow_type: "Reservation",
-        user_type: inferredUserType,
-        borrow_user: `Reservation-${reservation.reservation_code}`,
-        course: reservation.course,
-        group_number: reservation.group_count > 1 ? `Group ${reservation.group_count}` : "",
-        group_leader: "",
-        group_leader_id: "",
-        instructor: reservation.instructor,
-        subject: reservation.subject,
-        schedule: reservation.schedule,
-        reservation_code: reservation.reservation_code,
-      }));
-      
-      // Load reservation items into selected items
-      loadReservationItems(reservation);
-      
+
+      // keep reservation state and studentPrep (if any)
+      setCurrentReservation(resObj);
+      setStudentPrep(sp || null);
+      setReservationCode(String(resObj.reservation_code || code));
+
+      // Build merge logic safely (avoid mixing || and ??)
+      setRequestForm(prev => {
+        const borrowUser = prev.borrow_user || (sp && sp.borrower_name) || resObj.borrow_user || "";
+        const course = prev.course || resObj.course || (sp && sp.course) || "";
+        const instructor = prev.instructor || resObj.instructor || (sp && sp.instructor) || "";
+        const subject = prev.subject || resObj.subject || (sp && sp.subject) || "";
+        const schedule = prev.schedule || resObj.schedule || (sp && sp.schedule) || "";
+        const groupNumber = prev.group_number || (sp && sp.group_number) || resObj.group_number || "";
+        const groupLeader = prev.group_leader || (sp && sp.group_leader) || resObj.group_leader || "";
+        const groupLeaderId = prev.group_leader_id || (sp && sp.group_leader_id) || resObj.group_leader_id || "";
+
+        return {
+          ...prev,
+          reservation_code: resObj.reservation_code || prev.reservation_code,
+          borrow_user: borrowUser,
+          course,
+          instructor,
+          subject,
+          schedule,
+          group_number: groupNumber,
+          group_leader: groupLeader,
+          group_leader_id: groupLeaderId
+        };
+      });
+
+      // Populate groupMembers from student_prep first, then reservation
+      const members = Array.isArray(sp?.group_members) && sp.group_members.length > 0
+        ? sp.group_members
+        : (Array.isArray(resObj.group_members) ? resObj.group_members : []);
+      setGroupMembers(members);
+
+      // Set userType from reservation or infer from group_count
+      if (resObj.user_type) {
+        setUserType(resObj.user_type);
+      } else if (resObj.group_count && resObj.group_count > 1) {
+        setUserType('Group');
+      } else {
+        setUserType('Individual');
+      }
+
+      // Pre-load assigned_items into cart (if any)
+      try {
+        loadReservationItems(resObj);
+      } catch (e) {
+        console.warn("loadReservationItems failed:", e);
+        setSelectedItems([]);
+      }
+
+      // Advance the stepper to Borrower Info so the pre-filled values are visible
+      setActiveStep(1);
       setError(null);
-      
-      // AUTO PROCEED TO STEP 2 (Select Items) for reservation
-      setActiveStep(2);
-      
-      return reservation;
+      return resObj;
     } catch (err: any) {
       console.error("fetchReservation error:", err);
       if (err.response?.status === 404) {
@@ -922,7 +1002,7 @@ export default function BorrowPage() {
   };
 
   // stepper nav
-  const handleNext = () => {
+  const handleNext = async () => {
     if (activeStep === 0) {
       if (!borrowType) {
         setError("Please select borrow type");
@@ -930,17 +1010,23 @@ export default function BorrowPage() {
       }
       
       if (borrowType === 'Reservation') {
-        // For reservation, we need a reservation code
         if (!reservationCode.trim()) {
           setError("Please enter reservation code");
           return;
         }
-        
-        // Fetch reservation data - this will auto-navigate to step 2
-        fetchReservationByCode(reservationCode);
-        return; // Don't proceed to next step yet - wait for data fetch
+
+        setError(null);
+        // await lookup so UI updates (requestForm/groupMembers/selectedItems) before proceeding
+        const found = await fetchReservationByCode(reservationCode.trim());
+        if (found) {
+          // fetchReservationByCode already advances to step 1, ensure dialog open
+          setOpen(true);
+          return;
+        } else {
+          setError("Reservation not found");
+          return;
+        }
       } else {
-        // For Walk-In, require user type
         if (!userType) {
           setError("Please select user type");
           return;
@@ -968,17 +1054,12 @@ export default function BorrowPage() {
         return;
       }
 
-      // Validate identifier requirements before moving to Confirmation:
       for (const sItem of selectedItems) {
         const inv = items.find(i => i.num === sItem.num && i.item_type === sItem.item_type);
         if (inv && inv.identifiers && inv.identifiers.length > 0) {
-          // require identifiers selected and count matches qty (or at least >= qty)
           if (!sItem.selected_identifiers || sItem.selected_identifiers.length < sItem.qty) {
             setError(`Please select ${sItem.qty} identifier(s) for "${sItem.name}"`);
-            // open identifier selection for this item (prefill existing selections)
-            if (inv) {
-              handleOpenIdentifierDialog(inv, sItem.selected_identifiers?.slice(0, sItem.qty) || []);
-            }
+            if (inv) handleOpenIdentifierDialog(inv, sItem.selected_identifiers?.slice(0, sItem.qty) || []);
             return;
           }
         }
@@ -1021,7 +1102,8 @@ export default function BorrowPage() {
     }));
 
     setSelectedItems(itemsArr);
-    setActiveStep(2); // jump to item selection
+    setGroupMembers(record.group_members || []); // ADDED: Populate group members
+    setActiveStep(1); // jump to borrower info
     setOpen(true);
   };
 
@@ -1137,6 +1219,7 @@ export default function BorrowPage() {
       reservation_code: "",
     });
     setSelectedItems([]);
+    setGroupMembers([]); // RESET group members
     setError(null);
   };
 
@@ -1169,11 +1252,9 @@ export default function BorrowPage() {
           item_type: item.is_consumable ? 'consumable' : 'non-consumable',
           quantity: item.qty,
           status: 'Borrowed',
-          identifiers: item.selected_identifiers ? item.selected_identifiers.map(id => ({
-            identifier: id,
-            status: 'Borrowed'
-          })) : []
-        }))
+          identifiers: item.selected_identifiers ? item.selected_identifiers.map(id => ({ identifier: id, status: 'Borrowed' })) : []
+        })),
+        group_members: groupMembers // added so server receives members list
       };
 
       if (requestForm.borrow_id) {
@@ -1816,6 +1897,17 @@ export default function BorrowPage() {
                     onChange={(e) => setReservationCode(e.target.value)}
                     fullWidth
                     placeholder="Enter the reservation code"
+                    onKeyDown={async (e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        setReservationLoading(true);
+                        try {
+                          await fetchReservationByCode(String(reservationCode || "").trim());
+                        } finally {
+                          setReservationLoading(false);
+                        }
+                      }
+                    }}
                     InputProps={{
                       endAdornment: reservationLoading && (
                         <InputAdornment position="end">
@@ -1847,18 +1939,21 @@ export default function BorrowPage() {
             </Stack>
           )}
 
-          {/* Step 1: Borrower Info (Only for Walk-In) */}
-          {activeStep === 1 && borrowType === 'Walk-In' && (
+          {/* Step 1: Borrower Info (for Walk-In and Reservation) */}
+          {activeStep === 1 && (borrowType === 'Walk-In' || borrowType === 'Reservation') && (
             <Stack spacing={2}>
-              <TextField
-                label="Borrower Name"
-                value={requestForm.borrow_user}
-                onChange={(e) => setRequestForm({ ...requestForm, borrow_user: e.target.value })}
-                fullWidth
-                variant="outlined"
-                required
-              />
-              
+              {/* Show Borrower Name only for Individual (Walk-In or Reservation) */}
+              {userType !== 'Group' && (
+                <TextField
+                  label="Borrower Name"
+                  value={requestForm.borrow_user}
+                  onChange={(e) => setRequestForm({ ...requestForm, borrow_user: e.target.value })}
+                  fullWidth
+                  variant="outlined"
+                  required
+                />
+              )}
+
               <TextField
                 label="Course"
                 value={requestForm.course}
@@ -1894,28 +1989,57 @@ export default function BorrowPage() {
               </Stack>
 
               {userType === 'Group' && (
-                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-                  <TextField
-                    label="Group Number"
-                    value={requestForm.group_number}
-                    onChange={(e) => setRequestForm({ ...requestForm, group_number: e.target.value })}
-                    fullWidth
-                    required
-                  />
-                  <TextField
-                    label="Leader ID"
-                    value={requestForm.group_leader_id}
-                    onChange={(e) => setRequestForm({ ...requestForm, group_leader_id: e.target.value })}
-                    fullWidth
-                    required
-                  />
-                  <TextField
-                    label="Group Leader"
-                    value={requestForm.group_leader}
-                    onChange={(e) => setRequestForm({ ...requestForm, group_leader: e.target.value })}
-                    fullWidth
-                    required
-                  />
+                <Stack spacing={2}>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                    <TextField
+                      label="Group Number"
+                      value={requestForm.group_number}
+                      onChange={(e) => setRequestForm({ ...requestForm, group_number: e.target.value })}
+                      fullWidth
+                      required
+                    />
+                    <TextField
+                      label="Leader ID"
+                      value={requestForm.group_leader_id}
+                      onChange={(e) => setRequestForm({ ...requestForm, group_leader_id: e.target.value })}
+                      fullWidth
+                      required
+                    />
+                    <TextField
+                      label="Group Leader"
+                      value={requestForm.group_leader}
+                      onChange={(e) => setRequestForm({ ...requestForm, group_leader: e.target.value })}
+                      fullWidth
+                      required
+                    />
+                  </Stack>
+
+                  {/* Group Members Section (reservation may have prefilled members) */}
+                  <Box>
+                    <Typography variant="subtitle2" sx={{ mt: 1 }}>Group Members</Typography>
+                    <Stack spacing={1} sx={{ mt: 1 }}>
+                      {groupMembers.map((gm, idx) => (
+                        <Stack key={idx} direction={{ xs: "column", sm: "row" }} spacing={1} alignItems="center">
+                          <TextField
+                            label={`Member Name #${idx + 1}`}
+                            value={gm.name}
+                            onChange={(e) => updateGroupMember(idx, { name: e.target.value })}
+                            fullWidth
+                            size="small"
+                          />
+                          <TextField
+                            label="Student ID"
+                            value={gm.id}
+                            onChange={(e) => updateGroupMember(idx, { id: e.target.value })}
+                            sx={{ width: 180 }}
+                            size="small"
+                          />
+                          <Button color="error" onClick={() => removeGroupMember(idx)} sx={{ whiteSpace: 'nowrap' }}>Remove</Button>
+                        </Stack>
+                      ))}
+                      <Button variant="outlined" onClick={addGroupMember} startIcon={<AddIcon />}>Add Member</Button>
+                    </Stack>
+                  </Box>
                 </Stack>
               )}
             </Stack>
@@ -2090,7 +2214,7 @@ export default function BorrowPage() {
 
                     <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
                       <Button fullWidth variant="outlined" onClick={() => { setSelectedItems([]); setNewlyAddedItemNum(null); }}>Clear</Button>
-                      <Button fullWidth variant="contained" onClick={handleNext} sx={{ bgcolor: '#b91c1c', '&:hover': { bgcolor: '#9f1515' }}}>Proceed</Button>
+                      <Button fullWidth variant="contained" onClick={handleNext} sx={{ bgcolor: '#b91c1c', '&:hover': { bgcolor: '#b91c1c.dark' }}}>Proceed</Button>
                     </Box>
                   </Paper>
                 </Box>
