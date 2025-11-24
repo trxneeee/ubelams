@@ -29,6 +29,8 @@ import {
   Chip,
   Card,
   InputAdornment,
+  Tabs,
+  Tab,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import Loader from "../components/Loader";
@@ -36,6 +38,8 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import { useNavigate } from "react-router-dom";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import SearchIcon from "@mui/icons-material/Search";
+import VisibilityIcon from "@mui/icons-material/Visibility";
+import { useTheme } from "@mui/material/styles";
 
 const API_BASE_URL = "https://elams-server.onrender.com/api";
 
@@ -71,7 +75,14 @@ export default function StaffPage() {
   });
   const [user, setUser] = useState<User | null>(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" as "success" | "error" });
+  const [selectedTab, setSelectedTab] = useState<string>("All");
+  const [searchQuery, setSearchQuery] = useState(""); // Add search state
+  const [viewUserOpen, setViewUserOpen] = useState(false);
+  const [viewUser, setViewUser] = useState<Staff | null>(null);
+  const [userBorrowRecords, setUserBorrowRecords] = useState<any[]>([]);
+  const [userReservationRecords, setUserReservationRecords] = useState<any[]>([]);
   const navigate = useNavigate();
+  const theme = useTheme();
 
   const fetchStaffs = async () => {
     setLoading(true);
@@ -236,12 +247,104 @@ export default function StaffPage() {
     }
   };
 
-  // Check if current user can see a specific role in the table
-  const canSeeRole = (role: string) => {
-    if (!user) return false;
-    
-    const availableRoles = getAvailableRoles();
-    return availableRoles.includes(role);
+  // Tab role options based on user role, now includes "All"
+  const getTabRoles = () => {
+    if (!user) return [];
+    if (user.role === "Admin") {
+      return ["All", "Custodian", "Program Chair", "Instructor", "Student Assistant", "Student"];
+    }
+    if (user.role === "Custodian") {
+      return ["All", "Program Chair", "Instructor", "Student Assistant", "Student"];
+    }
+    return [];
+  };
+
+  // Filtered staffs for current tab, with search
+  const filteredStaffs = staffs
+    .filter(staff => selectedTab === "All" ? true : staff.role === selectedTab)
+    .filter(staff =>
+      searchQuery.trim() === "" ||
+      (staff.firstname && staff.firstname.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (staff.lastname && staff.lastname.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      staff.email.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+  // Fetch borrow records for student
+  const fetchBorrowRecords = async (user: Staff) => {
+    setUserBorrowRecords([]);
+    if (!user) return;
+    try {
+      const res = await axios.get("https://elams-server.onrender.com/api/borrow-records");
+      if (res.data && Array.isArray(res.data)) {
+        // Match group_leader or borrow_user by name or email
+        const name = `${user.firstname || ""} ${user.lastname || ""}`.trim();
+        const email = user.email;
+        const filtered = res.data.filter(
+          (b: any) =>
+            (b.group_leader && (b.group_leader === name || b.group_leader === email)) ||
+            (b.borrow_user && (b.borrow_user === name || b.borrow_user === email))
+        );
+        setUserBorrowRecords(filtered);
+      }
+    } catch (err) {
+      setUserBorrowRecords([]);
+    }
+  };
+
+  // Fetch reservation records for faculty
+  const fetchReservationRecords = async (user: Staff) => {
+    setUserReservationRecords([]);
+    if (!user) return;
+    try {
+      const res = await axios.get("https://elams-server.onrender.com/api/reservations");
+      if (Array.isArray(res.data)) {
+        const filtered = res.data.filter(
+          (r: any) =>
+            r.instructor_email === user.email ||
+            r.instructor === `${user.firstname || ""} ${user.lastname || ""}`.trim()
+        );
+        setUserReservationRecords(filtered);
+      }
+    } catch (err) {
+      setUserReservationRecords([]);
+    }
+  };
+
+  // Add fetchManagedBorrowRecords for Student Assistant
+  const fetchManagedBorrowRecords = async (user: Staff) => {
+    setUserBorrowRecords([]);
+    if (!user) return;
+    try {
+      const res = await axios.get("https://elams-server.onrender.com/api/borrow-records");
+      if (res.data && Array.isArray(res.data)) {
+        // Match managed_by by email or managed_name by name
+        const name = `${user.firstname || ""} ${user.lastname || ""}`.trim();
+        const email = user.email;
+        const filtered = res.data.filter(
+          (b: any) =>
+            (b.managed_by && b.managed_by === email) ||
+            (b.managed_name && b.managed_name === name)
+        );
+        setUserBorrowRecords(filtered);
+      }
+    } catch (err) {
+      setUserBorrowRecords([]);
+    }
+  };
+
+  // Open view user modal and fetch records
+  const handleViewUser = async (user: Staff) => {
+    setViewUser(user);
+    setViewUserOpen(true);
+    setUserBorrowRecords([]);
+    setUserReservationRecords([]);
+    if (user.role === "Student") {
+      await fetchBorrowRecords(user);
+    } else if (user.role === "Instructor" || user.role === "Program Chair" || user.role === "Faculty") {
+      await fetchReservationRecords(user);
+    } else if (user.role === "Student Assistant") {
+      await fetchManagedBorrowRecords(user);
+    }
   };
 
   useEffect(() => {
@@ -251,6 +354,8 @@ export default function StaffPage() {
     } else {
       const userData = JSON.parse(storedUser);
       setUser(userData);
+      // Default tab is "All" for all users
+      setSelectedTab("All");
       if (userData.role !== "Custodian" && userData.role !== "Admin") {
         navigate("/dashboard");
       }
@@ -286,7 +391,6 @@ export default function StaffPage() {
           Manage user accounts and roles
         </Typography>
       </Box>
-
       <Stack direction={{ xs: "column", md: "row" }} spacing={3} mb={3}>
         <Card sx={{ flex: 1, p: 3, borderRadius: 3, display: "flex", alignItems: "center", gap: 2, background: `linear-gradient(135deg, rgba(185,28,28,0.06) 0%, rgba(185,28,28,0.12) 100%)` }}>
           <Box sx={{ p: 1.5, borderRadius: "50%", bgcolor: "rgba(185,28,28,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -330,17 +434,69 @@ export default function StaffPage() {
           </Box>
         </Card>
 
+        {/* Student card */}
+        <Card sx={{ flex: 1, p: 3, borderRadius: 3, display: "flex", alignItems: "center", gap: 2, background: `linear-gradient(135deg, rgba(33,150,243,0.06) 0%, rgba(33,150,243,0.12) 100%)` }}>
+          <Box sx={{ p: 1.5, borderRadius: "50%", bgcolor: "rgba(33,150,243,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Typography sx={{ fontWeight: "bold", color: "#2196F3" }}>S</Typography>
+          </Box>
+          <Box>
+            <Typography variant="caption" color="text.secondary">Students</Typography>
+            <Typography variant="h4" sx={{ fontWeight: "bold", color: "#2196F3" }}>{staffs.filter(s => s.role === "Student").length}</Typography>
+          </Box>
+        </Card>
       </Stack>
 
+      {/* Tabs for roles - moved below summary cards */}
+      <Box sx={{ mb: 2 }}>
+        <Tabs
+          value={selectedTab}
+          onChange={(_, val) => setSelectedTab(val)}
+          variant="scrollable"
+          scrollButtons="auto"
+          sx={{ bgcolor: "#f5f5f5", borderRadius: 2 }}
+        >
+          {getTabRoles().map(role => (
+            <Tab
+              key={role}
+              value={role}
+              label={role}
+              sx={{
+                fontWeight: "bold",
+                color: selectedTab === role ? "#B71C1C" : "inherit",
+                "&.Mui-selected": { color: "#B71C1C" }
+              }}
+            />
+          ))}
+        </Tabs>
+      </Box>
+
       {/* Action bar inside a card for visual consistency */}
-      <Card sx={{ p: 2, mb: 3, borderRadius: 3, display: "flex", flexDirection: { xs: "column", sm: "row" }, alignItems: "center", gap: 2, justifyContent: "space-between" }}>
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ flex: 1, alignItems: "center" }}>
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={3} justifyContent="space-between" alignItems="center">
+  <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ flex: 1 }}>
           <Box sx={{ maxWidth: 420, width: "100%" }}>
             <TextField
               placeholder="Search name or email..."
               size="small"
-              onChange={() => { /* keep existing search behaviour if needed */ }}
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
               fullWidth
+               sx={{
+              flex: 1,
+              bgcolor: "background.paper",
+              borderRadius: 3,
+              "& .MuiOutlinedInput-root": {
+                borderRadius: 3,
+                "& fieldset": {
+                  borderRadius: 3,
+                },
+                "&:hover fieldset": {
+                  borderColor: "#b91c1c",
+                },
+                "&.Mui-focused fieldset": {
+                  borderColor: "#b91c1c",
+                },
+              },
+            }}
               InputProps={{
                 startAdornment: <InputAdornment position="start"><SearchIcon color="action" /></InputAdornment>,
               }}
@@ -349,50 +505,141 @@ export default function StaffPage() {
         </Stack>
 
         <Stack direction="row" spacing={1}>
-          <Button variant="contained" onClick={() => { setForm({ emails: [], currentEmail: "", role: getAvailableRoles()[0] }); setOpen(true); }} sx={{ bgcolor: "#B71C1C", "&:hover": { bgcolor: "#9f1515" }, textTransform: "none" }}>
+          <Button
+            variant="contained"
+            onClick={() => { setForm({ emails: [], currentEmail: "", role: getAvailableRoles()[0] }); setOpen(true); }}
+            sx={{
+              bgcolor: "#B71C1C",
+              "&:hover": { bgcolor: "#9f1515" },
+              textTransform: "none",
+              borderRadius: 2,
+              px: 3,
+              fontWeight: "bold"
+            }}
+          >
             + Add Account
           </Button>
           <Button variant="contained" color="error" disabled={selectedStaffs.length === 0} onClick={handleBulkDelete} sx={{ textTransform: "none" }}>
             Delete Selected ({selectedStaffs.length})
           </Button>
         </Stack>
-      </Card>
+      </Stack>
 
       {/* Main table in a consistent card */}
       <Card sx={{ p: 0, borderRadius: 3, boxShadow: 3, overflow: "hidden" }}>
         {loading ? (
-          <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 280 }}><Loader /></Box>
+          <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 280 }}>
+            <Loader />
+          </Box>
+        ) : filteredStaffs.length === 0 ? (
+          // ...existing no data design...
+          <Box
+            sx={{
+              minHeight: 320,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              bgcolor: "grey.50",
+              borderRadius: 3,
+              border: "2px dashed #b91c1c",
+              boxShadow: "0 4px 24px rgba(185,28,28,0.08)",
+              py: 6,
+              px: 2,
+              mt: 2,
+            }}
+          >
+            <CheckCircleIcon sx={{ fontSize: 64, color: "#b91c1c", mb: 2 }} />
+            <Typography variant="h5" sx={{ color: "#b91c1c", fontWeight: "bold", mb: 1 }}>
+              No accounts found
+            </Typography>
+            <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+              There are no accounts for <b>{selectedTab}</b> at the moment.
+            </Typography>
+            <Button
+              variant="contained"
+              sx={{
+                bgcolor: "#b91c1c",
+                color: "#fff",
+                borderRadius: 2,
+                textTransform: "none",
+                fontWeight: "bold",
+                px: 4,
+                boxShadow: "0 2px 8px rgba(185,28,28,0.12)"
+              }}
+              onClick={() => setOpen(true)}
+            >
+              + Add Account
+            </Button>
+          </Box>
         ) : (
           <TableContainer component={Paper} sx={{ maxHeight: 620 }}>
             <Table stickyHeader>
               <TableHead>
-                <TableRow sx={{ bgcolor: "#B71C1C" }}>
-                  <TableCell padding="checkbox">
+                <TableRow>
+                  {/* ...existing header cells... */}
+                  <TableCell
+                    padding="checkbox"
+                    sx={{
+                      bgcolor: "grey.50",
+                      borderBottom: "2px solid #b91c1c",
+                    }}
+                  >
                     <Checkbox
                       indeterminate={
-                        selectedStaffs.length > 0 && selectedStaffs.length < staffs.length
+                        selectedStaffs.length > 0 && selectedStaffs.length < filteredStaffs.length
                       }
-                      checked={staffs.length > 0 && selectedStaffs.length === staffs.length}
+                      checked={filteredStaffs.length > 0 && selectedStaffs.length === filteredStaffs.length}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          setSelectedStaffs(staffs.map(staff => staff.email));
+                          setSelectedStaffs(filteredStaffs.map(staff => staff.email));
                         } else {
                           setSelectedStaffs([]);
                         }
                       }}
-                      sx={{ color: "white", "&.Mui-checked": { color: "white" } }}
+                      sx={{
+                        color: "#b91c1c",
+                        "&.Mui-checked": { color: "#b91c1c" },
+                        "&.MuiCheckbox-indeterminate": { color: "#b91c1c" }
+                      }}
                     />
                   </TableCell>
-                  <TableCell sx={{ fontWeight: "bold", color: "white" }}>Name</TableCell>
-                  <TableCell sx={{ fontWeight: "bold", color: "white" }}>Email</TableCell>
-                  <TableCell sx={{ fontWeight: "bold", color: "white" }}>Role</TableCell>
-                  <TableCell sx={{ fontWeight: "bold", color: "white" }}>Actions</TableCell>
+                  <TableCell sx={{
+                    bgcolor: "grey.50",
+                    fontWeight: "bold",
+                    color: "#b91c1c",
+                    borderBottom: "2px solid #b91c1c"
+                  }}>
+                    Name
+                  </TableCell>
+                  <TableCell sx={{
+                    bgcolor: "grey.50",
+                    fontWeight: "bold",
+                    color: "#b91c1c",
+                    borderBottom: "2px solid #b91c1c"
+                  }}>
+                    Email
+                  </TableCell>
+                  <TableCell sx={{
+                    bgcolor: "grey.50",
+                    fontWeight: "bold",
+                    color: "#b91c1c",
+                    borderBottom: "2px solid #b91c1c"
+                  }}>
+                    Role
+                  </TableCell>
+                  <TableCell sx={{
+                    bgcolor: "grey.50",
+                    fontWeight: "bold",
+                    color: "#b91c1c",
+                    borderBottom: "2px solid #b91c1c"
+                  }}>
+                    Actions
+                  </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {staffs
-                  .filter(staff => canSeeRole(staff.role)) // Filter staff based on visible roles
-                  .map((staff) => (
+                {filteredStaffs.map((staff) => (
                   <TableRow key={staff.email} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
                     <TableCell padding="checkbox">
                       <Checkbox
@@ -431,7 +678,8 @@ export default function StaffPage() {
                           fontWeight: "bold",
                           bgcolor: staff.role === "Custodian" ? "#B71C1C" :
                                    staff.role === "Program Chair" ? "#2E7D32" :
-                                   staff.role === "Instructor" ? "#3B82F6" : "#f8a41a",
+                                   staff.role === "Instructor" ? "#3B82F6" :
+                                   staff.role === "Student Assistant" ? "#f8a41a" : "#757575",
                           color: "white",
                         }}
                       >
@@ -439,18 +687,41 @@ export default function StaffPage() {
                       </Box>
                     </TableCell>
                     <TableCell>
-                      <Button
-                        size="small"
-                        onClick={() => handleDelete(staff.email)}
-                        startIcon={<DeleteIcon />}
-                        sx={{ 
-                          textTransform: "none", 
-                          color: "error.main",
-                          fontWeight: "bold"
-                        }}
-                      >
-                        Delete
-                      </Button>
+                      <Stack direction="row" spacing={1}>
+                        {/* Only show Records/View icon for non-Custodian roles */}
+                        {staff.role !== "Custodian" && (
+                          <Button
+                            size="small"
+                            sx={{
+                              minWidth: 0,
+                              bgcolor: "#e3f2fd",
+                              color: "#1976d2",
+                              borderRadius: 2,
+                              p: 1,
+                              boxShadow: "0 2px 8px rgba(25,118,210,0.08)",
+                              "&:hover": { bgcolor: "#90caf9", color: "#1565c0" }
+                            }}
+                            onClick={() => handleViewUser(staff)}
+                          >
+                            <VisibilityIcon fontSize="small" />
+                          </Button>
+                        )}
+                        <Button
+                          size="small"
+                          sx={{
+                            minWidth: 0,
+                            bgcolor: "#ffebee",
+                            color: "#d32f2f",
+                            borderRadius: 2,
+                            p: 1,
+                            boxShadow: "0 2px 8px rgba(183,28,28,0.08)",
+                            "&:hover": { bgcolor: "#f44336", color: "#fff" }
+                          }}
+                          onClick={() => handleDelete(staff.email)}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </Button>
+                      </Stack>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -459,6 +730,214 @@ export default function StaffPage() {
           </TableContainer>
         )}
       </Card>
+
+      {/* View User Modal */}
+      <Dialog
+        open={viewUserOpen}
+        onClose={() => setViewUserOpen(false)}
+        maxWidth="md"
+        fullWidth
+        scroll="paper"
+      >
+        <DialogTitle sx={{ fontWeight: "bold", color: "#B71C1C", bgcolor: "#f5f5f5" }}>
+          User Information
+        </DialogTitle>
+        <DialogContent dividers sx={{ bgcolor: "#fafafa", maxHeight: 600 }}>
+          {viewUser && (
+            <Stack spacing={3}>
+              <Box>
+                <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                  Basic Information
+                </Typography>
+                <Stack spacing={2}>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Typography variant="body2" sx={{ minWidth: 120, fontWeight: 'bold' }}>Name:</Typography>
+                    <Typography variant="body2">{viewUser.firstname && viewUser.lastname ? `${viewUser.firstname} ${viewUser.lastname}` : "Not yet logged in"}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Typography variant="body2" sx={{ minWidth: 120, fontWeight: 'bold' }}>Email:</Typography>
+                    <Typography variant="body2">{viewUser.email}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <Typography variant="body2" sx={{ minWidth: 120, fontWeight: 'bold' }}>Role:</Typography>
+                    <Typography variant="body2">{viewUser.role}</Typography>
+                  </Box>
+                </Stack>
+              </Box>
+              {/* Student: Borrow Records */}
+              {viewUser.role === "Student" && (
+                <Box>
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                    Borrow Records
+                  </Typography>
+                  <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.info.main, 0.04), maxHeight: 250, overflowY: 'auto' }}>
+                    {userBorrowRecords.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary">
+                        No borrow records found for this student.
+                      </Typography>
+                    ) : (
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: "bold" }}>Borrow ID</TableCell>
+                            <TableCell sx={{ fontWeight: "bold" }}>Course</TableCell>
+                            <TableCell sx={{ fontWeight: "bold" }}>Group Leader</TableCell>
+                            <TableCell sx={{ fontWeight: "bold" }}>Date Borrowed</TableCell>
+                            <TableCell sx={{ fontWeight: "bold" }}>Status</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {userBorrowRecords.map((rec, idx) => (
+                            <TableRow key={idx}>
+                              <TableCell>{rec.borrow_id}</TableCell>
+                              <TableCell>{rec.course}</TableCell>
+                              <TableCell>{rec.group_leader}</TableCell>
+                              <TableCell>{rec.date_borrowed ? new Date(rec.date_borrowed).toLocaleDateString() : ""}</TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={rec.status}
+                                  size="small"
+                                  sx={{
+                                    bgcolor: rec.status === "Returned" ? alpha(theme.palette.success.main, 0.08) :
+                                            rec.status === "Borrowed" ? alpha(theme.palette.warning.main, 0.08) :
+                                            alpha(theme.palette.error.main, 0.08),
+                                    color: rec.status === "Returned" ? theme.palette.success.main :
+                                           rec.status === "Borrowed" ? theme.palette.warning.main :
+                                           theme.palette.error.main,
+                                    fontWeight: 'bold'
+                                  }}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </Paper>
+                </Box>
+              )}
+              {/* Student Assistant: Managed Borrow Records */}
+              {viewUser.role === "Student Assistant" && (
+                <Box>
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                    Managed Borrow Records
+                  </Typography>
+                  <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.info.main, 0.04), maxHeight: 250, overflowY: 'auto' }}>
+                    {userBorrowRecords.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary">
+                        No borrow records managed by this Student Assistant.
+                      </Typography>
+                    ) : (
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: "bold" }}>Borrow ID</TableCell>
+                            <TableCell sx={{ fontWeight: "bold" }}>Course</TableCell>
+                            <TableCell sx={{ fontWeight: "bold" }}>Borrower</TableCell>
+                            <TableCell sx={{ fontWeight: "bold" }}>Date Borrowed</TableCell>
+                            <TableCell sx={{ fontWeight: "bold" }}>Status</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {userBorrowRecords.map((rec, idx) => (
+                            <TableRow key={idx}>
+                              <TableCell>{rec.borrow_id}</TableCell>
+                              <TableCell>{rec.course}</TableCell>
+                              <TableCell>{rec.borrow_user}</TableCell>
+                              <TableCell>{rec.date_borrowed ? new Date(rec.date_borrowed).toLocaleDateString() : ""}</TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={rec.status}
+                                  size="small"
+                                  sx={{
+                                    bgcolor: rec.status === "Returned" ? alpha(theme.palette.success.main, 0.08) :
+                                            rec.status === "Borrowed" ? alpha(theme.palette.warning.main, 0.08) :
+                                            alpha(theme.palette.error.main, 0.08),
+                                    color: rec.status === "Returned" ? theme.palette.success.main :
+                                           rec.status === "Borrowed" ? theme.palette.warning.main :
+                                           theme.palette.error.main,
+                                    fontWeight: 'bold'
+                                  }}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </Paper>
+                </Box>
+              )}
+              {/* Faculty: Reservation Records */}
+              {(viewUser.role === "Instructor" || viewUser.role === "Program Chair" || viewUser.role === "Faculty") && (
+                <Box>
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                    Reservation Records
+                  </Typography>
+                  <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.info.main, 0.04), maxHeight: 250, overflowY: 'auto' }}>
+                    {userReservationRecords.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary">
+                        No reservation records found for this faculty.
+                      </Typography>
+                    ) : (
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: "bold" }}>Reservation Code</TableCell>
+                            <TableCell sx={{ fontWeight: "bold" }}>Subject</TableCell>
+                            <TableCell sx={{ fontWeight: "bold" }}>Course</TableCell>
+                            <TableCell sx={{ fontWeight: "bold" }}>Date Created</TableCell>
+                            <TableCell sx={{ fontWeight: "bold" }}>Status</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {userReservationRecords.map((rec, idx) => (
+                            <TableRow key={idx}>
+                              <TableCell>{rec.reservation_code}</TableCell>
+                              <TableCell>{rec.subject}</TableCell>
+                              <TableCell>{rec.course}</TableCell>
+                              <TableCell>{rec.date_created ? new Date(rec.date_created).toLocaleDateString() : ""}</TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={rec.status}
+                                  size="small"
+                                  sx={{
+                                    bgcolor: rec.status === "Rejected" ? alpha(theme.palette.error.main, 0.08) :
+                                            rec.status === "Pending" ? alpha(theme.palette.warning.main, 0.08) :
+                                            alpha(theme.palette.success.main, 0.08),
+                                    color: rec.status === "Rejected" ? theme.palette.error.main :
+                                           rec.status === "Pending" ? theme.palette.warning.main :
+                                           theme.palette.success.main,
+                                    fontWeight: 'bold'
+                                  }}
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </Paper>
+                </Box>
+              )}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2, bgcolor: "#f5f5f5" }}>
+          <Button
+            onClick={() => setViewUserOpen(false)}
+            sx={{
+              textTransform: "none",
+              color: "#B71C1C",
+              fontWeight: "bold",
+              borderRadius: 2,
+              px: 3
+            }}
+          >
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Add Staff Dialog */}
       <Dialog open={open} onClose={() => !processing && setOpen(false)} maxWidth="sm" fullWidth>

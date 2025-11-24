@@ -45,6 +45,7 @@ import SendIcon from "@mui/icons-material/Send";
 import CancelIcon from '@mui/icons-material/Cancel';
 import axios from 'axios';
 import { alpha, useTheme } from '@mui/material/styles';
+import Checkbox from '@mui/material/Checkbox';
 
 const API_BASE_URL = "https://elams-server.onrender.com/api";
 
@@ -60,6 +61,7 @@ interface AssignedItem {
   item_name: string;
   item_type: 'consumable' | 'non-consumable';
   quantity: number;
+  preAssigned?: boolean; // <-- new flag to mark already-assigned rows
 }
 
 interface Reservation {
@@ -117,6 +119,7 @@ export default function ReservationPage() {
   const [messageText, setMessageText] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
   const [chatRefreshInterval, setChatRefreshInterval] = useState<NodeJS.Timeout | null>(null);
+  const [selectedReservations, setSelectedReservations] = useState<string[]>([]);
 
   // ref for messages container to auto-scroll
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -172,15 +175,32 @@ export default function ReservationPage() {
 
   const handleAssign = (reservation: Reservation) => {
     setSelectedReservation(reservation);
-    
-    const initialAssignment = reservation.requested_items.map((item, index) => ({
-      requested_item_index: index,
-      item_id: '',
-      item_name: item.item_name,
-      item_type: item.item_type,
-      quantity: item.quantity
-    }));
-    
+
+    // Build initial assignment rows, but populate rows that are already assigned
+    const existingAssigned = Array.isArray(reservation.assigned_items) ? reservation.assigned_items : [];
+
+    const initialAssignment: AssignedItem[] = reservation.requested_items.map((item, index) => {
+      const assigned = existingAssigned.find(ai => ai.requested_item_index === index);
+      if (assigned) {
+        return {
+          requested_item_index: index,
+          item_id: assigned.item_id,
+          item_name: assigned.item_name,
+          item_type: assigned.item_type as 'consumable' | 'non-consumable',
+          quantity: assigned.quantity,
+          preAssigned: true
+        };
+      }
+      return {
+        requested_item_index: index,
+        item_id: '',
+        item_name: item.item_name,
+        item_type: item.item_type,
+        quantity: item.quantity,
+        preAssigned: false
+      };
+    });
+
     setAssignmentData(initialAssignment);
     setItemSearch({});
     setAssignDialogOpen(true);
@@ -192,19 +212,13 @@ export default function ReservationPage() {
   };
 
   const handleItemAssignment = (index: number, itemId: string) => {
-    const selectedItem = inventory.find(item => item.num === itemId);
-    if (selectedItem) {
-      setAssignmentData(prev => 
-        prev.map((item, i) => 
-          i === index ? { 
-            ...item, 
-            item_id: itemId,
-            item_name: selectedItem.equipment_name,
-            item_type: selectedItem.is_consumable ? 'consumable' : 'non-consumable'
-          } : item
-        )
-      );
-    }
+    setAssignmentData(prev =>
+      prev.map((item, i) =>
+        i === index
+          ? { ...item, item_id: item.preAssigned ? item.item_id : itemId, item_name: item.preAssigned ? item.item_name : (inventory.find(inv => inv.num === itemId)?.equipment_name || item.item_name) }
+          : item
+      )
+    );
   };
 
   const handleItemSearchChange = (index: number, searchTerm: string) => {
@@ -217,18 +231,35 @@ export default function ReservationPage() {
   const handleSubmitAssignment = async () => {
     if (!selectedReservation) return;
 
-    if (assignmentData.some(item => !item.item_id)) {
-      alert('Please assign all items before submitting');
+    // Only validate rows that are not preAssigned
+    const newAssignments = assignmentData.filter(a => !a.preAssigned);
+    if (newAssignments.length > 0 && newAssignments.some(item => !item.item_id)) {
+      alert('Please assign all unassigned items before submitting');
       return;
     }
 
     setProcessing(true);
     try {
+      // Combine existing assigned_items on reservation (if any) with new assignments
+      const existingAssigned = Array.isArray(selectedReservation.assigned_items) ? selectedReservation.assigned_items : [];
+
+      // Normalize newAssignments shape to sent format (ensure requested_item_index, item_id, item_name, item_type, quantity)
+      const normalizedNew = newAssignments.map(a => ({
+        requested_item_index: a.requested_item_index,
+        item_id: a.item_id,
+        item_name: a.item_name,
+        item_type: a.item_type,
+        quantity: a.quantity
+      }));
+
+      // Merge while avoiding duplicate requested_item_index entries (prefer existing if preAssigned)
+      const merged = [...existingAssigned.filter(e => !normalizedNew.some(n => n.requested_item_index === e.requested_item_index)), ...normalizedNew];
+
       await axios.post(`${API_BASE_URL}/reservations/${selectedReservation._id}/assign`, {
-        assigned_items: assignmentData,
+        assigned_items: merged,
         assigned_by: JSON.parse(localStorage.getItem('user') || '{}').email || 'Unknown'
       });
-      
+
       await fetchReservations();
       setAssignDialogOpen(false);
       setSelectedReservation(null);
@@ -406,6 +437,26 @@ export default function ReservationPage() {
     }
   };
 
+  // Bulk delete handler
+  const handleDeleteSelected = async () => {
+    if (selectedReservations.length === 0) return;
+    const codes = selectedReservations
+      .map(id => reservations.find(r => r._id === id)?.reservation_code || id)
+      .join('\n');
+    if (!window.confirm(`Are you sure you want to delete the following reservations?\n\n${codes}`)) return;
+    setProcessing(true);
+    try {
+      await Promise.all(selectedReservations.map(id => axios.delete(`${API_BASE_URL}/reservations/${id}`)));
+      setSelectedReservations([]);
+      await fetchReservations();
+    } catch (err) {
+      console.error('Failed to delete selected reservations', err);
+      alert('Failed to delete selected reservations');
+    } finally {
+      setProcessing(false);
+    }
+  }
+
   // Filter then sort by date_created descending (newest first)
   const filteredReservations = reservations
     .filter(reservation => {
@@ -470,6 +521,11 @@ export default function ReservationPage() {
   const getStatusCount = (status: string) => {
     return reservations.filter(r => r.status === status).length;
   };
+
+  // Checkbox helpers
+  const allVisibleCount = filteredReservations.length;
+  const headerChecked = allVisibleCount > 0 && selectedReservations.length === allVisibleCount;
+  const headerIndeterminate = selectedReservations.length > 0 && selectedReservations.length < allVisibleCount;
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
@@ -603,21 +659,22 @@ export default function ReservationPage() {
               size="small"
               fullWidth
               sx={{
-                bgcolor: "background.paper",
+              flex: 1,
+              bgcolor: "background.paper",
+              borderRadius: 3,
+              "& .MuiOutlinedInput-root": {
                 borderRadius: 3,
-                "& .MuiOutlinedInput-root": {
+                "& fieldset": {
                   borderRadius: 3,
-                  "& fieldset": {
-                    borderRadius: 3,
-                  },
-                  "&:hover fieldset": {
-                    borderColor: "primary.main",
-                  },
-                  "&.Mui-focused fieldset": {
-                    borderColor: "primary.main",
-                  },
                 },
-              }}
+                "&:hover fieldset": {
+                  borderColor: "#b91c1c",
+                },
+                "&.Mui-focused fieldset": {
+                  borderColor: "#b91c1c",
+                },
+              },
+            }}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
@@ -650,6 +707,22 @@ export default function ReservationPage() {
             <MenuItem value="Rejected">Rejected</MenuItem>
           </TextField>
         </Stack>
+        <Stack direction="row" spacing={1}>
+          <Button
+            variant="outlined"
+            color="error"
+            disabled={selectedReservations.length === 0}
+            onClick={handleDeleteSelected}
+            sx={{
+              borderRadius: 2,
+              textTransform: "none",
+              px: 3,
+              fontWeight: "bold",
+            }}
+          >
+            Delete Selected ({selectedReservations.length})
+          </Button>
+        </Stack>
       </Stack>
 
       {/* Reservations Table */}
@@ -678,12 +751,25 @@ export default function ReservationPage() {
               <Table stickyHeader sx={{ minWidth: 950 }}>
                 <TableHead>
                   <TableRow>
+                    <TableCell padding="checkbox" sx={{ bgcolor: "grey.50" }}>
+                      <Checkbox
+                        indeterminate={headerIndeterminate}
+                        checked={headerChecked}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedReservations(filteredReservations.map(r => r._id));
+                          } else {
+                            setSelectedReservations([]);
+                          }
+                        }}
+                        sx={{ color: brandRed }}
+                      />
+                    </TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Reservation Code</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Subject</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Instructor</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Course</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Groups</TableCell>
-                    <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Requested Items</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Status</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Date Created</TableCell>
                     <TableCell align="center" sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Actions</TableCell>
@@ -694,6 +780,19 @@ export default function ReservationPage() {
                     .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                     .map((reservation) => (
                       <TableRow key={reservation._id} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
+                        <TableCell padding="checkbox">
+                          <Checkbox
+                            checked={selectedReservations.includes(reservation._id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedReservations(prev => [...prev, reservation._id]);
+                              } else {
+                                setSelectedReservations(prev => prev.filter(id => id !== reservation._id));
+                              }
+                            }}
+                            sx={{ color: brandRed }}
+                          />
+                        </TableCell>
                         <TableCell>
                           <Typography fontWeight="bold" sx={{ color: brandRed }}>
                             {reservation.reservation_code}
@@ -713,35 +812,6 @@ export default function ReservationPage() {
                               fontWeight: 'bold'
                             }}
                           />
-                        </TableCell>
-                        <TableCell>
-                          <Stack spacing={0.5}>
-                            {reservation.requested_items.map((item, index) => {
-                              const totalNeeded = calculateTotalQuantityNeeded(item.quantity, reservation.group_count);
-                              return (
-                                <Box key={index} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                  <Typography variant="body2">
-                                    {item.item_name} 
-                                  </Typography>
-                                  <Chip
-                                    label={`${item.quantity} × ${reservation.group_count} = ${totalNeeded}`}
-                                    size="small"
-                                    variant="outlined"
-                                    sx={{ borderColor: brandRed, color: brandRed }}
-                                  />
-                                  <Chip
-                                    label={item.item_type}
-                                    size="small"
-                                    variant="outlined"
-                                    sx={{
-                                      borderColor: item.item_type === 'consumable' ? theme.palette.success.main : brandRed,
-                                      color: item.item_type === 'consumable' ? theme.palette.success.main : brandRed
-                                    }}
-                                  />
-                                </Box>
-                              );
-                            })}
-                          </Stack>
                         </TableCell>
                         <TableCell>
                           <Chip
@@ -966,6 +1036,7 @@ export default function ReservationPage() {
                         value={item.item_id}
                         label="Select Inventory Item"
                         onChange={(e) => handleItemAssignment(index, e.target.value)}
+                        disabled={item.preAssigned === true} // <-- disable if already assigned
                       >
                         <MenuItem value="">
                           <em>Not assigned</em>

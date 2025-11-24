@@ -11,15 +11,11 @@ import {
 } from "@mui/material";
 import { useNavigate } from "react-router-dom";
 import {
-  Inventory2 as InventoryIcon,
-  AssignmentTurnedIn as BorrowIcon,
-  Build as MaintenanceIcon,
-  People as StaffIcon,
   Warning as WarningIcon,
-  EventAvailable as EventIcon
 } from "@mui/icons-material";
 import axios from "axios";
 import { alpha, useTheme } from "@mui/material/styles";
+import {AiOutlineUser, AiOutlineFileSearch, AiOutlineAppstore, AiOutlineTool, AiOutlineBook } from "react-icons/ai";
 
 const API_BASE_URL = "https://elams-server.onrender.com/api";
 
@@ -73,62 +69,119 @@ const HomePage = () => {
 
   const fetchDashboardStats = async (currentUser: any = JSON.parse(localStorage.getItem("user") || "{}")) => {
     try {
-      // Get combined inventory (both consumable and non-consumable)
-      const [inventoryRes, borrowRes, maintenanceRes, usersRes] = await Promise.all([
+      // Parallel requests
+      const [inventoryRes, borrowRes, maintenanceRes, usersRes, reservationsRes, ncInvRes, cInvRes] = await Promise.all([
         axios.get(`${API_BASE_URL}/inventory`),
         axios.get(`${API_BASE_URL}/borrow-records`),
         axios.post(`${API_BASE_URL}/maintenance`, { action: "read" }),
-        axios.post(`${API_BASE_URL}/users`, { action: "read" })
+        axios.post(`${API_BASE_URL}/users`, { action: "read" }),
+        axios.get(`${API_BASE_URL}/reservations`),
+        axios.post(`${API_BASE_URL}/nc-inventory`, { action: "read" }),
+        axios.post(`${API_BASE_URL}/c-inventory`, { action: "read" })
       ]);
 
       const combinedInventory = Array.isArray(inventoryRes.data) ? inventoryRes.data : [];
       const borrowRecords = Array.isArray(borrowRes.data) ? borrowRes.data : [];
-      const maintenanceRecords = Array.isArray(maintenanceRes.data && maintenanceRes.data.data ? maintenanceRes.data.data : maintenanceRes.data) ? (maintenanceRes.data.data || maintenanceRes.data) : [];
-      const users = Array.isArray(usersRes.data && usersRes.data.data ? usersRes.data.data : usersRes.data) ? (usersRes.data.data || usersRes.data) : [];
-      
-      // total items: sum total_qty for all items
-      const totalItems = combinedInventory.reduce((acc: number, item: any) => {
-        return acc + (Number(item.total_qty || 0));
-      }, 0);
-      
-      // borrowed items: sum of quantities in borrow records
-      const borrowedItems = borrowRecords.reduce((acc: number, record: any) => {
-        return acc + (Array.isArray(record.items) ? record.items.reduce((s: number, it: any) => s + (Number(it.quantity) || 0), 0) : 0);
-      }, 0);
-      
-      // Get consumable inventory (via c-inventory) to compute low stock
-      let lowStockItems = 0;
-      try {
-        const cInvRes = await axios.post(`${API_BASE_URL}/c-inventory`, { action: "read" });
-        const cData = cInvRes.data && cInvRes.data.data ? cInvRes.data.data : cInvRes.data;
-        lowStockItems = Array.isArray(cData) ? cData.filter((row: any) => {
-          const qtyOpened = Number(row.quantity_opened || 0);
-          const stockAlert = Number(row.stock_alert || 5);
-          return qtyOpened <= stockAlert;
-        }).length : 0;
-      } catch (err) {
-        // ignore and keep 0
-        console.warn("Failed to fetch consumable inventory for low stock", err);
-      }
-      
+      const maintenanceRecords = (maintenanceRes.data && maintenanceRes.data.data) ? maintenanceRes.data.data : (Array.isArray(maintenanceRes.data) ? maintenanceRes.data : []);
+      const users = (usersRes.data && usersRes.data.data) ? usersRes.data.data : (Array.isArray(usersRes.data) ? usersRes.data : []);
+      const reservations = Array.isArray(reservationsRes.data) ? reservationsRes.data : [];
+      const ncInventory = (ncInvRes.data && ncInvRes.data.data) ? ncInvRes.data.data : (Array.isArray(ncInvRes.data) ? ncInvRes.data : []);
+      const cInventory = (cInvRes.data && cInvRes.data.data) ? cInvRes.data.data : (Array.isArray(cInvRes.data) ? cInvRes.data : []);
+
+      // totals
+      const totalItems = combinedInventory.reduce((acc: number, item: any) => acc + (Number(item.total_qty || 0)), 0);
+      const borrowedItems = borrowRecords.reduce((acc: number, record: any) => acc + (Array.isArray(record.items) ? record.items.reduce((s: number, it: any) => s + (Number(it.quantity) || 0), 0) : 0), 0);
+
+      // low stock from consumables
+      const lowStockItems = Array.isArray(cInventory)
+        ? cInventory.filter((row: any) => (Number(row.quantity_opened || 0) <= Number(row.stock_alert || 5))).length
+        : 0;
+
       // maintenance stats
       const currentYear = new Date().getFullYear();
-      const completedMaintenance = Array.isArray(maintenanceRecords) ? maintenanceRecords.filter((m: any) => {
-        const d = m.date_accomplished || m.dateAccomplished || m.dateAccomplished;
-        if (!d) return false;
-        const date = new Date(d);
-        return date.getFullYear() === currentYear;
-      }).length : 0;
+      const completedMaintenance = Array.isArray(maintenanceRecords)
+        ? maintenanceRecords.filter((m: any) => {
+            const d = m.date_accomplished || m.dateAccomplished || m.dateAccomplished;
+            if (!d) return false;
+            return new Date(d).getFullYear() === currentYear;
+          }).length
+        : 0;
       const pendingMaintenance = (Array.isArray(maintenanceRecords) ? maintenanceRecords.length : 0) - completedMaintenance;
-      
-      // staff count excluding current user
+
       const totalStaff = Array.isArray(users) ? users.filter((u: any) => u.email !== currentUser.email).length : 0;
-      
-      const recentActivity = [
-        { type: "borrow", description: `${borrowRecords.length} active borrow requests`, time: "Today" },
-        { type: "maintenance", description: `${pendingMaintenance} pending maintenance tasks`, time: "This week" },
-        { type: "inventory", description: `${lowStockItems} items low on stock`, time: "Needs attention" }
-      ];
+
+      // Build recent activity from multiple sources
+      const activity: Array<{ timestamp: number; type: string; description: string; time: string }> = [];
+
+      // Reservations (recent)
+      reservations.slice().forEach((r: any) => {
+        const ts = r.date_created ? new Date(r.date_created).getTime() : Date.now();
+        activity.push({
+          timestamp: ts,
+          type: "reservation",
+          description: `${r.instructor || 'Someone'} created reservation "${r.subject || r.reservation_code || ''}"`,
+          time: new Date(ts).toLocaleString()
+        });
+      });
+
+      // Borrow records
+      borrowRecords.slice().forEach((b: any) => {
+        const ts = b.date_borrowed ? new Date(b.date_borrowed).getTime() : Date.now();
+        const count = Array.isArray(b.items) ? b.items.reduce((s: number, it: any) => s + (Number(it.quantity) || 0), 0) : 0;
+        const who = b.borrow_user || b.group_leader || b.managed_name || 'Unknown';
+        activity.push({
+          timestamp: ts,
+          type: "borrow",
+          description: `${who} borrowed ${count} item(s)${b.reservation_code ? ` (code: ${b.reservation_code})` : ''}`,
+          time: new Date(ts).toLocaleString()
+        });
+      });
+
+      // Maintenance events
+      (maintenanceRecords || []).forEach((m: any) => {
+        const ts = m.date_accomplished ? new Date(m.date_accomplished).getTime() : (m.createdAt ? new Date(m.createdAt).getTime() : Date.now());
+        activity.push({
+          timestamp: ts,
+          type: "maintenance",
+          description: m.date_accomplished ? `Maintenance completed: ${m.equipment_name || m.identifier_number || ''}` : `Maintenance scheduled: ${m.equipment_name || ''}`,
+          time: new Date(ts).toLocaleString()
+        });
+      });
+
+      // Inventory adds/updates (non-consumable + consumable)
+      (ncInventory || []).forEach((it: any) => {
+        const ts = it.createdAt ? new Date(it.createdAt).getTime() : Date.now();
+        activity.push({
+          timestamp: ts,
+          type: "inventory",
+          description: `Inventory item added/updated: ${it.equipment_name || it.description || it.num || ''}`,
+          time: new Date(ts).toLocaleString()
+        });
+      });
+      (cInventory || []).forEach((it: any) => {
+        const ts = it.createdAt ? new Date(it.createdAt).getTime() : Date.now();
+        activity.push({
+          timestamp: ts,
+          type: "inventory",
+          description: `Consumable updated: ${it.description || it.num || ''}`,
+          time: new Date(ts).toLocaleString()
+        });
+      });
+
+      // User/account creations
+      (users || []).forEach((u: any) => {
+        const ts = u.createdAt ? new Date(u.createdAt).getTime() : Date.now();
+        activity.push({
+          timestamp: ts,
+          type: "account",
+          description: `Account created: ${u.firstname || u.email || u.email}`,
+          time: new Date(ts).toLocaleString()
+        });
+      });
+
+      // Sort descending and take recent 6
+      activity.sort((a, b) => b.timestamp - a.timestamp);
+      const recentActivity = activity.slice(0, 6).map(a => ({ type: a.type, description: a.description, time: a.time }));
 
       setStats({
         totalItems,
@@ -141,7 +194,7 @@ const HomePage = () => {
       });
     } catch (err) {
       console.error("Failed to fetch dashboard data", err);
-      // keep previous fallback sample data as before
+      // keep previous fallback if any error occurs
       setStats({
         totalItems: 142,
         borrowedItems: 28,
@@ -258,11 +311,13 @@ const HomePage = () => {
   const ActivityItem = ({ type, description, time }: any) => {
     const getIcon = () => {
       switch (type) {
-        case "borrow": return <BorrowIcon color="info" />;
-        case "return": return <EventIcon color="success" />;
-        case "maintenance": return <MaintenanceIcon color="warning" />;
-        case "inventory": return <InventoryIcon color="primary" />;
-        default: return <InventoryIcon color="action" />;
+        case "borrow": return <AiOutlineFileSearch style={{ color: theme.palette.info.main, fontSize: 22 }} />;
+        case "return": return <AiOutlineFileSearch style={{ color: theme.palette.success.main, fontSize: 22 }} />;
+        case "maintenance": return <AiOutlineTool style={{ color: theme.palette.warning.main, fontSize: 22 }} />;
+        case "inventory": return <AiOutlineAppstore style={{ color: theme.palette.primary.main, fontSize: 22 }} />;
+        case "account": return <AiOutlineUser style={{ color: theme.palette.secondary.main, fontSize: 22 }} />;
+        case "reservation": return <AiOutlineBook style={{ color: "#6b7280", fontSize: 22 }} />;
+        default: return <AiOutlineAppstore style={{ fontSize: 22 }} />;
       }
     };
 
@@ -314,14 +369,15 @@ const HomePage = () => {
         <StatCard
           title="Total Items"
           value={stats.totalItems}
-          icon={<InventoryIcon sx={{ color: theme.palette.primary.main }} />}
+          icon={<AiOutlineAppstore style={{ color: theme.palette.primary.main, fontSize: 22 }} />}
+          subtitle={`Non-consumable & Consumable`}
           color={theme.palette.primary.main}
           onClick={() => navigate('/inventory')}
         />
         <StatCard
           title="Borrowed"
           value={stats.borrowedItems}
-          icon={<BorrowIcon sx={{ color: theme.palette.info.main }} />}
+          icon={<AiOutlineFileSearch style={{ color: theme.palette.info.main, fontSize: 22 }} />}
           color={theme.palette.info.main}
           subtitle={`${Math.round((stats.borrowedItems / stats.totalItems) * 100)}% of inventory`}
           onClick={() => navigate('/borrow')}
@@ -337,7 +393,7 @@ const HomePage = () => {
         <StatCard
           title="Maintenance"
           value={`${stats.completedMaintenance}/${stats.pendingMaintenance + stats.completedMaintenance}`}
-          icon={<MaintenanceIcon sx={{ color: theme.palette.success.main }} />}
+          icon={<AiOutlineTool style={{ color: theme.palette.success.main, fontSize: 22 }} />}
           color={theme.palette.success.main}
           subtitle="Completed/Pending"
           onClick={() => navigate('/maintenance')}
@@ -355,28 +411,28 @@ const HomePage = () => {
             <QuickAction
               title="Manage Inventory"
               description="View and update equipment inventory"
-              icon={<InventoryIcon sx={{ color: theme.palette.primary.main }} />}
+              icon={<AiOutlineAppstore style={{ color: theme.palette.primary.main, fontSize: 22 }} />}
               color={theme.palette.primary.main}
               path="/inventory"
             />
             <QuickAction
               title="Borrow Equipment"
               description="Create new borrow requests"
-              icon={<BorrowIcon sx={{ color: theme.palette.info.main }} />}
+              icon={<AiOutlineFileSearch style={{ color: theme.palette.info.main, fontSize: 22 }} />}
               color={theme.palette.info.main}
               path="/borrow"
             />
             <QuickAction
               title="Maintenance"
               description="Track maintenance"
-              icon={<MaintenanceIcon sx={{ color: theme.palette.warning.main }} />}
+              icon={<AiOutlineTool style={{ color: theme.palette.warning.main, fontSize: 22 }} />}
               color={theme.palette.warning.main}
               path="/maintenance"
             />
             <QuickAction
-              title="Staff Management"
+              title="Account Management"
               description="Manage user accounts and permissions"
-              icon={<StaffIcon sx={{ color: theme.palette.secondary.main }} />}
+              icon={<AiOutlineUser style={{ color: theme.palette.secondary.main, fontSize: 22 }} />}
               color={theme.palette.secondary.main}
               path="/staff"
             />

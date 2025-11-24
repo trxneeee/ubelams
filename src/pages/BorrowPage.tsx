@@ -83,6 +83,8 @@ interface BorrowRecord {
   reservation_code?: string;
   // Added to match server payload and usage in code
   group_members?: { name: string; id: string }[];
+  managed_by?: string; // email or name of Student Assistant
+  managed_name?: string; // display name
 }
 
 interface BorrowItem {
@@ -207,7 +209,7 @@ export default function BorrowPage() {
   const [currentItem, setCurrentItem] = useState<InventoryItem | null>(null);
   const [selectedIdentifiers, setSelectedIdentifiers] = useState<string[]>([]);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
-  
+  const [reportText, setReportText] = useState("");
   // dialog + stepper
   const [open, setOpen] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
@@ -547,6 +549,134 @@ export default function BorrowPage() {
     }, 500);
   };
 
+
+  // Add this function near your other handler functions
+const handleGenerateReport = async () => {
+  if (!question.trim()) {
+    setReportText("Please enter a question first.");
+    return;
+  }
+
+  setLoading(true);
+  setReportText("");
+  setReportTable(null);
+
+  try {
+    console.log("Sending AI report request for borrow records...", { question });
+
+    const res = await axios.post(`${API_BASE_URL}/ai-report`, {
+      question: question,
+      itemType: "Borrow" // Specify this is for borrow records
+    });
+
+    console.log("AI report response received:", res.data);
+    const responseData = res.data;
+
+    if (responseData.success) {
+      // Handle string response
+      if (typeof responseData.data === 'string') {
+        setReportText(responseData.data);
+      } 
+      // Handle table response with summary
+      else if (responseData.data?.table) {
+        setReportTable({
+          columns: responseData.data.table.columns || [],
+          rows: responseData.data.table.rows || []
+        });
+        setReportText(responseData.data.summary || "Data analysis completed.");
+      } 
+      // Handle direct table format
+      else if (responseData.data?.columns && responseData.data?.rows) {
+        setReportTable({
+          columns: responseData.data.columns,
+          rows: responseData.data.rows
+        });
+      }
+      // Handle other object types
+      else {
+        setReportText(JSON.stringify(responseData.data, null, 2));
+      }
+    } else {
+      setReportText(`Error: ${responseData.error}`);
+    }
+
+  } catch (err: any) {
+    console.error("AI Report error details:", err);
+    
+    if (err.response) {
+      // Server responded with error status
+      console.error("Server error response:", err.response.data);
+      setReportText(`Server Error: ${err.response.data.error || err.response.statusText}`);
+    } else if (err.request) {
+      // Request was made but no response received
+      console.error("No response received:", err.request);
+      setReportText("Network Error: Could not connect to the server. Make sure your backend is running.");
+    } else {
+      // Something else happened
+      setReportText(`Error: ${err.message}`);
+    }
+  } finally {
+    setLoading(false);
+  }
+};
+
+
+const handleGeneratePDF2 = () => {
+  if (!reportTable) return;
+  
+  const printContent = `
+    <html>
+      <head>
+        <title>AI Borrow Report</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 20px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background-color: #f2f2f2; }
+          h1 { color: #b91c1c; }
+          .report-info { margin-bottom: 20px; color: #666; }
+          .ai-summary { background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        </style>
+      </head>
+      <body>
+        <h1>AI Borrow Report</h1>
+        <div class="report-info">
+          <p>Generated on: ${new Date().toLocaleString()}</p>
+          <p>Question: "${question}"</p>
+        </div>
+        ${reportText ? `
+        <div class="ai-summary">
+          <h3>AI Analysis Summary</h3>
+          <p>${reportText}</p>
+        </div>
+        ` : ''}
+        ${reportTable.columns.length > 0 ? `
+        <table>
+          <thead>
+            <tr>
+              ${reportTable.columns.map(col => `<th>${col}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${reportTable.rows.map(row => `
+              <tr>
+                ${row.map(cell => `<td>${cell}</td>`).join('')}
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        ` : ''}
+      </body>
+    </html>
+  `;
+
+  const printWindow = window.open('', '_blank');
+  if (printWindow) {
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+    printWindow.print();
+  }
+};
   // Generate PDF function
   const handleGeneratePDF = () => {
     if (!reportTable) return;
@@ -1229,7 +1359,6 @@ export default function BorrowPage() {
       const inv = items.find(i => i.num === sItem.num && i.item_type === sItem.item_type);
       if (inv && inv.identifiers && inv.identifiers.length > 0) {
         if (!sItem.selected_identifiers || sItem.selected_identifiers.length < sItem.qty) {
-          // open identifier dialog for this item and block submission
           setError(`Please select ${sItem.qty} identifier(s) for "${sItem.name}" before confirming.`);
           handleOpenIdentifierDialog(inv, sItem.selected_identifiers?.slice(0, sItem.qty) || []);
           return;
@@ -1239,6 +1368,10 @@ export default function BorrowPage() {
 
     setSaving(true);
     try {
+      const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+      const managed_by = currentUser.email || currentUser.name || "Unknown";
+      const managed_name = currentUser.name || currentUser.firstname || currentUser.email || "Unknown";
+
       const borrowData = {
         ...requestForm,
         borrow_type: borrowType,
@@ -1251,7 +1384,9 @@ export default function BorrowPage() {
           status: 'Borrowed',
           identifiers: item.selected_identifiers ? item.selected_identifiers.map(id => ({ identifier: id, status: 'Borrowed' })) : []
         })),
-        group_members: groupMembers // added so server receives members list
+        group_members: groupMembers,
+        managed_by,
+        managed_name
       };
 
       if (requestForm.borrow_id) {
@@ -1485,7 +1620,7 @@ export default function BorrowPage() {
               boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
             }}
           >
-            + New Borrow 
+            + Add Borrow 
           </Button>
 
           {(userRole === "Custodian" || userRole === "Admin")  && (
@@ -2046,7 +2181,7 @@ export default function BorrowPage() {
           {activeStep === 2 && (
             <Box>
               {borrowType === 'Reservation' && currentReservation && (
-                <Paper sx={{ p: 2, mb: 3, bgcolor: "success.light" }}>
+                <Paper sx={{ p: 2, mb:  3, bgcolor: "success.light" }}>
                   <Stack direction="row" alignItems="center" spacing={1}>
                     <CheckCircleIcon color="success" />
                     <Typography variant="h6" color="success.dark">
@@ -2299,7 +2434,7 @@ export default function BorrowPage() {
               </Paper>
               
               <Paper sx={{ p: 2, bgcolor: "grey.50" }}>
-                <Typography variant="subtitle2" gutterBottom>
+                <Typography variant="subtitle2" fontWeight="bold">
                   Items {requestForm.borrow_id ? "Details" : "to Borrow"}
                 </Typography>
                 <Table size="small">
@@ -2359,9 +2494,7 @@ export default function BorrowPage() {
                         <TableCell>
                           <Typography variant="body2" fontSize="0.75rem">
                             {item.notes || '-'}
-
                             {item.damage_report && ` Damage: ${item.damage_report}`}
-
                             {item.lacking_items && ` Lacking: ${item.lacking_items}`}
                           </Typography>
                         </TableCell>
@@ -2506,45 +2639,110 @@ export default function BorrowPage() {
       </Dialog>
 
       {/* AI Dialog */}
-      <Dialog 
-        open={aiDialogOpen} 
-        onClose={() => setAiDialogOpen(false)}
-        maxWidth="md"
+{/* AI Dialog */}
+<Dialog 
+  open={aiDialogOpen} 
+  onClose={() => setAiDialogOpen(false)}
+  maxWidth="md"
+  fullWidth
+>
+  <DialogTitle>
+    <Stack direction="row" spacing={1} alignItems="center">
+      <AutoAwesomeIcon color="primary" />
+      <Typography variant="h6">AI Borrow Report</Typography>
+    </Stack>
+  </DialogTitle>
+  <DialogContent dividers>
+    <Typography variant="body2" color="text.secondary" gutterBottom>
+      Ask questions about borrow records, analyze patterns, or generate custom reports.
+    </Typography>
+    
+    <Stack spacing={2} sx={{ mt: 2 }}>
+      <TextField
+        multiline
+        rows={3}
+        placeholder="e.g., Show me all borrow requests for ECE students this month
+Which courses borrow the most equipment?
+List overdue borrow requests
+Show borrow trends by day of week
+What's the average return time for different courses?"
+        value={question}
+        onChange={(e) => setQuestion(e.target.value)}
         fullWidth
+        variant="outlined"
+      />
+      
+      <Button
+        variant="contained"
+        onClick={handleGenerateReport}
+        disabled={loading || !question.trim()}
+        startIcon={loading ? <CircularProgress size={20} /> : <AutoAwesomeIcon />}
       >
-        <DialogTitle>
-          <Stack direction="row" spacing={1} alignItems="center">
-            <AutoAwesomeIcon color="primary" />
-            <Typography variant="h6">AI Report</Typography>
-          </Stack>
-        </DialogTitle>
-        <DialogContent dividers>
-          <Typography variant="body2" color="text.secondary" gutterBottom>
-            Ask questions about borrow records, inventory status, or generate reports.
-          </Typography>
-          
-          <Stack spacing={2} sx={{ mt: 2 }}>
-            <TextField
-              multiline
-              rows={3}
-              placeholder="e.g., Show me all borrow requests for ECE students this month"
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              fullWidth
-              variant="outlined"
-            />
-            
-            <Button
-              variant="contained"
-              onClick={() => {setLoading(true);}}
-              disabled={loading || !question.trim()}
-              startIcon={loading ? <CircularProgress size={20} /> : <AutoAwesomeIcon />}
-            >
-              {loading ? "Generating..." : "Generate Report"}
-            </Button>
-          </Stack>
-        </DialogContent>
-      </Dialog>
+        {loading ? "Generating..." : "Generate Report"}
+      </Button>
+    </Stack>
+    
+    {reportText && (
+      <Paper sx={{ p: 2, mt: 3, bgcolor: "grey.50" }}>
+        <Typography variant="body2" whiteSpace="pre-wrap">
+          {reportText}
+        </Typography>
+      </Paper>
+    )}
+    
+    {reportTable && (
+      <Box sx={{ mt: 3 }}>
+        <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+          <Button
+            variant="outlined"
+            startIcon={<PictureAsPdfIcon />}
+            onClick={handleGeneratePDF2}
+          >
+            Generate PDF
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={() => {
+              setReportTable(null);
+              setReportText("");
+            }}
+          >
+            Clear Results
+          </Button>
+        </Stack>
+        
+        <Typography variant="subtitle2" gutterBottom>
+          Report Results:
+        </Typography>
+        <TableContainer component={Paper} sx={{ maxHeight: 400 }}>
+          <Table size="small" stickyHeader>
+            <TableHead>
+              <TableRow>
+                {reportTable.columns.map((col, index) => (
+                  <TableCell key={index} sx={{ fontWeight: "bold" }}>
+                    {col}
+                  </TableCell>
+                ))}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {reportTable.rows.map((row, rowIndex) => (
+                <TableRow key={rowIndex}>
+                  {row.map((cell, cellIndex) => (
+                    <TableCell key={cellIndex}>{cell}</TableCell>
+                  ))}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
+    )}
+  </DialogContent>
+  <DialogActions>
+    <Button onClick={() => setAiDialogOpen(false)}>Close</Button>
+  </DialogActions>
+</Dialog>
         <Dialog 
         open={reportDialogOpen} 
         onClose={() => setReportDialogOpen(false)}
@@ -2693,27 +2891,163 @@ export default function BorrowPage() {
             {viewBorrowRecord ? (
               <Stack spacing={2}>
                 <Paper sx={{ p: 2 }}>
-                  <Typography variant="subtitle2">Borrower</Typography>
-                  <Typography variant="body2">{viewBorrowRecord.borrow_user}</Typography>
-                  <Typography variant="caption" color="text.secondary">Course: {viewBorrowRecord.course}</Typography>
+                  <Typography variant="subtitle2" fontWeight="bold">Borrow Details</Typography>
+                  <Stack spacing={1}>
+                    <Box sx={{ display: "flex" }}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Borrow ID:</Typography>
+                      <Typography variant="body2">{viewBorrowRecord.borrow_id || viewBorrowRecord._id}</Typography>
+                    </Box>
+                    <Box sx={{ display: "flex" }}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Type:</Typography>
+                      <Typography variant="body2">{viewBorrowRecord.borrow_type} - {viewBorrowRecord.user_type}</Typography>
+                    </Box>
+                    <Box sx={{ display: "flex" }}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Borrower:</Typography>
+                      <Typography variant="body2">{viewBorrowRecord.borrow_user}</Typography>
+                    </Box>
+                    <Box sx={{ display: "flex" }}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Course:</Typography>
+                      <Typography variant="body2">{viewBorrowRecord.course}</Typography>
+                    </Box>
+                    <Box sx={{ display: "flex" }}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Group:</Typography>
+                      <Typography variant="body2">{viewBorrowRecord.group_number || '-'}</Typography>
+                    </Box>
+                    <Box sx={{ display: "flex" }}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Group Leader:</Typography>
+                      <Typography variant="body2">{viewBorrowRecord.group_leader || '-'}</Typography>
+                    </Box>
+                    <Box sx={{ display: "flex" }}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Leader ID:</Typography>
+                      <Typography variant="body2">{viewBorrowRecord.group_leader_id || '-'}</Typography>
+                    </Box>
+                    <Box sx={{ display: "flex" }}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Instructor:</Typography>
+                      <Typography variant="body2">{viewBorrowRecord.instructor}</Typography>
+                    </Box>
+                    <Box sx={{ display: "flex" }}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Subject:</Typography>
+                      <Typography variant="body2">{viewBorrowRecord.subject}</Typography>
+                    </Box>
+                    <Box sx={{ display: "flex" }}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Schedule:</Typography>
+                      <Typography variant="body2">{viewBorrowRecord.schedule}</Typography>
+                    </Box>
+                    <Box sx={{ display: "flex" }}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Status:</Typography>
+                      <Chip 
+                        label={viewBorrowRecord.status} 
+                        size="small" 
+                        color={
+                          viewBorrowRecord.status === "Returned" ? "success" : 
+                          viewBorrowRecord.status === "Partially Returned" ? "warning" : "error"
+                        } 
+                      />
+                    </Box>
+                    <Box sx={{ display: "flex" }}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Date Borrowed:</Typography>
+                      <Typography variant="body2">
+                        {viewBorrowRecord.date_borrowed ? new Date(viewBorrowRecord.date_borrowed).toLocaleString() : "-"}
+                      </Typography>
+                    </Box>
+                    {viewBorrowRecord.date_returned && (
+                      <Box sx={{ display: "flex" }}>
+                        <Typography variant="body2" sx={{ minWidth: 120 }}>Date Returned:</Typography>
+                        <Typography variant="body2">
+                          {new Date(viewBorrowRecord.date_returned).toLocaleString()}
+                        </Typography>
+                      </Box>
+                    )}
+                    <Box sx={{ display: "flex" }}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Reservation Code:</Typography>
+                      <Typography variant="body2">{viewBorrowRecord.reservation_code || '-'}</Typography>
+                    </Box>
+                    {/* Group Members */}
+                    {viewBorrowRecord.group_members && viewBorrowRecord.group_members.length > 0 && (
+                      <Box sx={{ mt: 1 }}>
+                        <Typography variant="body2" sx={{ fontWeight: "bold" }}>Group Members:</Typography>
+                        <Stack spacing={0.5}>
+                          {viewBorrowRecord.group_members.map((gm, idx) => (
+                            <Typography key={idx} variant="body2">
+                              {gm.name} ({gm.id})
+                            </Typography>
+                          ))}
+                        </Stack>
+                      </Box>
+                    )}
+                  </Stack>
+                    <Box sx={{ display: "flex", mt:3}}>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}><b>Managed by:</b></Typography>
+                      <Typography variant="body2">{viewBorrowRecord.managed_name || viewBorrowRecord.managed_by || "Unknown"}</Typography>
+                    </Box>
                 </Paper>
 
                 <Paper sx={{ p: 2 }}>
-                  <Typography variant="subtitle2">Items</Typography>
-                  {viewBorrowRecord.items.map(item => (
-                    <Box key={item._id || `${item.item_id}-${item.item_name}`} sx={{ mb: 1 }}>
-                      <Typography variant="body2" fontWeight="medium">{item.item_name}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Qty: {item.quantity} • Type: {item.item_type}
-                      </Typography>
-                      {item.identifiers && item.identifiers.length > 0 && (
-                        <Typography variant="caption" display="block" color="text.secondary">
-                          IDs: {item.identifiers.map((id:any) => id.identifier).join(', ')}
-                        </Typography>
-                      )}
-                    </Box>
-                  ))}
-                </Paper>
+                  <Typography variant="subtitle2" fontWeight="bold">Items</Typography>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Item</TableCell>
+                        <TableCell align="right">Quantity</TableCell>
+                        <TableCell>Type</TableCell>
+                        <TableCell>Status</TableCell>
+                        <TableCell>Condition</TableCell>
+                        <TableCell>Notes</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {viewBorrowRecord.items.map(item => (
+                        <TableRow key={item._id || `${item.item_id}-${item.item_name}`}>
+                          <TableCell>
+                            <Typography variant="body2" fontWeight="medium">{item.item_name}</Typography>
+                            {item.identifiers && item.identifiers.length > 0 && (
+                              <Typography variant="caption" color="text.secondary">
+                                IDs: {item.identifiers.map((id:any) => id.identifier).join(', ')}
+                              </Typography>
+                            )}
+                          </TableCell>
+                          <TableCell align="right">{item.quantity}</TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={item.item_type === "consumable" ? "Consumable" : "Non-Consumable"} 
+                              size="small" 
+                              color={item.item_type === "consumable" ? "secondary" : "primary"}
+                              variant="outlined"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={item.status || 'Borrowed'} 
+                              size="small" 
+                              color={
+                                item.status === "Returned" ? "success" : 
+                                item.status === "Partially Returned" ? "warning" : "default"
+                              }
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={item.return_condition} 
+                              size="small" 
+                              color={
+                                item.return_condition === "Good" ? "success" : 
+                                item.return_condition === "Damaged" ? "warning" : 
+                                item.return_condition === "Broken" ? "error" : "default"
+                              }
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body2" fontSize="0.75rem">
+                              {item.notes || '-'}
+                              {item.damage_report && ` Damage: ${item.damage_report}`}
+                              {item.lacking_items && ` Lacking: ${item.lacking_items}`}
+                            </Typography>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Paper> 
               </Stack>
             ) : (
               <Typography>No data</Typography>

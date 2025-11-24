@@ -22,6 +22,7 @@ import NotificationsIcon from "@mui/icons-material/Notifications";
 import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
 import ReservationPage from "./pages/ReservationPage";
 import StudentPrepPage from "./pages/StudentPrepPage";
+import SubjectCoursePage from "./pages/SubjectCoursePage";
 import { Dialog, IconButton, ToggleButton, ToggleButtonGroup } from "@mui/material";
 
 interface CalendarEvent {
@@ -848,6 +849,16 @@ function App() {
             <Protected allowedRoles={["Student Assistant", "Custodian", "Admin"]}>
               <AppLayout>
                 <MaintenancePage />
+              </AppLayout>
+            </Protected>
+          }
+        />
+        <Route
+          path="/subjects-courses"
+          element={
+            <Protected allowedRoles={["Custodian", "Admin"]}>
+              <AppLayout>
+                <SubjectCoursePage />
               </AppLayout>
             </Protected>
           }

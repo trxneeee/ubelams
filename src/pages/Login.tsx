@@ -7,7 +7,6 @@ import axios from "axios";
 
 const API_BASE_URL = "https://elams-server.onrender.com/api";
 
-// 👇 Define the Google Credential Response type
 interface GoogleCredentialResponse {
   credential: string;
   select_by: string;
@@ -34,10 +33,12 @@ interface UserData {
 
 export default function Login() {
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false); // ⬅ NEW
   const navigate = useNavigate();
-  // helper for routing decisions
+
   const routeAfterLogin = (email: string, role: string) => {
     const lowerEmail = (email || "").toLowerCase();
+
     if (role === "Instructor" || role === "Program Chair") {
       navigate("/facultyreserve");
       return;
@@ -47,7 +48,7 @@ export default function Login() {
       return;
     }
     if (role === "Admin" || role === "Student Assistant" || role === "Custodian") {
-      navigate("/dashboard");;
+      navigate("/dashboard");
       return;
     }
   };
@@ -55,7 +56,6 @@ export default function Login() {
   useEffect(() => {
     const storedUser = localStorage.getItem("user");
     if (storedUser) {
-      // route based on stored role/email
       try {
         const u = JSON.parse(storedUser || "{}");
         const role = u.role || "";
@@ -67,7 +67,7 @@ export default function Login() {
       return;
     }
 
-    // 👇 Initialize Google Identity Services
+    // Google Login initialize
     /* global google */
     window.google.accounts.id.initialize({
       client_id:
@@ -75,275 +75,195 @@ export default function Login() {
       callback: handleCredentialResponse,
     });
 
-    // 👇 Render the Google Sign-In button
+    // Google button centered
     window.google.accounts.id.renderButton(
       document.getElementById("google-login-button")!,
       {
         theme: "filled_blue",
         size: "large",
-        width: "100%",
+        width: "250px",
       }
     );
 
-    // Optional: one-tap popup
     window.google.accounts.id.prompt();
   }, [navigate]);
 
   const handleCredentialResponse = async (response: GoogleCredentialResponse) => {
+    setLoading(true); // ⬅ START LOADING
+    setError("");
+
     try {
       const userData = parseJwt(response.credential) as GoogleUserData;
       const email = (userData.email || "").toLowerCase();
 
       if (!isAllowedEmail(email)) {
-        setError("❌ Please use your UB school email (@s.ubaguio.edu, @e.ubaguio.edu) or the system admin email to log in.");
+        setError(
+          "❌ Please use your UB school email (@s.ubaguio.edu, @e.ubaguio.edu)"
+        );
+        setLoading(false); // stop loading
         return;
       }
 
-      // Try to find existing user in DB
       try {
-        const findResp = await axios.post(`${API_BASE_URL}/users`, { action: "read", email: userData.email });
-        const found = findResp.data?.data && findResp.data.data.length > 0 ? findResp.data.data[0] : null;
+        const findResp = await axios.post(`${API_BASE_URL}/users`, {
+          action: "read",
+          email: userData.email,
+        });
+        const found =
+          findResp.data?.data && findResp.data.data.length > 0
+            ? findResp.data.data[0]
+            : null;
 
         if (found) {
-          // existing account -> update names then route based on role
           await updateUserWithGoogleData(userData, found).catch(() => {});
           const role = found.role || determineRoleFromEmail(email);
           const completeUserData: UserData = { ...userData, role };
           localStorage.setItem("user", JSON.stringify(completeUserData));
+
           routeAfterLogin(email, role);
           return;
         }
-      } catch (dbErr) {
-        // continue to fallback behavior if DB read fails
-        console.warn("User lookup failed, continuing to fallback:", (dbErr && (dbErr as any).message) || dbErr);
-      }
+      } catch {}
 
-      // Not found in DB:
-      // - If student domain: treat as Student and send to student fill-up (no DB required)
+      // Not found in DB
       if (email.endsWith("@s.ubaguio.edu")) {
+        // Create new user in DB with role Student
+        try {
+          await axios.post(`${API_BASE_URL}/users`, {
+            action: "create",
+            email: userData.email,
+            firstname: userData.given_name || userData.name?.split(" ")[0] || "",
+            lastname: userData.family_name || userData.name?.split(" ").slice(1).join(" ") || "",
+            role: "Student"
+          });
+        } catch (err) {
+          // Ignore error if already exists
+        }
         const completeUserData: UserData = { ...userData, role: "Student" };
         localStorage.setItem("user", JSON.stringify(completeUserData));
         navigate("/studentprep");
         return;
       }
 
-      // For others (e.g., faculty), attempt to create a DB user and route based on returned role
-      try {
-        const role = await createNewUser(userData); // returns role string
-        const completeUserData: UserData = { ...userData, role };
-        localStorage.setItem("user", JSON.stringify(completeUserData));
-        routeAfterLogin(email, role);
-        return;
-      } catch (createErr) {
-        console.error("Failed to create user:", createErr);
-        setError("Failed to complete login. Please contact administrator.");
-      }
+      const role = await createNewUser(userData);
+      const completeUserData: UserData = { ...userData, role };
+      localStorage.setItem("user", JSON.stringify(completeUserData));
+      routeAfterLogin(email, role);
     } catch (err) {
-      console.error("Login error:", err);
+      console.error(err);
       setError("Something went wrong during login");
+    } finally {
+      setLoading(false); // ⬅ STOP LOADING
     }
   };
 
-  // Function to check if email is allowed
   const isAllowedEmail = (email: string): boolean => {
-    const allowedDomains = ['@s.ubaguio.edu', '@e.ubaguio.edu'];
-    const allowedEmails = ['ubaguioelams@gmail.com'];
-    
-    return allowedDomains.some(domain => email.endsWith(domain)) || 
-           allowedEmails.includes(email);
+    const allowedDomains = ["@s.ubaguio.edu", "@e.ubaguio.edu"];
+    const allowedEmails = ["ubaguioelams@gmail.com"];
+
+    return (
+      allowedDomains.some((domain) => email.endsWith(domain)) ||
+      allowedEmails.includes(email)
+    );
   };
 
-  // Function to determine role based on email
   const determineRoleFromEmail = (email: string): string => {
-    if (email.endsWith('@s.ubaguio.edu')) {
-      return "Student";
-    } else if (email.endsWith('@e.ubaguio.edu')) {
-      return "Faculty";
-    } else if (email === 'ubaguioelams@gmail.com') {
-      return "Admin";
-    }
+    if (email.endsWith("@s.ubaguio.edu")) return "Student";
+    if (email.endsWith("@e.ubaguio.edu")) return "Faculty";
+    if (email === "ubaguioelams@gmail.com") return "Admin";
     return "Student";
   };
 
-  // Function to get user role from MongoDB and create user if doesn't exist
-
-  // ✅ NEW FUNCTION: Update existing user with Google data
-  const updateUserWithGoogleData = async (userData: GoogleUserData, existingUser: any): Promise<void> => {
+  const updateUserWithGoogleData = async (userData: GoogleUserData, existingUser: any) => {
     try {
-      // Extract names from Google data
       const { firstName, lastName } = extractNames(userData);
-      
-      console.log("🔄 Updating existing user with Google data:", {
-        email: userData.email,
-        currentFirstname: existingUser.firstname,
-        currentLastname: existingUser.lastname,
-        newFirstname: firstName,
-        newLastname: lastName
-      });
 
-      // Only update if names are different or empty
-      if (existingUser.firstname !== firstName || existingUser.lastname !== lastName || 
-          !existingUser.firstname || !existingUser.lastname) {
-        
-        const updateResponse = await axios.post(`${API_BASE_URL}/users`, {
+      if (
+        existingUser.firstname !== firstName ||
+        existingUser.lastname !== lastName
+      ) {
+        await axios.post(`${API_BASE_URL}/users`, {
           action: "update",
           email: userData.email,
           firstname: firstName,
           lastname: lastName,
-          role: existingUser.role // Keep existing role
+          role: existingUser.role,
         });
-
-        console.log("✅ Update response:", updateResponse.data);
-
-        if (!updateResponse.data.success) {
-          console.warn("⚠️ Failed to update user data:", updateResponse.data.message);
-        }
-      } else {
-        console.log("✅ User data is already up to date");
       }
     } catch (error) {
-      console.error("❌ Error updating user with Google data:", error);
-      // Don't throw error here - we can still let the user login even if update fails
+      console.error(error);
     }
   };
 
-  // safe extractor for messages from axios responses / errors
   const extractMessage = (obj: any) => {
-    if (!obj) return '';
-    // axios response shape: { data: { message: string } } or error.response?.data?.message
-    if (obj?.data && typeof obj.data === 'object' && ('message' in obj.data)) return String((obj.data as any).message || '');
-    if ('message' in obj) return String(obj.message || '');
+    if (!obj) return "";
+    if (obj?.data?.message) return obj.data.message;
+    if (obj.message) return obj.message;
     return String(obj);
   };
 
-  // Function to create new user
   const createNewUser = async (userData: GoogleUserData): Promise<string> => {
     try {
       const role = determineRoleFromEmail(userData.email);
-      
-      // ✅ Use the new extractNames function
       const { firstName, lastName } = extractNames(userData);
-      
-      console.log("✅ Creating new user with data:", {
-        email: userData.email,
-        firstname: firstName,
-        lastname: lastName,
-        role: role
-      });
 
       const createResponse = await axios.post(`${API_BASE_URL}/users`, {
         action: "create",
         email: userData.email,
         firstname: firstName,
         lastname: lastName,
-        role: role
+        role: role,
       });
 
-      console.log("✅ Create response:", createResponse.data);
-
-      if ((createResponse.data as any).success) {
-        return role;
-      } else {
-        throw new Error("Failed to create user: " + extractMessage(createResponse));
-      }
-    } catch (error: any) {
-      console.error("Error creating user:", error);
-      
-      // If it's a duplicate error, try to read the existing user
-      const errMsg = extractMessage(error);
-      if (errMsg.includes("already exists") || error.response?.status === 400) {
-        console.log("User already exists, fetching existing user...");
-        const findResponse = await axios.post(`${API_BASE_URL}/users`, {
+      if (createResponse.data.success) return role;
+      throw new Error("Failed to create user");
+    } catch (err: any) {
+      const errMsg = extractMessage(err);
+      if (errMsg.includes("already exists")) {
+        const find = await axios.post(`${API_BASE_URL}/users`, {
           action: "read",
-          email: userData.email
+          email: userData.email,
         });
-        
-        if (findResponse.data.success && findResponse.data.data && findResponse.data.data.length > 0) {
-          return findResponse.data.data[0].role;
-        }
+        return find.data.data[0].role;
       }
-      
-      throw error;
+      throw err;
     }
   };
 
-  // ✅ NEW: Better name extraction function
-  const extractNames = (userData: GoogleUserData): { firstName: string; lastName: string } => {
-    // Special case for admin email
-    if (userData.email === 'ubaguioelams@gmail.com') {
-      return { firstName: 'System', lastName: 'Admin' };
-    }
+  const extractNames = (userData: GoogleUserData) => {
+    if (userData.email === "ubaguioelams@gmail.com")
+      return { firstName: "System", lastName: "Admin" };
 
-    // Method 1: Use Google's provided names (check both given_name/family_name and name)
-    if (userData.given_name && userData.family_name) {
-      console.log("✅ Using given_name/family_name from Google");
-      return { 
-        firstName: userData.given_name.trim(), 
-        lastName: userData.family_name.trim()
+    if (userData.given_name && userData.family_name)
+      return {
+        firstName: userData.given_name,
+        lastName: userData.family_name,
       };
-    }
 
-    // Method 2: Use the full name field and split it intelligently
     if (userData.name) {
-      console.log("✅ Using full name field from Google:", userData.name);
-      const nameParts = userData.name.trim().split(/\s+/);
-      
-      if (nameParts.length === 1) {
-        // Only one name provided
-        return {
-          firstName: nameParts[0],
-          lastName: 'User'
-        };
-      } else if (nameParts.length === 2) {
-        // First and last name
-        return {
-          firstName: nameParts[0],
-          lastName: nameParts[1]
-        };
-      } else {
-        // Multiple names - assume first is first name, rest is last name
-        return {
-          firstName: nameParts[0],
-          lastName: nameParts.slice(1).join(' ')
-        };
-      }
+      const p = userData.name.trim().split(" ");
+      return p.length === 1
+        ? { firstName: p[0], lastName: "User" }
+        : { firstName: p[0], lastName: p.slice(1).join(" ") };
     }
 
-    // Method 3: Extract from email as final fallback
-    console.log("⚠️ Using email fallback for names");
     return extractNamesFromEmail(userData.email);
   };
 
-  // ✅ UPDATED: Extract names from email
-  const extractNamesFromEmail = (email: string): { firstName: string; lastName: string } => {
-    const emailPrefix = email.split('@')[0];
-    
-    if (emailPrefix.includes('.')) {
-      const parts = emailPrefix.split('.');
+  const extractNamesFromEmail = (email: string) => {
+    const pre = email.split("@")[0];
+    if (pre.includes(".")) {
+      const [f, l] = pre.split(".");
       return {
-        firstName: capitalizeFirstLetter(parts[0] || 'User'),
-        lastName: capitalizeFirstLetter(parts[1] || 'User')
-      };
-    } else if (emailPrefix.includes('_')) {
-      const parts = emailPrefix.split('_');
-      return {
-        firstName: capitalizeFirstLetter(parts[0] || 'User'),
-        lastName: capitalizeFirstLetter(parts[1] || 'User')
-      };
-    } else {
-      return {
-        firstName: capitalizeFirstLetter(emailPrefix),
-        lastName: 'User'
+        firstName: capitalizeFirstLetter(f),
+        lastName: capitalizeFirstLetter(l),
       };
     }
+    return { firstName: capitalizeFirstLetter(pre), lastName: "User" };
   };
 
-
-  // Helper function to capitalize first letter
-  const capitalizeFirstLetter = (str: string): string => {
-    if (!str) return 'User';
-    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
-  };
+  const capitalizeFirstLetter = (str: string) =>
+    str ? str.charAt(0).toUpperCase() + str.slice(1).toLowerCase() : "User";
 
   function parseJwt(token: string): object {
     const base64Url = token.split(".")[1];
@@ -359,6 +279,15 @@ export default function Login() {
 
   return (
     <div className="login-container">
+
+      {/* ⬅ LOADING OVERLAY */}
+      {loading && (
+        <div className="loading-overlay">
+          <div className="loader"></div>
+          <p>Logging you in…</p>
+        </div>
+      )}
+
       <div className="login-card">
         <div className="logo-wrapper">
           <img src={logo2} alt="University of Baguio" className="logo" />
@@ -370,8 +299,11 @@ export default function Login() {
 
         {error && <p className="alert error">{error}</p>}
 
-        {/* Google Login Button Container */}
-        <div id="google-login-button" style={{ marginTop: "20px" }}></div>
+        {/* GOOGLE BUTTON (centered) */}
+        <div
+          id="google-login-button"
+          style={{ marginTop: "20px", display: "flex", justifyContent: "center" }}
+        ></div>
 
         <div className="footer">
           <p>

@@ -40,7 +40,9 @@ import {
   AiFillTool,
   AiOutlineSetting,
   AiOutlineSecurityScan,
+  AiOutlineDatabase
 } from "react-icons/ai";
+import { AiFillDatabase } from "react-icons/ai";
 import { AiOutlineBook, AiFillBook } from "react-icons/ai";
 import { MdPerson, MdMenu, MdEditDocument, MdLogout } from "react-icons/md";
 import { useTheme } from "@mui/material/styles";
@@ -81,6 +83,8 @@ const Header = () => {
     tabIcons = [
       { to: "/dashboard", label: "Home", icon: <AiOutlineHome size={24} />, active: <AiFillHome size={24} /> },
       ...(userRoles === "Custodian" || userRoles === "Admin" ? [{ to: "/staff", label: "Staff", icon: <AiOutlineUser size={24} />, active: <MdPerson size={24} /> }] : []),
+      // Subjects & Courses management (Custodian/Admin only)
+      ...(userRoles === "Custodian" || userRoles === "Admin" ? [{ to: "/subjects-courses", label: "Subjects & Courses", icon: <AiOutlineDatabase size={24} />, active: <AiFillDatabase size={24} /> }] : []),
       { to: "/reservation", label: "Reservation", icon: <AiOutlineBook size={24} />, active: <AiFillBook size={24} /> },
       { to: "/borrow", label: "Borrow", icon: <AiOutlineFileSearch size={24} />, active: <MdEditDocument size={24} /> },
       { to: "/inventory", label: "Inventory", icon: <AiOutlineAppstore size={24} />, active: <AiFillAppstore size={24} /> },

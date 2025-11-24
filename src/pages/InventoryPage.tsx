@@ -51,8 +51,6 @@ import Loader from "../components/Loader";
 import { useSearchParams } from "react-router-dom";
 import SearchIcon from "@mui/icons-material/Search";
 import AddIcon from '@mui/icons-material/Add';
-const API_URL =
-  "https://script.google.com/macros/s/AKfycbwJaoaV_QAnwlFxtryyN-v7KWUPjCop3zaSwCCjcejp34nP32X-HXCIaXoX-PlGqPd4/exec";
 const API_BASE_URL = "https://elams-server.onrender.com/api";
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const userRole = user?.role || "Custodian";
@@ -77,6 +75,19 @@ interface InventoryItem {
   preventive_or_calibration: string;
   inhouse_outsourced:string;
   month: string;
+
+  // <-- new utilization fields
+  total_usage_minutes?: number;
+  usage_logs?: {
+    // added identifier and borrow_id to match server payload
+    borrow_id?: string | any;
+    identifier?: string;
+    minutes?: number;
+    borrowed_at?: string | Date | null;
+    returned_at?: string | Date | null;
+    borrow_record_ref?: string;
+    managed_by?: string;
+  }[];
 }
 
 interface CInventoryItem {
@@ -127,11 +138,20 @@ const [availableFields, setAvailableFields] = useState<ReportField[]>([]);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const queryType = searchParams.get("stock"); 
-  // Add these state variables near your other useState declarations
+  // Add these states near other useState declarations (around aiDialogOpen / question / reportText)
 const [aiDialogOpen, setAiDialogOpen] = useState(false);
 const [question, setQuestion] = useState("");
 const [reportText, setReportText] = useState("");
 const [reportTable, setReportTable] = useState<{ columns: string[]; rows: string[][] } | null>(null);
+const [utilDialogOpen, setUtilDialogOpen] = useState(false); // <-- new
+const [borrowInfo, setBorrowInfo] = useState<Record<string, { borrowerName: string; course: string }>>({});
+
+// Add small date formatter helper near other helpers
+const formatDate = (d?: string | Date | null) => {
+  if (!d) return '-';
+  try { return new Date(d).toLocaleString(); } catch (e) { return String(d); }
+};
+
   const handleChangePage = (_: unknown, newPage: number) => {
     setPage(newPage);
   };
@@ -370,82 +390,78 @@ const getOperatorsForField = (fieldType: string) => {
 // Add this function near your other handler functions
 // Update the handleGenerateReport function to handle responses with additional text:
 const handleGenerateReport = async () => {
+  if (!question.trim()) {
+    setReportText("Please enter a question first.");
+    return;
+  }
+
   setLoading(true);
   setReportText("");
   setReportTable(null);
 
   try {
-    // Add "in json" to the question if it's not already there
-    const formattedQuestion = question.toLowerCase().includes("json") 
-      ? question 
-      : `${question} in json`;
-
-    const res = await axios.get(API_URL, {
-      params: {
-        sheet: "report",
-        targetSheet: "non_consumable_inventory",
-        q: formattedQuestion,
-      },
+    console.log("Sending AI report request:", {
+      question,
+      itemType,
+      API_BASE_URL
     });
 
-    const json = res.data;
+    const res = await axios.post(`${API_BASE_URL}/ai-report`, {
+      question: question,
+      itemType: itemType
+    }, {
+      timeout: 30000 // 30 second timeout
+    });
 
-    if (json.success && json.data) {
-      try {
-        // Remove markdown code block syntax if present and extract only the JSON part
-        let cleanedData = json.data;
-        
-        // Extract JSON from markdown code blocks
-        if (cleanedData.includes('```json')) {
-          const jsonMatch = cleanedData.match(/```json\n([\s\S]*?)\n```/);
-          if (jsonMatch && jsonMatch[1]) {
-            cleanedData = jsonMatch[1].trim();
-          } else {
-            // Fallback: remove all markdown code block markers
-            cleanedData = cleanedData.replace(/```json\n?/g, '').replace(/```\n?/g, '');
-          }
-        }
-        
-        // Remove any non-JSON text that might come after the JSON (like "Limitations:" notes)
-        const jsonStart = cleanedData.indexOf('[');
-        const jsonEnd = cleanedData.lastIndexOf(']') + 1;
-        
-        if (jsonStart !== -1 && jsonEnd !== -1) {
-          cleanedData = cleanedData.substring(jsonStart, jsonEnd);
-        }
-        
-        const parsed = JSON.parse(cleanedData);
-        
-        // Handle both response formats
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Convert array format to table format with proper string conversion
-          const columns = Object.keys(parsed[0]);
-          const rows = parsed.map((item: any) => 
-            Object.values(item).map((value: any) => 
-              value === null || value === undefined ? '' : String(value)
-            )
-          );
-          setReportTable({ columns, rows });
-        } else if (parsed.columns && parsed.rows) {
-          // Handle existing table format - ensure all values are strings
-          const columns = parsed.columns;
-          const rows = parsed.rows.map((row: any[]) => 
-            row.map((cell: any) => cell === null || cell === undefined ? '' : String(cell))
-          );
-          setReportTable({ columns, rows });
-        } else {
-          setReportText(json.data);
-        }
-      } catch (parseError) {
-        console.error("JSON parse error:", parseError);
-        setReportText(json.data);
+    console.log("AI report response received:", res.data);
+    const responseData = res.data;
+
+    if (responseData.success) {
+      // Handle string response
+      if (typeof responseData.data === 'string') {
+        setReportText(responseData.data);
+      } 
+      // Handle table response with summary
+      else if (responseData.data?.table) {
+        setReportTable({
+          columns: responseData.data.table.columns || [],
+          rows: responseData.data.table.rows || []
+        });
+        setReportText(responseData.data.summary || "Data analysis completed.");
+      } 
+      // Handle direct table format
+      else if (responseData.data?.columns && responseData.data?.rows) {
+        setReportTable({
+          columns: responseData.data.columns,
+          rows: responseData.data.rows
+        });
       }
-    } 
-  } catch (err) {
-    console.error(err);
-  }
+      // Handle other object types
+      else {
+        setReportText(JSON.stringify(responseData.data, null, 2));
+      }
+    } else {
+      setReportText(`Error: ${responseData.error}`);
+    }
 
-  setLoading(false);
+  } catch (err: any) {
+    console.error("AI Report error details:", err);
+    
+    if (err.response) {
+      // Server responded with error status
+      console.error("Server error response:", err.response.data);
+      setReportText(`Server Error: ${err.response.data.error || err.response.statusText}`);
+    } else if (err.request) {
+      // Request was made but no response received
+      console.error("No response received:", err.request);
+      setReportText("Network Error: Could not connect to the server. Make sure your backend is running.");
+    } else {
+      // Something else happened
+      setReportText(`Error: ${err.message}`);
+    }
+  } finally {
+    setLoading(false);
+  }
 };
 const handleGeneratePDF = () => {
   if (!reportTable) return;
@@ -638,6 +654,17 @@ const filteredCInventory = cinventory
           preventive_or_calibration: item.preventive_or_calibration,
           inhouse_outsourced: item.inhouse_outsourced,
           month: item.month,
+          // <-- map utilization fields returned by server
+          total_usage_minutes: item.total_usage_minutes ?? 0,
+          usage_logs: Array.isArray(item.usage_logs) ? item.usage_logs.map((l: any) => ({
+            borrow_id: l.borrow_id ?? l.borrow_id?._id ?? l.borrow_record_ref ?? l.borrow_id ?? '',
+            identifier: l.identifier ?? l.identifier_number ?? l.id ?? l.serial ?? null,
+            minutes: l.minutes ?? 0,
+            borrowed_at: l.borrowed_at ?? l.date_borrowed ?? null,
+            returned_at: l.returned_at ?? l.date_returned ?? null,
+            borrow_record_ref: l.borrow_record_ref ?? (l.borrow_id ? String(l.borrow_id) : '') ?? '',
+            managed_by: l.managed_by ?? l.processed_by ?? ''
+          })) : []
         }));
         setInventory(parsed);
       } else {
@@ -852,6 +879,74 @@ const handleUpdateItem = async () => {
     fetchInventory();
   }, []);
 
+  // populate borrowInfo when utilization dialog opens
+useEffect(() => {
+  if (!utilDialogOpen) {
+    setBorrowInfo({});
+    return;
+  }
+
+  const logs = form.usage_logs || [];
+  const keys = new Set<string>();
+  logs.forEach((l: any) => {
+    if (l.borrow_id) keys.add(String(l.borrow_id));
+    if (l.borrow_record_ref) keys.add(String(l.borrow_record_ref));
+    if (l._id) keys.add(String(l._id));
+  });
+
+  if (keys.size === 0) {
+    setBorrowInfo({});
+    return;
+  }
+
+  let mounted = true;
+  (async () => {
+    try {
+      // fetch all borrow records once
+      const resp = await axios.get(`${API_BASE_URL}/borrow-records`);
+      const borrows: any[] = Array.isArray(resp.data) ? resp.data : (resp.data.data || []);
+
+      const map: Record<string, { borrowerName: string; course: string }> = {};
+
+      for (const b of borrows) {
+        const idStr = b._id ? String(b._id) : null;
+        const bidStr = (typeof b.borrow_id !== 'undefined' && b.borrow_id !== null) ? String(b.borrow_id) : null;
+        const refStr = b.borrow_record_ref ? String(b.borrow_record_ref) : null;
+
+        const borrowerName = b.borrow_user || b.group_leader || b.managed_name || '-';
+        const course = b.course || '-';
+
+        if (idStr && keys.has(idStr)) map[idStr] = { borrowerName, course };
+        if (bidStr && keys.has(bidStr)) map[bidStr] = { borrowerName, course };
+        if (refStr && keys.has(refStr)) map[refStr] = { borrowerName, course };
+      }
+
+      // for any missing keys, try per-id fetch (best-effort)
+      const missing = Array.from(keys).filter(k => !map[k]);
+      if (missing.length > 0) {
+        await Promise.all(missing.map(async (k) => {
+          try {
+            const r = await axios.get(`${API_BASE_URL}/borrow-records/${k}`).catch(() => null);
+            const bRec = r?.data;
+            if (bRec) {
+              map[k] = { borrowerName: bRec.borrow_user || bRec.group_leader || bRec.managed_name || '-', course: bRec.course || '-' };
+            }
+          } catch (e) {
+            // ignore
+          }
+        }));
+      }
+
+      if (mounted) setBorrowInfo(map);
+    } catch (err) {
+      console.error('Failed to load borrow records for utilization view', err);
+      if (mounted) setBorrowInfo({});
+    }
+  })();
+
+  return () => { mounted = false; };
+}, [utilDialogOpen, form.usage_logs]);
+
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Backdrop
@@ -1061,22 +1156,23 @@ const handleUpdateItem = async () => {
         variant="outlined"
         size="small"
         fullWidth
-        sx={{
-          bgcolor: "background.paper",
-          borderRadius: 3,
-          "& .MuiOutlinedInput-root": {
-            borderRadius: 3,
-            "& fieldset": {
+         sx={{
+              flex: 1,
+              bgcolor: "background.paper",
               borderRadius: 3,
-            },
-            "&:hover fieldset": {
-              borderColor: "primary.main",
-            },
-            "&.Mui-focused fieldset": {
-              borderColor: "primary.main",
-            },
-          },
-        }}
+              "& .MuiOutlinedInput-root": {
+                borderRadius: 3,
+                "& fieldset": {
+                  borderRadius: 3,
+                },
+                "&:hover fieldset": {
+                  borderColor: "#b91c1c",
+                },
+                "&.Mui-focused fieldset": {
+                  borderColor: "#b91c1c",
+                },
+              },
+            }}
         InputProps={{
           startAdornment: (
             <InputAdornment position="start">
@@ -1441,21 +1537,38 @@ await Promise.all(
   {/* Buttons on the same row */}
   <Box sx={{ display: "flex", gap: 1 }}>
     {viewing ? (
-      <Button
-        onClick={() => {
-          setOpen(false);
-          setViewing(false);
-          resetForm();
-        }}
-        sx={{
-          textTransform: "none",
-          fontWeight: "bold",
-          color: "#B71C1C",
-          "&:hover": { bgcolor: "rgba(183,28,28,0.08)" },
-        }}
-      >
-        Close
-      </Button>
+      <Box sx={{ display: 'flex', gap: 1 }}>
+    {/* View Utilization - only enabled for non-consumable items with identifiers or usage logs */}
+    <Button
+      onClick={() => setUtilDialogOpen(true)}
+      disabled={!(form?.identifiers && form.identifiers.length > 0) && !(form?.usage_logs && form.usage_logs.length > 0)}
+      sx={{
+        textTransform: "none",
+        fontWeight: "bold",
+        color: "#444",
+        borderColor: alpha('#000', 0.06),
+        "&:hover": { bgcolor: "rgba(0,0,0,0.04)" },
+      }}
+    >
+      View Utilization
+    </Button>
+
+    <Button
+      onClick={() => {
+        setOpen(false);
+        setViewing(false);
+        resetForm();
+      }}
+      sx={{
+        textTransform: "none",
+        fontWeight: "bold",
+        color: "#B71C1C",
+        "&:hover": { bgcolor: "rgba(183,28,28,0.08)" },
+      }}
+    >
+      Close
+    </Button>
+  </Box>
     ) : (
       <>
         <Button
@@ -2136,8 +2249,8 @@ onClick={() => {
   {/* Divider */}
   <Divider orientation="vertical" flexItem />
 
-  {/* RIGHT BOX */}
   <Box
+   
     sx={{
       flex: 1,
       display: "flex",
@@ -2304,7 +2417,7 @@ onClick={() => {
   </DialogActions>
 </Dialog>
 
-    <Dialog 
+<Dialog 
   open={aiDialogOpen} 
   onClose={() => setAiDialogOpen(false)}
   maxWidth="md"
@@ -2313,19 +2426,19 @@ onClick={() => {
   <DialogTitle>
     <Stack direction="row" spacing={1} alignItems="center">
       <AutoAwesomeIcon color="primary" />
-      <Typography variant="h6">AI Report</Typography>
+      <Typography variant="h6">AI Report (MongoDB)</Typography>
     </Stack>
   </DialogTitle>
   <DialogContent dividers>
     <Typography variant="body2" color="text.secondary" gutterBottom>
-      Ask questions about borrow records, inventory status, or generate reports.
+      Ask questions about {itemType.toLowerCase()} inventory, borrow records, or generate custom reports.
     </Typography>
     
     <Stack spacing={2} sx={{ mt: 2 }}>
       <TextField
         multiline
         rows={3}
-        placeholder="e.g., Show me all borrow requests for ECE students this month"
+        placeholder={`e.g., Show me all ${itemType === "Non-Consumable" ? "equipment" : "consumables"} with low stock`}
         value={question}
         onChange={(e) => setQuestion(e.target.value)}
         fullWidth
@@ -2341,7 +2454,6 @@ onClick={() => {
         {loading ? "Generating..." : "Generate Report"}
       </Button>
     </Stack>
-    
     {reportText && (
       <Paper sx={{ p: 2, mt: 3, bgcolor: "grey.50" }}>
         <Typography variant="body2" whiteSpace="pre-wrap">
@@ -2523,6 +2635,115 @@ onClick={() => {
     </Button>
   </DialogActions>
 </Dialog>
+
+{/* Utilization Dialog */}
+<Dialog
+  open={utilDialogOpen}
+  onClose={() => setUtilDialogOpen(false)}
+  maxWidth="md"
+  fullWidth
+>
+  <DialogTitle>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+      <Inventory2Icon sx={{ color: "#b91c1c" }} />
+      <Typography variant="h6" sx={{ color: "#b91c1c" }}>Utilization Details</Typography>
+    </Box>
+  </DialogTitle>
+
+  <DialogContent dividers>
+    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+      Showing utilization logs grouped by identifier for: <strong>{form.equipment_name || '-'}</strong>
+    </Typography>
+
+    {(() => {
+      const logs = form.usage_logs || [];
+      const byId: Record<string, any[]> = {};
+      // Group logs by explicit identifier or a placeholder for unidentified logs
+      logs.forEach((l: any) => {
+        const id = l.identifier ?? '__NO_IDENTIFIER__';
+        if (!byId[id]) byId[id] = [];
+        byId[id].push(l);
+      });
+
+      const idsToShow = (form.identifiers && form.identifiers.length > 0)
+        ? form.identifiers
+        : Object.keys(byId);
+
+      if (!idsToShow || idsToShow.length === 0) {
+        return <Typography variant="caption" color="text.secondary">No utilization logs available.</Typography>;
+      }
+
+      return (
+        <Stack spacing={2}>
+          {idsToShow.map((identifier: string, idx: number) => {
+            const key = identifier ?? '__NO_IDENTIFIER__';
+            const logsForId = byId[key] || [];
+            const totalMinutes = logsForId.reduce((s, lg) => s + (Number(lg.minutes || 0)), 0);
+
+            return (
+              // Use native details/summary for a compact collapsible item
+              <Paper key={idx} sx={{ p: 0 }}>
+                <details style={{ padding: 12 }}>
+                  <summary style={{ cursor: 'pointer', outline: 'none', listStyle: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Box>
+                      <Typography variant="subtitle2" component="span">
+                        {identifier === '__NO_IDENTIFIER__' ? 'Unidentified / Item-level' : identifier}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        {logsForId.length} log(s) • Total: {totalMinutes} min ({(totalMinutes / 60).toFixed(2)} hrs)
+                      </Typography>
+                    </Box>
+                    <Typography variant="caption" color="text.secondary">Expand</Typography>
+                  </summary>
+
+                  {/* Expanded content */}
+                  <Box sx={{ mt: 2 }}>
+                    {logsForId.length > 0 ? (
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell><strong>Borrower (Course)</strong></TableCell>
+                            <TableCell><strong>Borrowed At</strong></TableCell>
+                            <TableCell><strong>Returned At</strong></TableCell>
+                            <TableCell align="right"><strong>Minutes</strong></TableCell>
+                            <TableCell><strong>Processed By</strong></TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {logsForId.slice().reverse().map((log, i) => {
+                            const idKey = log.borrow_id ? String(log.borrow_id) : String(log.borrow_record_ref || '');
+                            const info = borrowInfo[idKey] || { borrowerName: '-', course: '-' };
+                            const borrowerDisplay = `${info.borrowerName || '-'}${info.course ? ` • ${info.course}` : ''}`;
+                            return (
+                              <TableRow key={i}>
+                                <TableCell>{borrowerDisplay}</TableCell>
+                                <TableCell>{formatDate(log.borrowed_at)}</TableCell>
+                                <TableCell>{formatDate(log.returned_at)}</TableCell>
+                                <TableCell align="right">{log.minutes ?? 0}</TableCell>
+                                <TableCell>{log.managed_by || '-'}</TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <Typography variant="caption" color="text.secondary">No logs for this identifier.</Typography>
+                    )}
+                  </Box>
+                </details>
+              </Paper>
+            );
+          })}
+        </Stack>
+      );
+    })()}
+  </DialogContent>
+
+  <DialogActions>
+    <Button onClick={() => setUtilDialogOpen(false)}>Close</Button>
+  </DialogActions>
+</Dialog>
+
     </Container>
   );
 };

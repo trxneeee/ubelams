@@ -25,10 +25,6 @@ import {
   useTheme,
   Tabs,
   Tab,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
   CircularProgress,
   Backdrop,
   Badge
@@ -45,6 +41,7 @@ import SendIcon from "@mui/icons-material/Send";
 import EditIcon from '@mui/icons-material/Edit';
 import ListIcon from '@mui/icons-material/List';
 import axios from 'axios';
+import { FormControl, InputLabel, Select, MenuItem } from "@mui/material";
 
 const API_BASE_URL = "https://elams-server.onrender.com/api";
 
@@ -118,15 +115,21 @@ export default function FacultyReservationPage() {
   
   const [consumableItems, setConsumableItems] = useState<RequestedItem[]>([]);
   const [nonConsumableItems, setNonConsumableItems] = useState<RequestedItem[]>([]);
-  const [currentConsumable, setCurrentConsumable] = useState<RequestedItem>({
+  const [consumableSearch, setConsumableSearch] = useState('');
+  const [nonConsumableSearch, setNonConsumableSearch] = useState('');
+  const [currentConsumable, setCurrentConsumable] = useState<{ item_name: string; quantity: number; item_type: 'consumable'; custom_name?: string; selected_num?: string }>({
     item_name: '',
     quantity: 1,
-    item_type: 'consumable'
+    item_type: 'consumable',
+    custom_name: '',
+    selected_num: ''
   });
-  const [currentNonConsumable, setCurrentNonConsumable] = useState<RequestedItem>({
+  const [currentNonConsumable, setCurrentNonConsumable] = useState<{ item_name: string; quantity: number; item_type: 'non-consumable'; custom_name?: string; selected_num?: string }>({
     item_name: '',
     quantity: 1,
-    item_type: 'non-consumable'
+    item_type: 'non-consumable',
+    custom_name: '',
+    selected_num: ''
   });
   
   // Reservation Inbox State
@@ -149,6 +152,13 @@ export default function FacultyReservationPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [logsOpen, setLogsOpen] = useState(false);
   const [currentLogs, setCurrentLogs] = useState<any[]>([]);
+
+  // Inventory state
+  const [inventory, setInventory] = useState<{ num: string; equipment_name: string; is_consumable: boolean; available: number }[]>([]);
+
+  // Subjects and Courses state
+  const [subjects, setSubjects] = useState<{ _id: string; name: string }[]>([]);
+  const [courses, setCourses] = useState<{ _id: string; name: string }[]>([]);
 
   // ref to the messages container for automatic scrolling
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -198,6 +208,47 @@ export default function FacultyReservationPage() {
     fetchMyReservations();
   }, []);
 
+  // Add inventory fetch on mount
+  useEffect(() => {
+    const fetchInventory = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_URL}/inventory`);
+        setInventory(
+          Array.isArray(response.data)
+            ? response.data.map((item: any) => ({
+                num: item.num,
+                equipment_name: item.equipment_name,
+                is_consumable: item.is_consumable,
+                available: item.available ?? 0
+              }))
+            : []
+        );
+      } catch (err) {
+        setInventory([]);
+      }
+    };
+    fetchInventory();
+  }, []);
+
+  // Fetch subjects & courses on mount
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [sRes, cRes] = await Promise.all([
+          axios.get(`${API_BASE_URL}/subjects`),
+          axios.get(`${API_BASE_URL}/courses`)
+        ]);
+        if (!mounted) return;
+        setSubjects(Array.isArray(sRes.data) ? sRes.data : []);
+        setCourses(Array.isArray(cRes.data) ? cRes.data : []);
+      } catch (err) {
+        console.error("Failed to fetch subjects/courses", err);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
   const fetchMyReservations = async () => {
     setLoadingReservations(true);
     try {
@@ -235,25 +286,62 @@ export default function FacultyReservationPage() {
     }
   };
 
+  // For adding consumable/non-consumable items, use dropdown selection
+  const getInventoryOptions = (type: 'consumable' | 'non-consumable', search: string = '') =>
+    inventory.filter(i =>
+      (type === 'consumable' ? i.is_consumable : !i.is_consumable) &&
+      (!search || i.equipment_name.toLowerCase().includes(search.toLowerCase()))
+    );
+
   const handleAddConsumable = () => {
-    if (currentConsumable.item_name.trim() && currentConsumable.quantity > 0) {
-      setConsumableItems(prev => [...prev, { ...currentConsumable }]);
+    const customName = typeof currentConsumable.custom_name === "string" ? currentConsumable.custom_name : "";
+    if (
+      (currentConsumable.item_name === 'Other' && customName.trim()) ||
+      (currentConsumable.item_name && currentConsumable.item_name !== 'Other')
+    ) {
+      setConsumableItems(prev => [
+        ...prev,
+        {
+          item_name: currentConsumable.item_name === 'Other' ? customName : currentConsumable.item_name,
+          quantity: currentConsumable.quantity,
+          item_type: 'consumable',
+          item_id: currentConsumable.selected_num && currentConsumable.item_name !== 'Other' ? currentConsumable.selected_num : undefined
+        } as any
+      ]);
       setCurrentConsumable({
         item_name: '',
         quantity: 1,
-        item_type: 'consumable'
+        item_type: 'consumable',
+        custom_name: '',
+        selected_num: ''
       });
+      setConsumableSearch('');
     }
   };
 
   const handleAddNonConsumable = () => {
-    if (currentNonConsumable.item_name.trim() && currentNonConsumable.quantity > 0) {
-      setNonConsumableItems(prev => [...prev, { ...currentNonConsumable }]);
+    const customName = typeof currentNonConsumable.custom_name === "string" ? currentNonConsumable.custom_name : "";
+    if (
+      (currentNonConsumable.item_name === 'Other' && customName.trim()) ||
+      (currentNonConsumable.item_name && currentNonConsumable.item_name !== 'Other')
+    ) {
+      setNonConsumableItems(prev => [
+        ...prev,
+        {
+          item_name: currentNonConsumable.item_name === 'Other' ? customName : currentNonConsumable.item_name,
+          quantity: currentNonConsumable.quantity,
+          item_type: 'non-consumable',
+          item_id: currentNonConsumable.selected_num && currentNonConsumable.item_name !== 'Other' ? currentNonConsumable.selected_num : undefined
+        } as any
+      ]);
       setCurrentNonConsumable({
         item_name: '',
         quantity: 1,
-        item_type: 'non-consumable'
+        item_type: 'non-consumable',
+        custom_name: '',
+        selected_num: ''
       });
+      setNonConsumableSearch('');
     }
   };
 
@@ -282,7 +370,7 @@ export default function FacultyReservationPage() {
       // detect recurring vs single
       scheduleType: String(res.schedule || "").toLowerCase().startsWith("every") ? 'recurring' : 'single',
       scheduleDate: String(res.schedule || "").match(/^\d{4}-\d{2}-\d{2}/) ? String(res.schedule) : new Date().toISOString().split('T')[0],
-      recurringDays: [], // leave as-is for simplicity
+      recurringDays: [],
       recurringEndDate: '',
       course: res.course || '',
       room: res.room || '',
@@ -292,20 +380,26 @@ export default function FacultyReservationPage() {
       needsItems: res.requested_items && res.requested_items.length > 0,
       notes: res.notes || ''
     }));
-    // split requested items back into consumable/non-consumable
-    // server may send item_type as string; cast to the narrow union so TypeScript accepts it
+    // Restore selected_num for items if possible
     const consumables: RequestedItem[] = (res.requested_items || [])
       .filter(i => String(i.item_type).toLowerCase() === 'consumable')
-      .map(i => ({ item_name: i.item_name, quantity: i.quantity, item_type: 'consumable' }));
+      .map(i => ({
+        item_name: i.item_name,
+        quantity: i.quantity,
+        item_type: 'consumable',
+        item_id: (i as any).item_id
+      }));
     const noncons: RequestedItem[] = (res.requested_items || [])
       .filter(i => String(i.item_type).toLowerCase() === 'non-consumable')
-      .map(i => ({ item_name: i.item_name, quantity: i.quantity, item_type: 'non-consumable' }));
+      .map(i => ({
+        item_name: i.item_name,
+        quantity: i.quantity,
+        item_type: 'non-consumable',
+        item_id: (i as any).item_id
+      }));
     setConsumableItems(consumables);
     setNonConsumableItems(noncons);
-    // if group sets userType
     setUserType(res.group_count && res.group_count > 1 ? 'Group' : 'Individual');
-
-    // switch to New Reservation tab
     setCurrentTab(1);
   };
 
@@ -343,8 +437,26 @@ export default function FacultyReservationPage() {
     setSaving(true);
     try {
       const user = JSON.parse(localStorage.getItem('user') || '{}');
-      const allItems = reservationForm.needsItems ? [...consumableItems, ...nonConsumableItems] : [];
-      const payload = {
+
+      // Build requested items (keeps existing behavior)
+      const allItems: any[] = reservationForm.needsItems ? [...consumableItems, ...nonConsumableItems] : [];
+
+      // Build assigned_items from those requested items that already have an item_id (selected from inventory)
+      const assigned_items = allItems
+        .map((it, idx) => ({ ...it, requested_index: idx })) // temp map
+        .filter(it => (it as any).item_id) // only those assigned from inventory
+        .map(it => ({
+          requested_item_index: it.requested_index,
+          item_id: it.item_id,
+          item_name: it.item_name,
+          item_type: it.item_type,
+          quantity: it.quantity,
+          assigned_by: user.email || user.name || 'Unknown',
+          date_assigned: new Date()
+        }));
+
+      // Compose payload, include assigned_items when present
+      const payload: any = {
         ...reservationForm,
         instructor_email: user.email,
         schedule: generateScheduleString(),
@@ -352,13 +464,19 @@ export default function FacultyReservationPage() {
         user_type: userType,
       };
 
+      if (assigned_items.length > 0) {
+        payload.assigned_items = assigned_items;
+        // NOTE: Do NOT set payload.status or date_assigned here.
+        // Keep reservation as Pending so staff can approve/assign in workflow.
+      }
+
       if (isEditing && editingId) {
         // call PUT to update reservation and include editor info
         const resp = await axios.put(`${API_BASE_URL}/reservations/${editingId}`, {
           ...payload,
           editedBy: user.email,
           editedName: user.name || user.firstname || user.email,
-          editReason: 'Edited by faculty' // optional; could prompt
+          editReason: 'Edited by faculty'
         });
         // refresh and reset
         await fetchMyReservations();
@@ -537,7 +655,14 @@ export default function FacultyReservationPage() {
           {items.map((item, index) => (
             <TableRow key={index}>
               <TableCell>
-                <Typography fontWeight="medium">{item.item_name}</Typography>
+                <Typography fontWeight="medium">
+                  {item.item_name}
+                  {(item as any).item_id && (
+                    <span style={{ color: "#888", fontSize: "0.8em", marginLeft: 4 }}>
+                      [{(item as any).item_id}]
+                    </span>
+                  )}
+                </Typography>
               </TableCell>
               <TableCell align="center">
                 <Chip label={item.quantity} color="primary" size="small" />
@@ -641,18 +766,30 @@ export default function FacultyReservationPage() {
               </Typography>
               <Stack spacing={2}>
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                  <TextField
-                    label="Subject *"
-                    value={reservationForm.subject}
-                    onChange={(e) => setReservationForm(prev => ({ ...prev, subject: e.target.value }))}
-                    fullWidth
-                  />
-                  <TextField
-                    label="Course *"
-                    value={reservationForm.course}
-                    onChange={(e) => setReservationForm(prev => ({ ...prev, course: e.target.value }))}
-                    fullWidth
-                  />
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Subject</InputLabel>
+                    <Select
+                      label="Subject"
+                      value={reservationForm.subject}
+                      onChange={(e) => setReservationForm(prev => ({ ...(prev || {}), subject: String(e.target.value) }))}
+                    >
+                      {subjects.map((s) => (
+                        <MenuItem key={s._id} value={s.name}>{s.name}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Course</InputLabel>
+                    <Select
+                      label="Course"
+                      value={reservationForm.course}
+                      onChange={(e) => setReservationForm(prev => ({ ...(prev || {}), course: String(e.target.value) }))}
+                    >
+                      {courses.map((c) => (
+                        <MenuItem key={c._id} value={c.name}>{c.name}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
                 </Stack>
                 
                 <TextField
@@ -863,28 +1000,96 @@ export default function FacultyReservationPage() {
                 
                 {/* Consumable Item Form */}
                 <Stack spacing={2} sx={{ mb: 3 }}>
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                  <TextField
+                    label="Search Consumable Item"
+                    value={consumableSearch}
+                    onChange={e => setConsumableSearch(e.target.value)}
+                    fullWidth
+                    placeholder="Type to search inventory..."
+                  />
+                  <FormControl fullWidth>
+                    <InputLabel>Select Consumable Item</InputLabel>
+                    <Select
+                      value={currentConsumable.selected_num || (currentConsumable.item_name === 'Other' ? 'Other' : '')}
+                      label="Select Consumable Item"
+                      onChange={e => {
+                        const selectedNum = String(e.target.value);
+                        if (selectedNum === 'Other') {
+                          setCurrentConsumable(prev => ({
+                            ...prev,
+                            item_name: 'Other',
+                            selected_num: '',
+                            custom_name: ''
+                          }));
+                          return;
+                        }
+                        const inv = getInventoryOptions('consumable', consumableSearch).find(i => String(i.num) === selectedNum);
+                        if (!inv) return;
+                        // prevent duplicate assignment of same inventory num
+                        const already = consumableItems.some(it => (it as any).item_id && (it as any).item_id === selectedNum);
+                        if (!already) {
+                          setConsumableItems(prev => [
+                            ...prev,
+                            {
+                              item_name: inv.equipment_name,
+                              quantity: currentConsumable.quantity || 1,
+                              item_type: 'consumable',
+                              item_id: selectedNum
+                            } as any
+                          ]);
+                        }
+                        // reset selection state
+                        setCurrentConsumable({
+                          item_name: '',
+                          quantity: 1,
+                          item_type: 'consumable',
+                          custom_name: '',
+                          selected_num: ''
+                        });
+                        setConsumableSearch('');
+                      }}
+                      MenuProps={{ PaperProps: { style: { maxHeight: 300 } } }}
+                    >
+                      {getInventoryOptions('consumable', consumableSearch).map(item => (
+                        <MenuItem key={item.num} value={item.num}>
+                          {item.equipment_name} (Available: {item.available})
+                        </MenuItem>
+                      ))}
+                      <MenuItem value="Other">Other (Specify)</MenuItem>
+                    </Select>
+                  </FormControl>
+                  {currentConsumable.item_name === 'Other' && (
                     <TextField
-                      label="Item Name *"
-                      value={currentConsumable.item_name}
-                      onChange={(e) => setCurrentConsumable(prev => ({ ...prev, item_name: e.target.value }))}
+                      label="Custom Item Name"
+                      value={currentConsumable.custom_name ?? ''}
+                      onChange={e => setCurrentConsumable(prev => ({ ...prev, custom_name: e.target.value }))
+                      }
                       fullWidth
-                      placeholder="e.g., Resistors, Capacitors, Wires"
+                      required
                     />
-                    <TextField
-                      label="Qty per Group *"
-                      type="number"
-                      value={currentConsumable.quantity}
-                      onChange={(e) => setCurrentConsumable(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
-                      sx={{ minWidth: 140 }}
-                      inputProps={{ min: 1 }}
-                    />
-                  </Stack>
+                  )}
+                  <TextField
+                    label="Qty per Group *"
+                    type="number"
+                    value={currentConsumable.quantity}
+                    onChange={e => setCurrentConsumable(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
+                    sx={{ minWidth: 140 }}
+                    inputProps={{ min: 1 }}
+                  />
+                  {currentConsumable.selected_num && currentConsumable.item_name !== 'Other' && (
+                    <Typography variant="caption" color="text.secondary">
+                      Available: {getInventoryOptions('consumable').find(i => i.num === currentConsumable.selected_num)?.available ?? 0}
+                    </Typography>
+                  )}
                   <Button
                     startIcon={<AddIcon />}
                     onClick={handleAddConsumable}
                     variant="outlined"
-                    disabled={!currentConsumable.item_name.trim() || currentConsumable.quantity < 1}
+                    disabled={
+                      !currentConsumable.item_name ||
+                      (currentConsumable.item_name === 'Other' && !(currentConsumable.custom_name ?? '').trim()) ||
+                      currentConsumable.quantity < 1
+                    }
                   >
                     Add Consumable Item
                   </Button>
@@ -921,28 +1126,95 @@ export default function FacultyReservationPage() {
                 
                 {/* Non-Consumable Item Form */}
                 <Stack spacing={2} sx={{ mb: 3 }}>
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                  <TextField
+                    label="Search Non-Consumable Item"
+                    value={nonConsumableSearch}
+                    onChange={e => setNonConsumableSearch(e.target.value)}
+                    fullWidth
+                    placeholder="Type to search inventory..."
+                  />
+                  <FormControl fullWidth>
+                    <InputLabel>Select Non-Consumable Item</InputLabel>
+                    <Select
+                      value={currentNonConsumable.selected_num || (currentNonConsumable.item_name === 'Other' ? 'Other' : '')}
+                      label="Select Non-Consumable Item"
+                      onChange={e => {
+                        const selectedNum = String(e.target.value);
+                        if (selectedNum === 'Other') {
+                          setCurrentNonConsumable(prev => ({
+                            ...prev,
+                            item_name: 'Other',
+                            selected_num: '',
+                            custom_name: ''
+                          }));
+                          return;
+                        }
+                        const inv = getInventoryOptions('non-consumable', nonConsumableSearch).find(i => String(i.num) === selectedNum);
+                        if (!inv) return;
+                        const already = nonConsumableItems.some(it => (it as any).item_id && (it as any).item_id === selectedNum);
+                        if (!already) {
+                          setNonConsumableItems(prev => [
+                            ...prev,
+                            {
+                              item_name: inv.equipment_name,
+                              quantity: currentNonConsumable.quantity || 1,
+                              item_type: 'non-consumable',
+                              item_id: selectedNum
+                            } as any
+                          ]);
+                        }
+                        // reset selection state
+                        setCurrentNonConsumable({
+                          item_name: '',
+                          quantity: 1,
+                          item_type: 'non-consumable',
+                          custom_name: '',
+                          selected_num: ''
+                        });
+                        setNonConsumableSearch('');
+                      }}
+                      MenuProps={{ PaperProps: { style: { maxHeight: 300 } } }}
+                    >
+                      {getInventoryOptions('non-consumable', nonConsumableSearch).map(item => (
+                        <MenuItem key={item.num} value={item.num}>
+                          {item.equipment_name} (Available: {item.available})
+                        </MenuItem>
+                      ))}
+                      <MenuItem value="Other">Other (Specify)</MenuItem>
+                    </Select>
+                  </FormControl>
+                  {currentNonConsumable.item_name === 'Other' && (
                     <TextField
-                      label="Item Name *"
-                      value={currentNonConsumable.item_name}
-                      onChange={(e) => setCurrentNonConsumable(prev => ({ ...prev, item_name: e.target.value }))}
+                      label="Custom Item Name"
+                      value={currentNonConsumable.custom_name ?? ''}
+                      onChange={e => setCurrentNonConsumable(prev => ({ ...prev, custom_name: e.target.value }))
+                      }
                       fullWidth
-                      placeholder="e.g., Multimeter, Oscilloscope, Power Supply"
+                      required
                     />
-                    <TextField
-                      label="Qty per Group *"
-                      type="number"
-                      value={currentNonConsumable.quantity}
-                      onChange={(e) => setCurrentNonConsumable(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
-                      sx={{ minWidth: 140 }}
-                      inputProps={{ min: 1 }}
-                    />
-                  </Stack>
+                  )}
+                  <TextField
+                    label="Qty per Group *"
+                    type="number"
+                    value={currentNonConsumable.quantity}
+                    onChange={e => setCurrentNonConsumable(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
+                    sx={{ minWidth: 140 }}
+                    inputProps={{ min: 1 }}
+                  />
+                  {currentNonConsumable.selected_num && currentNonConsumable.item_name !== 'Other' && (
+                    <Typography variant="caption" color="text.secondary">
+                      Available: {getInventoryOptions('non-consumable').find(i => i.num === currentNonConsumable.selected_num)?.available ?? 0}
+                    </Typography>
+                  )}
                   <Button
                     startIcon={<AddIcon />}
                     onClick={handleAddNonConsumable}
                     variant="outlined"
-                    disabled={!currentNonConsumable.item_name.trim() || currentNonConsumable.quantity < 1}
+                    disabled={
+                      !currentNonConsumable.item_name ||
+                      (currentNonConsumable.item_name === 'Other' && !(currentNonConsumable.custom_name ?? '').trim()) ||
+                      currentNonConsumable.quantity < 1
+                    }
                   >
                     Add Non-Consumable Item
                   </Button>
