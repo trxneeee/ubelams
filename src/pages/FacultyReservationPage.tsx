@@ -1,11 +1,12 @@
 // src/pages/FacultyReservationPage.tsx
-import { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from "react";
 import {
   Container,
   Card,
   Typography,
   Box,
   Stack,
+  Tooltip,
   TextField,
   Button,
   Paper,
@@ -27,8 +28,8 @@ import {
   Tab,
   CircularProgress,
   Backdrop,
-  Badge
-} from '@mui/material';
+  Badge,
+} from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EventIcon from "@mui/icons-material/Event";
@@ -38,9 +39,9 @@ import InboxIcon from "@mui/icons-material/Inbox";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import ChatBubbleIcon from "@mui/icons-material/ChatBubble";
 import SendIcon from "@mui/icons-material/Send";
-import EditIcon from '@mui/icons-material/Edit';
-import ListIcon from '@mui/icons-material/List';
-import axios from 'axios';
+import EditIcon from "@mui/icons-material/Edit";
+import ListIcon from "@mui/icons-material/List";
+import axios from "axios";
 import { FormControl, InputLabel, Select, MenuItem } from "@mui/material";
 
 const API_BASE_URL = "https://elams-server.onrender.com/api";
@@ -48,14 +49,14 @@ const API_BASE_URL = "https://elams-server.onrender.com/api";
 interface RequestedItem {
   item_name: string;
   quantity: number;
-  item_type: 'consumable' | 'non-consumable';
+  item_type: "consumable" | "non-consumable";
 }
 
 interface ReservationForm {
   subject: string;
   instructor: string;
   schedule: string;
-  scheduleType: 'single' | 'recurring';
+  scheduleType: "single" | "recurring";
   scheduleDate: string;
   recurringDays: string[];
   recurringEndDate: string;
@@ -83,8 +84,13 @@ interface Reservation {
   requested_items: RequestedItem[];
   status: string;
   date_created: string;
-  messages?: Array<{ sender: string; sender_name?: string; message: string; timestamp: string }>;
-  user_type?: 'Individual' | 'Group';
+  messages?: Array<{
+    sender: string;
+    sender_name?: string;
+    message: string;
+    timestamp: string;
+  }>;
+  user_type?: "Individual" | "Group";
   edits?: any[]; // edit history from server (keeps flexible shape)
   notes?: string; // <-- added so references to reservation.notes compile
 }
@@ -93,45 +99,57 @@ export default function FacultyReservationPage() {
   const theme = useTheme();
   const brandRed = "#b91c1c";
   const [currentTab, setCurrentTab] = useState(0);
-  const [facultyName, setFacultyName] = useState('');
-  
+  const [facultyName, setFacultyName] = useState("");
+
   // Reservation Form State
   const [reservationForm, setReservationForm] = useState<ReservationForm>({
-    subject: '',
-    instructor: '',
-    schedule: '',
-    scheduleType: 'single',
-    scheduleDate: new Date().toISOString().split('T')[0],
+    subject: "",
+    instructor: "",
+    schedule: "",
+    scheduleType: "single",
+    scheduleDate: new Date().toISOString().split("T")[0],
     recurringDays: [],
-    recurringEndDate: '',
-    course: '',
-    room: '',
-    startTime: '09:00',
-    endTime: '10:00',
+    recurringEndDate: "",
+    course: "",
+    room: "",
+    startTime: "09:00",
+    endTime: "10:00",
     group_count: 1,
     needsItems: true,
-    notes: ''
+    notes: "",
   });
-  
+
   const [consumableItems, setConsumableItems] = useState<RequestedItem[]>([]);
   const [nonConsumableItems, setNonConsumableItems] = useState<RequestedItem[]>([]);
-  const [consumableSearch, setConsumableSearch] = useState('');
-  const [nonConsumableSearch, setNonConsumableSearch] = useState('');
-  const [currentConsumable, setCurrentConsumable] = useState<{ item_name: string; quantity: number; item_type: 'consumable'; custom_name?: string; selected_num?: string }>({
-    item_name: '',
+  const [consumableSearch, setConsumableSearch] = useState("");
+  const [nonConsumableSearch, setNonConsumableSearch] = useState("");
+  const [currentConsumable, setCurrentConsumable] = useState<{
+    item_name: string;
+    quantity: number;
+    item_type: "consumable";
+    custom_name?: string;
+    selected_num?: string;
+  }>({
+    item_name: "",
     quantity: 1,
-    item_type: 'consumable',
-    custom_name: '',
-    selected_num: ''
+    item_type: "consumable",
+    custom_name: "",
+    selected_num: "",
   });
-  const [currentNonConsumable, setCurrentNonConsumable] = useState<{ item_name: string; quantity: number; item_type: 'non-consumable'; custom_name?: string; selected_num?: string }>({
-    item_name: '',
+  const [currentNonConsumable, setCurrentNonConsumable] = useState<{
+    item_name: string;
+    quantity: number;
+    item_type: "non-consumable";
+    custom_name?: string;
+    selected_num?: string;
+  }>({
+    item_name: "",
     quantity: 1,
-    item_type: 'non-consumable',
-    custom_name: '',
-    selected_num: ''
+    item_type: "non-consumable",
+    custom_name: "",
+    selected_num: "",
   });
-  
+
   // Reservation Inbox State
   const [myReservations, setMyReservations] = useState<Reservation[]>([]);
   const [loadingReservations, setLoadingReservations] = useState(false);
@@ -139,22 +157,27 @@ export default function FacultyReservationPage() {
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [messageDialogOpen, setMessageDialogOpen] = useState(false);
   const [selectedReservationForChat, setSelectedReservationForChat] = useState<Reservation | null>(null);
-  const [messageText, setMessageText] = useState('');
+  const [messageText, setMessageText] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
-  
+
   const [saving, setSaving] = useState(false);
   const [successDialog, setSuccessDialog] = useState(false);
-  const [reservationCode, setReservationCode] = useState('');
+  const [reservationCode, setReservationCode] = useState("");
 
   // Add user_type state (Individual | Group)
-  const [userType, setUserType] = useState<'Individual' | 'Group'>('Individual');
+  const [userType, setUserType] = useState<"Individual" | "Group">("Individual");
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [logsOpen, setLogsOpen] = useState(false);
   const [currentLogs, setCurrentLogs] = useState<any[]>([]);
 
   // Inventory state
-  const [inventory, setInventory] = useState<{ num: string; equipment_name: string; is_consumable: boolean; available: number }[]>([]);
+  const [inventory, setInventory] = useState<{
+    num: string;
+    equipment_name: string;
+    is_consumable: boolean;
+    available: number;
+  }[]>([]);
 
   // Subjects and Courses state
   const [subjects, setSubjects] = useState<{ _id: string; name: string }[]>([]);
@@ -174,10 +197,10 @@ export default function FacultyReservationPage() {
       try {
         const resp = await axios.get(`${API_BASE_URL}/reservations/${reservationId}`);
         const updated = resp.data as Reservation;
-        setMyReservations(prev => prev.map(r => r._id === updated._id ? updated : r));
-        setSelectedReservationForChat(prev => prev && prev._id === updated._id ? updated : prev);
+        setMyReservations((prev) => prev.map((r) => (r._id === updated._id ? updated : r)));
+        setSelectedReservationForChat((prev) => (prev && prev._id === updated._id ? updated : prev));
       } catch (err) {
-        console.error('Chat polling error:', err);
+        console.error("Chat polling error:", err);
       }
     }, 1000); // faster polling for near real-time
   };
@@ -197,12 +220,12 @@ export default function FacultyReservationPage() {
   }, []);
 
   useEffect(() => {
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
     if (user.name && user.email) {
       setFacultyName(user.name);
-      setReservationForm(prev => ({
+      setReservationForm((prev) => ({
         ...prev,
-        instructor: user.name
+        instructor: user.name,
       }));
     }
     fetchMyReservations();
@@ -219,7 +242,7 @@ export default function FacultyReservationPage() {
                 num: item.num,
                 equipment_name: item.equipment_name,
                 is_consumable: item.is_consumable,
-                available: item.available ?? 0
+                available: item.available ?? 0,
               }))
             : []
         );
@@ -237,7 +260,7 @@ export default function FacultyReservationPage() {
       try {
         const [sRes, cRes] = await Promise.all([
           axios.get(`${API_BASE_URL}/subjects`),
-          axios.get(`${API_BASE_URL}/courses`)
+          axios.get(`${API_BASE_URL}/courses`),
         ]);
         if (!mounted) return;
         setSubjects(Array.isArray(sRes.data) ? sRes.data : []);
@@ -246,18 +269,20 @@ export default function FacultyReservationPage() {
         console.error("Failed to fetch subjects/courses", err);
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const fetchMyReservations = async () => {
     setLoadingReservations(true);
     try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
       if (!user.email) {
-        console.error('No user email found in localStorage');
+        console.error("No user email found in localStorage");
         return;
       }
-      
+
       const response = await axios.get(`${API_BASE_URL}/reservations`);
       const allReservations = response.data;
       // Filter by current faculty member's email
@@ -270,173 +295,173 @@ export default function FacultyReservationPage() {
         });
       setMyReservations(filtered);
     } catch (error) {
-      console.error('Fetch reservations error:', error);
+      console.error("Fetch reservations error:", error);
     } finally {
       setLoadingReservations(false);
     }
   };
 
   const generateScheduleString = (): string => {
-    if (reservationForm.scheduleType === 'single') {
+    if (reservationForm.scheduleType === "single") {
       return reservationForm.scheduleDate;
     } else {
-      const days = reservationForm.recurringDays.join(', ');
-      const endDate = reservationForm.recurringEndDate ? ` until ${reservationForm.recurringEndDate}` : '';
+      const days = reservationForm.recurringDays.join(", ");
+      const endDate = reservationForm.recurringEndDate ? ` until ${reservationForm.recurringEndDate}` : "";
       return `Every ${days}${endDate}`;
     }
   };
 
   // For adding consumable/non-consumable items, use dropdown selection
-  const getInventoryOptions = (type: 'consumable' | 'non-consumable', search: string = '') =>
-    inventory.filter(i =>
-      (type === 'consumable' ? i.is_consumable : !i.is_consumable) &&
-      (!search || i.equipment_name.toLowerCase().includes(search.toLowerCase()))
+  const getInventoryOptions = (type: "consumable" | "non-consumable", search: string = "") =>
+    inventory.filter(
+      (i) =>
+        (type === "consumable" ? i.is_consumable : !i.is_consumable) &&
+        (!search || i.equipment_name.toLowerCase().includes(search.toLowerCase()))
     );
 
   const handleAddConsumable = () => {
     const customName = typeof currentConsumable.custom_name === "string" ? currentConsumable.custom_name : "";
     if (
-      (currentConsumable.item_name === 'Other' && customName.trim()) ||
-      (currentConsumable.item_name && currentConsumable.item_name !== 'Other')
+      (currentConsumable.item_name === "Other" && customName.trim()) ||
+      (currentConsumable.item_name && currentConsumable.item_name !== "Other")
     ) {
-      setConsumableItems(prev => [
+      setConsumableItems((prev) => [
         ...prev,
         {
-          item_name: currentConsumable.item_name === 'Other' ? customName : currentConsumable.item_name,
+          item_name: currentConsumable.item_name === "Other" ? customName : currentConsumable.item_name,
           quantity: currentConsumable.quantity,
-          item_type: 'consumable',
-          item_id: currentConsumable.selected_num && currentConsumable.item_name !== 'Other' ? currentConsumable.selected_num : undefined
-        } as any
+          item_type: "consumable",
+          item_id: currentConsumable.selected_num && currentConsumable.item_name !== "Other" ? currentConsumable.selected_num : undefined,
+        } as any,
       ]);
       setCurrentConsumable({
-        item_name: '',
+        item_name: "",
         quantity: 1,
-        item_type: 'consumable',
-        custom_name: '',
-        selected_num: ''
+        item_type: "consumable",
+        custom_name: "",
+        selected_num: "",
       });
-      setConsumableSearch('');
+      setConsumableSearch("");
     }
   };
 
   const handleAddNonConsumable = () => {
     const customName = typeof currentNonConsumable.custom_name === "string" ? currentNonConsumable.custom_name : "";
     if (
-      (currentNonConsumable.item_name === 'Other' && customName.trim()) ||
-      (currentNonConsumable.item_name && currentNonConsumable.item_name !== 'Other')
+      (currentNonConsumable.item_name === "Other" && customName.trim()) ||
+      (currentNonConsumable.item_name && currentNonConsumable.item_name !== "Other")
     ) {
-      setNonConsumableItems(prev => [
+      setNonConsumableItems((prev) => [
         ...prev,
         {
-          item_name: currentNonConsumable.item_name === 'Other' ? customName : currentNonConsumable.item_name,
+          item_name: currentNonConsumable.item_name === "Other" ? customName : currentNonConsumable.item_name,
           quantity: currentNonConsumable.quantity,
-          item_type: 'non-consumable',
-          item_id: currentNonConsumable.selected_num && currentNonConsumable.item_name !== 'Other' ? currentNonConsumable.selected_num : undefined
-        } as any
+          item_type: "non-consumable",
+          item_id: currentNonConsumable.selected_num && currentNonConsumable.item_name !== "Other" ? currentNonConsumable.selected_num : undefined,
+        } as any,
       ]);
       setCurrentNonConsumable({
-        item_name: '',
+        item_name: "",
         quantity: 1,
-        item_type: 'non-consumable',
-        custom_name: '',
-        selected_num: ''
+        item_type: "non-consumable",
+        custom_name: "",
+        selected_num: "",
       });
-      setNonConsumableSearch('');
+      setNonConsumableSearch("");
     }
   };
 
   const handleRemoveConsumable = (index: number) => {
-    setConsumableItems(prev => prev.filter((_, i) => i !== index));
+    setConsumableItems((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleRemoveNonConsumable = (index: number) => {
-    setNonConsumableItems(prev => prev.filter((_, i) => i !== index));
+    setNonConsumableItems((prev) => prev.filter((_, i) => i !== index));
   };
 
   // Calculate totals
-  const totalConsumableItems = consumableItems.reduce((sum, item) => sum + (item.quantity * reservationForm.group_count), 0);
-  const totalNonConsumableItems = nonConsumableItems.reduce((sum, item) => sum + (item.quantity * reservationForm.group_count), 0);
+  const totalConsumableItems = consumableItems.reduce((sum, item) => sum + item.quantity * reservationForm.group_count, 0);
+  const totalNonConsumableItems = nonConsumableItems.reduce((sum, item) => sum + item.quantity * reservationForm.group_count, 0);
   const totalAllItems = totalConsumableItems + totalNonConsumableItems;
 
   // When opening the New Reservation form for edit, populate states
   const openEditForm = (res: Reservation) => {
     setIsEditing(true);
     setEditingId(res._id);
-    setReservationForm(prev => ({
+    setReservationForm((prev) => ({
       ...prev,
-      subject: res.subject || '',
+      subject: res.subject || "",
       instructor: res.instructor || facultyName,
-      schedule: res.schedule || '',
+      schedule: res.schedule || "",
       // detect recurring vs single
-      scheduleType: String(res.schedule || "").toLowerCase().startsWith("every") ? 'recurring' : 'single',
-      scheduleDate: String(res.schedule || "").match(/^\d{4}-\d{2}-\d{2}/) ? String(res.schedule) : new Date().toISOString().split('T')[0],
+      scheduleType: String(res.schedule || "").toLowerCase().startsWith("every") ? "recurring" : "single",
+      scheduleDate: String(res.schedule || "").match(/^\d{4}-\d{2}-\d{2}/) ? String(res.schedule) : new Date().toISOString().split("T")[0],
       recurringDays: [],
-      recurringEndDate: '',
-      course: res.course || '',
-      room: res.room || '',
-      startTime: res.startTime || '09:00',
-      endTime: res.endTime || '10:00',
+      recurringEndDate: "",
+      course: res.course || "",
+      room: res.room || "",
+      startTime: res.startTime || "09:00",
+      endTime: res.endTime || "10:00",
       group_count: res.group_count || 1,
       needsItems: res.requested_items && res.requested_items.length > 0,
-      notes: res.notes || ''
+      notes: res.notes || "",
     }));
     // Restore selected_num for items if possible
     const consumables: RequestedItem[] = (res.requested_items || [])
-      .filter(i => String(i.item_type).toLowerCase() === 'consumable')
-      .map(i => ({
+      .filter((i) => String(i.item_type).toLowerCase() === "consumable")
+      .map((i) => ({
         item_name: i.item_name,
         quantity: i.quantity,
-        item_type: 'consumable',
-        item_id: (i as any).item_id
+        item_type: "consumable",
+        item_id: (i as any).item_id,
       }));
     const noncons: RequestedItem[] = (res.requested_items || [])
-      .filter(i => String(i.item_type).toLowerCase() === 'non-consumable')
-      .map(i => ({
+      .filter((i) => String(i.item_type).toLowerCase() === "non-consumable")
+      .map((i) => ({
         item_name: i.item_name,
         quantity: i.quantity,
-        item_type: 'non-consumable',
-        item_id: (i as any).item_id
+        item_type: "non-consumable",
+        item_id: (i as any).item_id,
       }));
     setConsumableItems(consumables);
     setNonConsumableItems(noncons);
-    setUserType(res.group_count && res.group_count > 1 ? 'Group' : 'Individual');
+    setUserType(res.group_count && res.group_count > 1 ? "Group" : "Individual");
     setCurrentTab(1);
   };
 
   // Submit handler (create or edit)
   const handleSubmit = async () => {
-    if (!reservationForm.subject || !reservationForm.instructor || 
-        !reservationForm.course || !reservationForm.room) {
-      alert('Please fill all required fields');
+    if (!reservationForm.subject || !reservationForm.instructor || !reservationForm.course || !reservationForm.room) {
+      alert("Please fill all required fields");
       return;
     }
 
     // Validate items if needed
     if (reservationForm.needsItems && consumableItems.length === 0 && nonConsumableItems.length === 0) {
-      alert('Please add at least one item or disable "Items Needed" if no items are required');
+      alert("Please add at least one item or disable 'Items Needed' if no items are required");
       return;
     }
 
     // Validate schedule
-    if (reservationForm.scheduleType === 'single' && !reservationForm.scheduleDate) {
-      alert('Please select a date for single reservation');
+    if (reservationForm.scheduleType === "single" && !reservationForm.scheduleDate) {
+      alert("Please select a date for single reservation");
       return;
     }
 
-    if (reservationForm.scheduleType === 'recurring' && reservationForm.recurringDays.length === 0) {
-      alert('Please select at least one day of the week for recurring reservation');
+    if (reservationForm.scheduleType === "recurring" && reservationForm.recurringDays.length === 0) {
+      alert("Please select at least one day of the week for recurring reservation");
       return;
     }
 
     // Validate times
     if (!reservationForm.startTime || !reservationForm.endTime) {
-      alert('Please set start and end times');
+      alert("Please set start and end times");
       return;
     }
 
     setSaving(true);
     try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
 
       // Build requested items (keeps existing behavior)
       const allItems: any[] = reservationForm.needsItems ? [...consumableItems, ...nonConsumableItems] : [];
@@ -444,15 +469,15 @@ export default function FacultyReservationPage() {
       // Build assigned_items from those requested items that already have an item_id (selected from inventory)
       const assigned_items = allItems
         .map((it, idx) => ({ ...it, requested_index: idx })) // temp map
-        .filter(it => (it as any).item_id) // only those assigned from inventory
-        .map(it => ({
+        .filter((it) => (it as any).item_id) // only those assigned from inventory
+        .map((it) => ({
           requested_item_index: it.requested_index,
           item_id: it.item_id,
           item_name: it.item_name,
           item_type: it.item_type,
           quantity: it.quantity,
-          assigned_by: user.email || user.name || 'Unknown',
-          date_assigned: new Date()
+          assigned_by: user.email || user.name || "Unknown",
+          date_assigned: new Date(),
         }));
 
       // Compose payload, include assigned_items when present
@@ -476,7 +501,7 @@ export default function FacultyReservationPage() {
           ...payload,
           editedBy: user.email,
           editedName: user.name || user.firstname || user.email,
-          editReason: 'Edited by faculty'
+          editReason: "Edited by faculty",
         });
         // refresh and reset
         await fetchMyReservations();
@@ -489,32 +514,32 @@ export default function FacultyReservationPage() {
         setReservationCode(response.data.reservation_code);
         setSuccessDialog(true);
       }
-      
+
       // Reset form
       setReservationForm({
-        subject: '',
+        subject: "",
         instructor: facultyName,
-        schedule: '',
-        scheduleType: 'single',
-        scheduleDate: new Date().toISOString().split('T')[0],
+        schedule: "",
+        scheduleType: "single",
+        scheduleDate: new Date().toISOString().split("T")[0],
         recurringDays: [],
-        recurringEndDate: '',
-        course: '',
-        room: '',
-        startTime: '09:00',
-        endTime: '10:00',
+        recurringEndDate: "",
+        course: "",
+        room: "",
+        startTime: "09:00",
+        endTime: "10:00",
         group_count: 1,
         needsItems: true,
-        notes: ''
+        notes: "",
       });
       setConsumableItems([]);
       setNonConsumableItems([]);
-      
+
       // Refresh reservations inbox
       await fetchMyReservations();
     } catch (error) {
-      console.error('Create/update reservation error:', error);
-      alert('Failed to save reservation');
+      console.error("Create/update reservation error:", error);
+      alert("Failed to save reservation");
     } finally {
       setSaving(false);
     }
@@ -523,10 +548,10 @@ export default function FacultyReservationPage() {
   // helper: count unseen messages for current user
   const unseenCount = (reservation: Reservation) => {
     try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
-      const email = (user && (user.email || user.name)) || '';
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const email = (user && (user.email || user.name)) || "";
       if (!email) return 0;
-      return (reservation.messages || []).filter(m => !(m as any).seen_by || !(m as any).seen_by.includes(email)).length;
+      return (reservation.messages || []).filter((m) => !(m as any).seen_by || !(m as any).seen_by.includes(email)).length;
     } catch (e) {
       return 0;
     }
@@ -535,14 +560,14 @@ export default function FacultyReservationPage() {
   const handleOpenChat = async (reservation: Reservation) => {
     setSelectedReservationForChat(reservation);
     setMessageDialogOpen(true);
-    setMessageText('');
+    setMessageText("");
 
     // mark messages seen on server and refresh the reservation locally
     try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
-      const userEmail = user.email || user.name || 'Unknown';
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const userEmail = user.email || user.name || "Unknown";
       await axios.post(`${API_BASE_URL}/reservations/${reservation._id}/messages-seen`, {
-        user_email: userEmail
+        user_email: userEmail,
       });
 
       // fetch updated reservation to update messages/seen_by immediately
@@ -551,19 +576,21 @@ export default function FacultyReservationPage() {
 
       // update chat state and inbox (replace or append)
       setSelectedReservationForChat(updated);
-      setMyReservations(prev => {
-        const exists = prev.some(r => r._id === updated._id);
-        return exists ? prev.map(r => r._id === updated._id ? updated : r) : [updated, ...prev];
+      setMyReservations((prev) => {
+        const exists = prev.some((r) => r._id === updated._id);
+        return exists ? prev.map((r) => (r._id === updated._id ? updated : r)) : [updated, ...prev];
       });
 
       // ensure scroll after render
       setTimeout(() => {
-        try { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); } catch(e){}
+        try {
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+        } catch (e) {}
       }, 50);
     } catch (err) {
-      console.error('Mark messages seen error:', err);
+      console.error("Mark messages seen error:", err);
     }
-    
+
     startChatPolling(reservation._id);
   };
 
@@ -574,15 +601,15 @@ export default function FacultyReservationPage() {
 
     setSendingMessage(true);
     try {
-      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-      const userIdentifier = currentUser.email || currentUser.name || 'Unknown';
+      const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+      const userIdentifier = currentUser.email || currentUser.name || "Unknown";
       const userName = currentUser.name || userIdentifier;
 
       // use server response (should return updated reservation)
       const resp = await axios.post(`${API_BASE_URL}/reservations/${selectedReservationForChat._id}/message`, {
         sender: userIdentifier,
         sender_name: userName,
-        message: messageText
+        message: messageText,
       });
 
       const updated = resp.data as Reservation;
@@ -590,7 +617,7 @@ export default function FacultyReservationPage() {
       // mark messages as seen for this user (best-effort, server emits updates)
       try {
         await axios.post(`${API_BASE_URL}/reservations/${selectedReservationForChat._id}/messages-seen`, {
-          user_email: userIdentifier
+          user_email: userIdentifier,
         });
       } catch (e) {
         // non-fatal
@@ -602,13 +629,15 @@ export default function FacultyReservationPage() {
       startChatPolling(updated._id);
 
       // clear input then scroll to bottom after DOM paints
-      setMessageText('');
+      setMessageText("");
       setTimeout(() => {
-        try { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); } catch(e){}
+        try {
+          messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+        } catch (e) {}
       }, 50);
     } catch (error) {
-      console.error('Send message error:', error);
-      alert('Failed to send message');
+      console.error("Send message error:", error);
+      alert("Failed to send message");
     } finally {
       setSendingMessage(false);
     }
@@ -623,7 +652,7 @@ export default function FacultyReservationPage() {
 
   const scrollToBottom = () => {
     try {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     } catch (e) {}
   };
 
@@ -635,20 +664,26 @@ export default function FacultyReservationPage() {
   }, [messageDialogOpen, selectedReservationForChat?.messages?.length]);
 
   /* Insert ItemsTable component here */
-  const ItemsTable = ({ items, onRemove, type }: { 
-    items: RequestedItem[]; 
-    onRemove: (index: number) => void;
-    type: 'consumable' | 'non-consumable';
-  }) => (
+  const ItemsTable = ({ items, onRemove, type }: { items: RequestedItem[]; onRemove: (index: number) => void; type: "consumable" | "non-consumable" }) => (
     <TableContainer>
       <Table size="small">
         <TableHead>
           <TableRow>
-            <TableCell><strong>Item Name</strong></TableCell>
-            <TableCell align="center"><strong>Qty per Group</strong></TableCell>
-            <TableCell align="center"><strong>Total Qty</strong></TableCell>
-            <TableCell align="center"><strong>Type</strong></TableCell>
-            <TableCell align="center"><strong>Action</strong></TableCell>
+            <TableCell>
+              <strong>Item Name</strong>
+            </TableCell>
+            <TableCell align="center">
+              <strong>Qty per Group</strong>
+            </TableCell>
+            <TableCell align="center">
+              <strong>Total Qty</strong>
+            </TableCell>
+            <TableCell align="center">
+              <strong>Type</strong>
+            </TableCell>
+            <TableCell align="center">
+              <strong>Action</strong>
+            </TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -668,20 +703,10 @@ export default function FacultyReservationPage() {
                 <Chip label={item.quantity} color="primary" size="small" />
               </TableCell>
               <TableCell align="center">
-                <Chip 
-                  label={item.quantity * reservationForm.group_count} 
-                  color="secondary" 
-                  size="small" 
-                  variant="outlined"
-                />
+                <Chip label={item.quantity * reservationForm.group_count} color="secondary" size="small" variant="outlined" />
               </TableCell>
               <TableCell align="center">
-                <Chip 
-                  label={type === 'consumable' ? 'Consumable' : 'Non-Consumable'} 
-                  color={type === 'consumable' ? 'success' : 'info'} 
-                  size="small" 
-                  variant="filled"
-                />
+                <Chip label={type === "consumable" ? "Consumable" : "Non-Consumable"} color={type === "consumable" ? "success" : "info"} size="small" variant="filled" />
               </TableCell>
               <TableCell align="center">
                 <IconButton color="error" size="small" onClick={() => onRemove(index)}>
@@ -695,12 +720,38 @@ export default function FacultyReservationPage() {
     </TableContainer>
   );
 
+  // --- FIX: delete handler uses fetchReservations ---
+  const handleDeleteReservation = async (reservation: any) => {
+    // reuse role guard if defined elsewhere in this file; fall back to local check
+    const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+    const isStudentAssistant = (currentUser?.role || "") === "Student Assistant";
+    if (isStudentAssistant) {
+      alert("You are not allowed to delete reservations.");
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to delete reservation ${reservation.reservation_code}?`)) {
+      return;
+    }
+
+    try {
+      await axios.delete(`${API_BASE_URL}/reservations/${reservation._id}`);
+      // Always refresh reservations after delete
+      await fetchMyReservations();
+    } catch (error) {
+      console.error("Delete reservation error:", error);
+      alert("Failed to delete reservation");
+    }
+  };
+
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Backdrop sx={{ color: "#fff", zIndex: (theme) => theme.zIndex.modal + 1 }} open={saving}>
         <Stack alignItems="center" spacing={2}>
           <CircularProgress size={60} thickness={4} sx={{ color: theme.palette.primary.main }} />
-          <Typography variant="h6" sx={{ color: "#fff" }}>Submitting...</Typography>
+          <Typography variant="h6" sx={{ color: "#fff" }}>
+            Submitting...
+          </Typography>
         </Stack>
       </Backdrop>
 
@@ -710,16 +761,16 @@ export default function FacultyReservationPage() {
           Faculty Reservation Portal
         </Typography>
         <Typography variant="body1" color="text.secondary">
-          {facultyName ? `Welcome, ${facultyName}` : 'Create and manage equipment reservations'}
+          {facultyName ? `Welcome, ${facultyName}` : "Create and manage equipment reservations"}
         </Typography>
       </Box>
 
       {/* Tabs */}
       <Card sx={{ mb: 3 }}>
-        <Tabs 
-          value={currentTab} 
+        <Tabs
+          value={currentTab}
           onChange={(_, newValue) => setCurrentTab(newValue)}
-          sx={{ borderBottom: 1, borderColor: 'divider' }}
+          sx={{ borderBottom: 1, borderColor: "divider" }}
         >
           <Tab label="My Reservation" icon={<InboxIcon />} iconPosition="start" />
           <Tab label="New Reservation" icon={<AddIcon />} iconPosition="start" />
@@ -732,49 +783,51 @@ export default function FacultyReservationPage() {
         <Card sx={{ p: 4, borderRadius: 3 }}>
           <Stack spacing={3}>
             {/* USER TYPE: Individual / Group selector - choose before filling other info */}
-            <Paper sx={{ p: 2, display: 'flex', gap: 1, alignItems: 'center' }}>
+            <Paper sx={{ p: 2, display: "flex", gap: 1, alignItems: "center" }}>
               <Typography variant="subtitle1" sx={{ mr: 2 }}>Reservation for</Typography>
               <Button
-                variant={userType === 'Individual' ? 'contained' : 'outlined'}
+                variant={userType === "Individual" ? "contained" : "outlined"}
                 onClick={() => {
-                  setUserType('Individual');
+                  setUserType("Individual");
                   // reset group-specific fields when switching to Individual
-                  setReservationForm(prev => ({ ...prev, group_count: 1 }));
+                  setReservationForm((prev) => ({ ...prev, group_count: 1 }));
                   setConsumableItems([]);
                   setNonConsumableItems([]);
-                  setReservationForm(prev => ({ ...prev, needsItems: prev.needsItems }));
+                  setReservationForm((prev) => ({ ...prev, needsItems: prev.needsItems }));
                 }}
               >
                 Individual
               </Button>
               <Button
-                variant={userType === 'Group' ? 'contained' : 'outlined'}
+                variant={userType === "Group" ? "contained" : "outlined"}
                 onClick={() => {
-                  setUserType('Group');
+                  setUserType("Group");
                   // default to 2 groups if switching to Group and it's 1
-                  setReservationForm(prev => ({ ...prev, group_count: Math.max(2, prev.group_count || 2) }));
+                  setReservationForm((prev) => ({ ...prev, group_count: Math.max(2, prev.group_count || 2) }));
                 }}
               >
                 Group
               </Button>
             </Paper>
- 
+
             {/* Class Information */}
             <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.primary.main, 0.04) }}>
               <Typography variant="h6" gutterBottom color="primary">
                 Class Information
               </Typography>
               <Stack spacing={2}>
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                   <FormControl fullWidth size="small">
                     <InputLabel>Subject</InputLabel>
                     <Select
                       label="Subject"
                       value={reservationForm.subject}
-                      onChange={(e) => setReservationForm(prev => ({ ...(prev || {}), subject: String(e.target.value) }))}
+                      onChange={(e) => setReservationForm((prev) => ({ ...(prev || {}), subject: String(e.target.value) }))}
                     >
                       {subjects.map((s) => (
-                        <MenuItem key={s._id} value={s.name}>{s.name}</MenuItem>
+                        <MenuItem key={s._id} value={s.name}>
+                          {s.name}
+                        </MenuItem>
                       ))}
                     </Select>
                   </FormControl>
@@ -783,15 +836,17 @@ export default function FacultyReservationPage() {
                     <Select
                       label="Course"
                       value={reservationForm.course}
-                      onChange={(e) => setReservationForm(prev => ({ ...(prev || {}), course: String(e.target.value) }))}
+                      onChange={(e) => setReservationForm((prev) => ({ ...(prev || {}), course: String(e.target.value) }))}
                     >
                       {courses.map((c) => (
-                        <MenuItem key={c._id} value={c.name}>{c.name}</MenuItem>
+                        <MenuItem key={c._id} value={c.name}>
+                          {c.name}
+                        </MenuItem>
                       ))}
                     </Select>
                   </FormControl>
                 </Stack>
-                
+
                 <TextField
                   label="Instructor *"
                   value={reservationForm.instructor}
@@ -799,31 +854,31 @@ export default function FacultyReservationPage() {
                   fullWidth
                   helperText="Automatically filled from your profile"
                 />
-                
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                   <TextField
                     label="Room *"
                     value={reservationForm.room}
-                    onChange={(e) => setReservationForm(prev => ({ ...prev, room: e.target.value }))}
+                    onChange={(e) => setReservationForm((prev) => ({ ...prev, room: e.target.value }))}
                     fullWidth
                   />
                   <TextField
                     label="Number of Groups"
                     type="number"
                     value={reservationForm.group_count}
-                    onChange={(e) => setReservationForm(prev => ({ ...prev, group_count: parseInt(e.target.value) || 1 }))}
+                    onChange={(e) => setReservationForm((prev) => ({ ...prev, group_count: parseInt(e.target.value) || 1 }))}
                     fullWidth
                     inputProps={{ min: 1 }}
-                    disabled={userType === 'Individual'} // disable when Individual selected
+                    disabled={userType === "Individual"} // disable when Individual selected
                   />
                 </Stack>
 
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                   <TextField
                     label="Start Time *"
                     type="time"
                     value={reservationForm.startTime}
-                    onChange={(e) => setReservationForm(prev => ({ ...prev, startTime: e.target.value }))}
+                    onChange={(e) => setReservationForm((prev) => ({ ...prev, startTime: e.target.value }))}
                     fullWidth
                     InputLabelProps={{ shrink: true }}
                   />
@@ -831,7 +886,7 @@ export default function FacultyReservationPage() {
                     label="End Time *"
                     type="time"
                     value={reservationForm.endTime}
-                    onChange={(e) => setReservationForm(prev => ({ ...prev, endTime: e.target.value }))}
+                    onChange={(e) => setReservationForm((prev) => ({ ...prev, endTime: e.target.value }))}
                     fullWidth
                     InputLabelProps={{ shrink: true }}
                   />
@@ -839,18 +894,20 @@ export default function FacultyReservationPage() {
 
                 {/* Schedule Section */}
                 <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.warning.main, 0.05), borderRadius: 2 }}>
-                  <Typography variant="subtitle2" fontWeight="bold" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography
+                    variant="subtitle2"
+                    fontWeight="bold"
+                    gutterBottom
+                    sx={{ display: "flex", alignItems: "center", gap: 1 }}
+                  >
                     <EventIcon fontSize="small" /> Schedule
                   </Typography>
-                  
+
                   <FormControl fullWidth sx={{ mb: 2 }}>
                     <InputLabel>Schedule Type</InputLabel>
                     <Select
                       value={reservationForm.scheduleType}
-                      onChange={(e) => setReservationForm(prev => ({ 
-                        ...prev, 
-                        scheduleType: e.target.value as 'single' | 'recurring'
-                      }))}
+                      onChange={(e) => setReservationForm((prev) => ({ ...prev, scheduleType: e.target.value as "single" | "recurring" }))}
                       label="Schedule Type"
                     >
                       <MenuItem value="single">Single Date</MenuItem>
@@ -858,49 +915,58 @@ export default function FacultyReservationPage() {
                     </Select>
                   </FormControl>
 
-                  {reservationForm.scheduleType === 'single' ? (
+                  {reservationForm.scheduleType === "single" ? (
                     <TextField
                       type="date"
                       label="Date *"
                       value={reservationForm.scheduleDate}
-                      onChange={(e) => setReservationForm(prev => ({ ...prev, scheduleDate: e.target.value }))}
+                      onChange={(e) => setReservationForm((prev) => ({ ...prev, scheduleDate: e.target.value }))}
                       fullWidth
                       InputLabelProps={{ shrink: true }}
                     />
                   ) : (
                     <Stack spacing={2}>
-                      <Typography variant="subtitle2" fontWeight="bold">Select Days of Week *</Typography>
-                      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 1 }}>
-                        {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => (
+                      <Typography variant="subtitle2" fontWeight="bold">
+                        Select Days of Week *
+                      </Typography>
+                      <Box
+                        sx={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+                          gap: 1,
+                        }}
+                      >
+                        {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((day) => (
                           <Box
                             key={day}
                             onClick={() => {
-                              setReservationForm(prev => {
+                              setReservationForm((prev) => {
                                 const days = prev.recurringDays.includes(day)
-                                  ? prev.recurringDays.filter(d => d !== day)
+                                  ? prev.recurringDays.filter((d) => d !== day)
                                   : [...prev.recurringDays, day];
                                 return { ...prev, recurringDays: days };
                               });
                             }}
                             sx={{
                               p: 1.5,
-                              border: '2px solid',
-                              borderColor: reservationForm.recurringDays.includes(day) ? 'primary.main' : 'divider',
+                              border: "2px solid",
+                              borderColor: reservationForm.recurringDays.includes(day) ? "primary.main" : "divider",
                               borderRadius: 2,
-                              cursor: 'pointer',
-                              textAlign: 'center',
-                              transition: 'all 0.2s',
-                              bgcolor: reservationForm.recurringDays.includes(day) ? alpha(theme.palette.primary.main, 0.1) : 'transparent',
-                              '&:hover': {
-                                borderColor: 'primary.main',
-                                bgcolor: alpha(theme.palette.primary.main, 0.05)
-                              }
+                              cursor: "pointer",
+                              textAlign: "center",
+                              transition: "all 0.2s",
+                              bgcolor:
+                                reservationForm.recurringDays.includes(day) ? alpha(theme.palette.primary.main, 0.1) : "transparent",
+                              "&:hover": {
+                                borderColor: "primary.main",
+                                bgcolor: alpha(theme.palette.primary.main, 0.05),
+                              },
                             }}
                           >
-                            <Typography 
-                              variant="body2" 
-                              fontWeight={reservationForm.recurringDays.includes(day) ? 'bold' : 'medium'}
-                              color={reservationForm.recurringDays.includes(day) ? 'primary' : 'text.primary'}
+                            <Typography
+                              variant="body2"
+                              fontWeight={reservationForm.recurringDays.includes(day) ? "bold" : "medium"}
+                              color={reservationForm.recurringDays.includes(day) ? "primary" : "text.primary"}
                             >
                               {day}
                             </Typography>
@@ -911,29 +977,38 @@ export default function FacultyReservationPage() {
                         type="date"
                         label="End Date (Optional)"
                         value={reservationForm.recurringEndDate}
-                        onChange={(e) => setReservationForm(prev => ({ ...prev, recurringEndDate: e.target.value }))}
+                        onChange={(e) => setReservationForm((prev) => ({ ...prev, recurringEndDate: e.target.value }))}
                         fullWidth
                         InputLabelProps={{ shrink: true }}
                         helperText="Leave empty for no end date"
                       />
                       {reservationForm.recurringDays.length > 0 && (
-                        <Typography variant="caption" color="text.secondary" sx={{ p: 1, bgcolor: alpha(theme.palette.info.main, 0.1), borderRadius: 1 }}>
-                          📅 Recurring: Every {reservationForm.recurringDays.join(', ')}{reservationForm.recurringEndDate ? ` until ${reservationForm.recurringEndDate}` : ' (ongoing)'}
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          sx={{ p: 1, bgcolor: alpha(theme.palette.info.main, 0.1), borderRadius: 1 }}
+                        >
+                          📅 Recurring: Every {reservationForm.recurringDays.join(", ")}{" "}
+                          {reservationForm.recurringEndDate ? `until ${reservationForm.recurringEndDate}` : " (ongoing)"}
                         </Typography>
                       )}
                       {reservationForm.recurringDays.length === 0 && (
-                        <Typography variant="caption" color="error" sx={{ p: 1, bgcolor: alpha(theme.palette.error.main, 0.1), borderRadius: 1 }}>
+                        <Typography
+                          variant="caption"
+                          color="error"
+                          sx={{ p: 1, bgcolor: alpha(theme.palette.error.main, 0.1), borderRadius: 1 }}
+                        >
                           ⚠️ Please select at least one day of the week
                         </Typography>
                       )}
                     </Stack>
                   )}
                 </Paper>
-                
+
                 <TextField
                   label="Additional Notes (Optional)"
                   value={reservationForm.notes}
-                  onChange={(e) => setReservationForm(prev => ({ ...prev, notes: e.target.value }))}
+                  onChange={(e) => setReservationForm((prev) => ({ ...prev, notes: e.target.value }))}
                   fullWidth
                   multiline
                   rows={2}
@@ -944,26 +1019,26 @@ export default function FacultyReservationPage() {
 
             {/* Items Needed Toggle */}
             <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.success.main, 0.04) }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
                 <Box
-                  onClick={() => setReservationForm(prev => ({ ...prev, needsItems: !prev.needsItems }))}
+                  onClick={() => setReservationForm((prev) => ({ ...prev, needsItems: !prev.needsItems }))}
                   sx={{
                     p: 1.5,
-                    border: '2px solid',
-                    borderColor: reservationForm.needsItems ? 'success.main' : 'divider',
+                    border: "2px solid",
+                    borderColor: reservationForm.needsItems ? "success.main" : "divider",
                     borderRadius: 2,
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                    bgcolor: reservationForm.needsItems ? alpha(theme.palette.success.main, 0.1) : 'transparent',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
+                    cursor: "pointer",
+                    transition: "all 0.2s",
+                    bgcolor: reservationForm.needsItems ? alpha(theme.palette.success.main, 0.1) : "transparent",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
                     minWidth: 50,
-                    minHeight: 50
+                    minHeight: 50,
                   }}
                 >
-                  <Typography variant="h6" color={reservationForm.needsItems ? 'success.main' : 'text.disabled'}>
-                    {reservationForm.needsItems ? '✓' : '○'}
+                  <Typography variant="h6" color={reservationForm.needsItems ? "success.main" : "text.disabled"}>
+                    {reservationForm.needsItems ? "✓" : "○"}
                   </Typography>
                 </Box>
                 <Box>
@@ -971,9 +1046,9 @@ export default function FacultyReservationPage() {
                     Do you need equipment items for this reservation?
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    {reservationForm.needsItems 
-                      ? 'Click below to add consumable and non-consumable items' 
-                      : 'No items will be requested for this reservation'}
+                    {reservationForm.needsItems
+                      ? "Click below to add consumable and non-consumable items"
+                      : "No items will be requested for this reservation"}
                   </Typography>
                 </Box>
               </Box>
@@ -981,274 +1056,256 @@ export default function FacultyReservationPage() {
 
             {/* Requested Items - Two Sections (Only show if needsItems is true) */}
             {reservationForm.needsItems && (
-            <Stack direction={{ xs: 'column', md: 'row' }} spacing={3}>
-              {/* Consumable Items */}
-              <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.success.main, 0.04), flex: 1 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <ScienceIcon color="success" />
-                    <Typography variant="h6" color="success.main">
-                      Consumable Items
-                    </Typography>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={3}>
+                {/* Consumable Items */}
+                <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.success.main, 0.04), flex: 1 }}>
+                  <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2 }}>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <ScienceIcon color="success" />
+                      <Typography variant="h6" color="success.main">
+                        Consumable Items
+                      </Typography>
+                    </Box>
+                    <Chip label={`Total: ${totalConsumableItems}`} color="success" variant="filled" />
                   </Box>
-                  <Chip 
-                    label={`Total: ${totalConsumableItems}`} 
-                    color="success" 
-                    variant="filled"
-                  />
-                </Box>
-                
-                {/* Consumable Item Form */}
-                <Stack spacing={2} sx={{ mb: 3 }}>
-                  <TextField
-                    label="Search Consumable Item"
-                    value={consumableSearch}
-                    onChange={e => setConsumableSearch(e.target.value)}
-                    fullWidth
-                    placeholder="Type to search inventory..."
-                  />
-                  <FormControl fullWidth>
-                    <InputLabel>Select Consumable Item</InputLabel>
-                    <Select
-                      value={currentConsumable.selected_num || (currentConsumable.item_name === 'Other' ? 'Other' : '')}
-                      label="Select Consumable Item"
-                      onChange={e => {
-                        const selectedNum = String(e.target.value);
-                        if (selectedNum === 'Other') {
-                          setCurrentConsumable(prev => ({
-                            ...prev,
-                            item_name: 'Other',
-                            selected_num: '',
-                            custom_name: ''
-                          }));
-                          return;
-                        }
-                        const inv = getInventoryOptions('consumable', consumableSearch).find(i => String(i.num) === selectedNum);
-                        if (!inv) return;
-                        // prevent duplicate assignment of same inventory num
-                        const already = consumableItems.some(it => (it as any).item_id && (it as any).item_id === selectedNum);
-                        if (!already) {
-                          setConsumableItems(prev => [
-                            ...prev,
-                            {
-                              item_name: inv.equipment_name,
-                              quantity: currentConsumable.quantity || 1,
-                              item_type: 'consumable',
-                              item_id: selectedNum
-                            } as any
-                          ]);
-                        }
-                        // reset selection state
-                        setCurrentConsumable({
-                          item_name: '',
-                          quantity: 1,
-                          item_type: 'consumable',
-                          custom_name: '',
-                          selected_num: ''
-                        });
-                        setConsumableSearch('');
-                      }}
-                      MenuProps={{ PaperProps: { style: { maxHeight: 300 } } }}
-                    >
-                      {getInventoryOptions('consumable', consumableSearch).map(item => (
-                        <MenuItem key={item.num} value={item.num}>
-                          {item.equipment_name} (Available: {item.available})
-                        </MenuItem>
-                      ))}
-                      <MenuItem value="Other">Other (Specify)</MenuItem>
-                    </Select>
-                  </FormControl>
-                  {currentConsumable.item_name === 'Other' && (
+
+                  {/* Consumable Item Form */}
+                  <Stack spacing={2} sx={{ mb: 3 }}>
                     <TextField
-                      label="Custom Item Name"
-                      value={currentConsumable.custom_name ?? ''}
-                      onChange={e => setCurrentConsumable(prev => ({ ...prev, custom_name: e.target.value }))
-                      }
+                      label="Search Consumable Item"
+                      value={consumableSearch}
+                      onChange={(e) => setConsumableSearch(e.target.value)}
                       fullWidth
-                      required
+                      placeholder="Type to search inventory..."
                     />
-                  )}
-                  <TextField
-                    label="Qty per Group *"
-                    type="number"
-                    value={currentConsumable.quantity}
-                    onChange={e => setCurrentConsumable(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
-                    sx={{ minWidth: 140 }}
-                    inputProps={{ min: 1 }}
-                  />
-                  {currentConsumable.selected_num && currentConsumable.item_name !== 'Other' && (
-                    <Typography variant="caption" color="text.secondary">
-                      Available: {getInventoryOptions('consumable').find(i => i.num === currentConsumable.selected_num)?.available ?? 0}
+                    <FormControl fullWidth>
+                      <InputLabel>Select Consumable Item</InputLabel>
+                      <Select
+                        value={currentConsumable.selected_num || (currentConsumable.item_name === "Other" ? "Other" : "")}
+                        label="Select Consumable Item"
+                        onChange={(e) => {
+                          const selectedNum = String(e.target.value);
+                          if (selectedNum === "Other") {
+                            setCurrentConsumable((prev) => ({
+                              ...prev,
+                              item_name: "Other",
+                              selected_num: "",
+                              custom_name: "",
+                            }));
+                            return;
+                          }
+                          const inv = getInventoryOptions("consumable", consumableSearch).find((i) => String(i.num) === selectedNum);
+                          if (!inv) return;
+                          // prevent duplicate assignment of same inventory num
+                          const already = consumableItems.some((it) => (it as any).item_id && (it as any).item_id === selectedNum);
+                          if (!already) {
+                            setConsumableItems((prev) => [
+                              ...prev,
+                              {
+                                item_name: inv.equipment_name,
+                                quantity: currentConsumable.quantity || 1,
+                                item_type: "consumable",
+                                item_id: selectedNum,
+                              } as any,
+                            ]);
+                          }
+                          // reset selection state
+                          setCurrentConsumable({
+                            item_name: "",
+                            quantity: 1,
+                            item_type: "consumable",
+                            custom_name: "",
+                            selected_num: "",
+                          });
+                          setConsumableSearch("");
+                        }}
+                        MenuProps={{ PaperProps: { style: { maxHeight: 300 } } }}
+                      >
+                        {getInventoryOptions("consumable", consumableSearch).map((item) => (
+                          <MenuItem key={item.num} value={item.num}>
+                            {item.equipment_name} (Available: {item.available})
+                          </MenuItem>
+                        ))}
+                        <MenuItem value="Other">Other (Specify)</MenuItem>
+                      </Select>
+                    </FormControl>
+                    {currentConsumable.item_name === "Other" && (
+                      <TextField
+                        label="Custom Item Name"
+                        value={currentConsumable.custom_name ?? ""}
+                        onChange={(e) => setCurrentConsumable((prev) => ({ ...prev, custom_name: e.target.value }))}
+                        fullWidth
+                        required
+                      />
+                    )}
+                    <TextField
+                      label="Qty per Group *"
+                      type="number"
+                      value={currentConsumable.quantity}
+                      onChange={(e) => setCurrentConsumable((prev) => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
+                      sx={{ minWidth: 140 }}
+                      inputProps={{ min: 1 }}
+                    />
+                    {currentConsumable.selected_num && currentConsumable.item_name !== "Other" && (
+                      <Typography variant="caption" color="text.secondary">
+                        Available: {getInventoryOptions("consumable").find((i) => i.num === currentConsumable.selected_num)?.available ?? 0}
+                      </Typography>
+                    )}
+                    <Button
+                      startIcon={<AddIcon />}
+                      onClick={handleAddConsumable}
+                      variant="outlined"
+                      disabled={
+                        !currentConsumable.item_name ||
+                        (currentConsumable.item_name === "Other" && !(currentConsumable.custom_name ?? "").trim()) ||
+                        currentConsumable.quantity < 1
+                      }
+                    >
+                      Add Consumable Item
+                    </Button>
+                  </Stack>
+
+                  {consumableItems.length > 0 ? (
+                    <ItemsTable items={consumableItems} onRemove={handleRemoveConsumable} type="consumable" />
+                  ) : (
+                    <Typography variant="body2" color="text.secondary" textAlign="center" py={3}>
+                      No consumable items added yet.
                     </Typography>
                   )}
-                  <Button
-                    startIcon={<AddIcon />}
-                    onClick={handleAddConsumable}
-                    variant="outlined"
-                    disabled={
-                      !currentConsumable.item_name ||
-                      (currentConsumable.item_name === 'Other' && !(currentConsumable.custom_name ?? '').trim()) ||
-                      currentConsumable.quantity < 1
-                    }
-                  >
-                    Add Consumable Item
-                  </Button>
-                </Stack>
+                </Paper>
 
-                {consumableItems.length > 0 ? (
-                  <ItemsTable 
-                    items={consumableItems} 
-                    onRemove={handleRemoveConsumable} 
-                    type="consumable"
-                  />
-                ) : (
-                  <Typography variant="body2" color="text.secondary" textAlign="center" py={3}>
-                    No consumable items added yet.
-                  </Typography>
-                )}
-              </Paper>
-
-              {/* Non-Consumable Items */}
-              <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.info.main, 0.04), flex: 1 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <BuildIcon color="info" />
-                    <Typography variant="h6" color="info.main">
-                      Non-Consumable Items
-                    </Typography>
+                {/* Non-Consumable Items */}
+                <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.info.main, 0.04), flex: 1 }}>
+                  <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 2 }}>
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                      <BuildIcon color="info" />
+                      <Typography variant="h6" color="info.main">
+                        Non-Consumable Items
+                      </Typography>
+                    </Box>
+                    <Chip label={`Total: ${totalNonConsumableItems}`} color="info" variant="filled" />
                   </Box>
-                  <Chip 
-                    label={`Total: ${totalNonConsumableItems}`} 
-                    color="info" 
-                    variant="filled"
-                  />
-                </Box>
-                
-                {/* Non-Consumable Item Form */}
-                <Stack spacing={2} sx={{ mb: 3 }}>
-                  <TextField
-                    label="Search Non-Consumable Item"
-                    value={nonConsumableSearch}
-                    onChange={e => setNonConsumableSearch(e.target.value)}
-                    fullWidth
-                    placeholder="Type to search inventory..."
-                  />
-                  <FormControl fullWidth>
-                    <InputLabel>Select Non-Consumable Item</InputLabel>
-                    <Select
-                      value={currentNonConsumable.selected_num || (currentNonConsumable.item_name === 'Other' ? 'Other' : '')}
-                      label="Select Non-Consumable Item"
-                      onChange={e => {
-                        const selectedNum = String(e.target.value);
-                        if (selectedNum === 'Other') {
-                          setCurrentNonConsumable(prev => ({
-                            ...prev,
-                            item_name: 'Other',
-                            selected_num: '',
-                            custom_name: ''
-                          }));
-                          return;
-                        }
-                        const inv = getInventoryOptions('non-consumable', nonConsumableSearch).find(i => String(i.num) === selectedNum);
-                        if (!inv) return;
-                        const already = nonConsumableItems.some(it => (it as any).item_id && (it as any).item_id === selectedNum);
-                        if (!already) {
-                          setNonConsumableItems(prev => [
-                            ...prev,
-                            {
-                              item_name: inv.equipment_name,
-                              quantity: currentNonConsumable.quantity || 1,
-                              item_type: 'non-consumable',
-                              item_id: selectedNum
-                            } as any
-                          ]);
-                        }
-                        // reset selection state
-                        setCurrentNonConsumable({
-                          item_name: '',
-                          quantity: 1,
-                          item_type: 'non-consumable',
-                          custom_name: '',
-                          selected_num: ''
-                        });
-                        setNonConsumableSearch('');
-                      }}
-                      MenuProps={{ PaperProps: { style: { maxHeight: 300 } } }}
-                    >
-                      {getInventoryOptions('non-consumable', nonConsumableSearch).map(item => (
-                        <MenuItem key={item.num} value={item.num}>
-                          {item.equipment_name} (Available: {item.available})
-                        </MenuItem>
-                      ))}
-                      <MenuItem value="Other">Other (Specify)</MenuItem>
-                    </Select>
-                  </FormControl>
-                  {currentNonConsumable.item_name === 'Other' && (
+
+                  {/* Non-Consumable Item Form */}
+                  <Stack spacing={2} sx={{ mb: 3 }}>
                     <TextField
-                      label="Custom Item Name"
-                      value={currentNonConsumable.custom_name ?? ''}
-                      onChange={e => setCurrentNonConsumable(prev => ({ ...prev, custom_name: e.target.value }))
-                      }
+                      label="Search Non-Consumable Item"
+                      value={nonConsumableSearch}
+                      onChange={(e) => setNonConsumableSearch(e.target.value)}
                       fullWidth
-                      required
+                      placeholder="Type to search inventory..."
                     />
-                  )}
-                  <TextField
-                    label="Qty per Group *"
-                    type="number"
-                    value={currentNonConsumable.quantity}
-                    onChange={e => setCurrentNonConsumable(prev => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
-                    sx={{ minWidth: 140 }}
-                    inputProps={{ min: 1 }}
-                  />
-                  {currentNonConsumable.selected_num && currentNonConsumable.item_name !== 'Other' && (
-                    <Typography variant="caption" color="text.secondary">
-                      Available: {getInventoryOptions('non-consumable').find(i => i.num === currentNonConsumable.selected_num)?.available ?? 0}
+                    <FormControl fullWidth>
+                      <InputLabel>Select Non-Consumable Item</InputLabel>
+                      <Select
+                        value={currentNonConsumable.selected_num || (currentNonConsumable.item_name === "Other" ? "Other" : "")}
+                        label="Select Non-Consumable Item"
+                        onChange={(e) => {
+                          const selectedNum = String(e.target.value);
+                          if (selectedNum === "Other") {
+                            setCurrentNonConsumable((prev) => ({
+                              ...prev,
+                              item_name: "Other",
+                              selected_num: "",
+                              custom_name: "",
+                            }));
+                            return;
+                          }
+                          const inv = getInventoryOptions("non-consumable", nonConsumableSearch).find((i) => String(i.num) === selectedNum);
+                          if (!inv) return;
+                          const already = nonConsumableItems.some((it) => (it as any).item_id && (it as any).item_id === selectedNum);
+                          if (!already) {
+                            setNonConsumableItems((prev) => [
+                              ...prev,
+                              {
+                                item_name: inv.equipment_name,
+                                quantity: currentNonConsumable.quantity || 1,
+                                item_type: "non-consumable",
+                                item_id: selectedNum,
+                              } as any,
+                            ]);
+                          }
+                          // reset selection state
+                          setCurrentNonConsumable({
+                            item_name: "",
+                            quantity: 1,
+                            item_type: "non-consumable",
+                            custom_name: "",
+                            selected_num: "",
+                          });
+                          setNonConsumableSearch("");
+                        }}
+                        MenuProps={{ PaperProps: { style: { maxHeight: 300 } } }}
+                      >
+                        {getInventoryOptions("non-consumable", nonConsumableSearch).map((item) => (
+                          <MenuItem key={item.num} value={item.num}>
+                            {item.equipment_name} (Available: {item.available})
+                          </MenuItem>
+                        ))}
+                        <MenuItem value="Other">Other (Specify)</MenuItem>
+                      </Select>
+                    </FormControl>
+                    {currentNonConsumable.item_name === "Other" && (
+                      <TextField
+                        label="Custom Item Name"
+                        value={currentNonConsumable.custom_name ?? ""}
+                        onChange={(e) => setCurrentNonConsumable((prev) => ({ ...prev, custom_name: e.target.value }))}
+                        fullWidth
+                        required
+                      />
+                    )}
+                    <TextField
+                      label="Qty per Group *"
+                      type="number"
+                      value={currentNonConsumable.quantity}
+                      onChange={(e) => setCurrentNonConsumable((prev) => ({ ...prev, quantity: parseInt(e.target.value) || 1 }))}
+                      sx={{ minWidth: 140 }}
+                      inputProps={{ min: 1 }}
+                    />
+                    {currentNonConsumable.selected_num && currentNonConsumable.item_name !== "Other" && (
+                      <Typography variant="caption" color="text.secondary">
+                        Available: {getInventoryOptions("non-consumable").find((i) => i.num === currentNonConsumable.selected_num)?.available ?? 0}
+                      </Typography>
+                    )}
+                    <Button
+                      startIcon={<AddIcon />}
+                      onClick={handleAddNonConsumable}
+                      variant="outlined"
+                      disabled={
+                        !currentNonConsumable.item_name ||
+                        (currentNonConsumable.item_name === "Other" && !(currentNonConsumable.custom_name ?? "").trim()) ||
+                        currentNonConsumable.quantity < 1
+                      }
+                    >
+                      Add Non-Consumable Item
+                    </Button>
+                  </Stack>
+
+                  {nonConsumableItems.length > 0 ? (
+                    <ItemsTable items={nonConsumableItems} onRemove={handleRemoveNonConsumable} type="non-consumable" />
+                  ) : (
+                    <Typography variant="body2" color="text.secondary" textAlign="center" py={3}>
+                      No non-consumable items added yet.
                     </Typography>
                   )}
-                  <Button
-                    startIcon={<AddIcon />}
-                    onClick={handleAddNonConsumable}
-                    variant="outlined"
-                    disabled={
-                      !currentNonConsumable.item_name ||
-                      (currentNonConsumable.item_name === 'Other' && !(currentNonConsumable.custom_name ?? '').trim()) ||
-                      currentNonConsumable.quantity < 1
-                    }
-                  >
-                    Add Non-Consumable Item
-                  </Button>
-                </Stack>
-
-                {nonConsumableItems.length > 0 ? (
-                  <ItemsTable
-                    items={nonConsumableItems}
-                    onRemove={handleRemoveNonConsumable}
-                    type="non-consumable"
-                  />
-                ) : (
-                  <Typography variant="body2" color="text.secondary" textAlign="center" py={3}>
-                    No non-consumable items added yet.
-                  </Typography>
-                )}
-                </Paper> {/* <-- missing closing tag fixed */}
-            </Stack>
+                </Paper>
+              </Stack>
             )}
 
             {/* Summary and Submit */}
             <Paper sx={{ p: 3, bgcolor: alpha(theme.palette.warning.main, 0.04) }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
                 <Typography variant="h6" color="warning.main">
                   Reservation Summary
                 </Typography>
-                <Chip 
-                  label={`Grand Total: ${totalAllItems} items`} 
-                  color="warning" 
+                <Chip
+                  label={`Grand Total: ${totalAllItems} items`}
+                  color="warning"
                   variant="filled"
-                  sx={{ fontSize: '1rem', py: 1 }}
+                  sx={{ fontSize: "1rem", py: 1 }}
                 />
               </Box>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 2 }}>
                 <Box sx={{ flex: 1 }}>
                   <Typography variant="body2">
                     Consumable Items: <strong>{totalConsumableItems}</strong> total items
@@ -1266,8 +1323,8 @@ export default function FacultyReservationPage() {
                   </Typography>
                 </Box>
               </Stack>
-              
-              <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+
+              <Box sx={{ display: "flex", justifyContent: "center", mt: 3 }}>
                 <Button
                   variant="contained"
                   size="large"
@@ -1279,10 +1336,10 @@ export default function FacultyReservationPage() {
                     borderRadius: 2,
                     px: 4,
                     py: 1.5,
-                    fontSize: '1.1rem'
+                    fontSize: "1.1rem",
                   }}
                 >
-                  {saving ? 'Submitting...' : 'Submit Reservation'}
+                  {saving ? "Submitting..." : "Submit Reservation"}
                 </Button>
               </Box>
             </Paper>
@@ -1294,13 +1351,13 @@ export default function FacultyReservationPage() {
         // Reservation Inbox
         <Card sx={{ p: 3, borderRadius: 3 }}>
           {loadingReservations ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
+            <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 400 }}>
               <CircularProgress />
             </Box>
           ) : myReservations.length === 0 ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
+            <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 400 }}>
               <Stack alignItems="center" spacing={2}>
-                <InboxIcon sx={{ fontSize: 60, color: 'text.disabled' }} />
+                <InboxIcon sx={{ fontSize: 60, color: "text.disabled" }} />
                 <Typography variant="h6" color="text.secondary">
                   No reservations yet
                 </Typography>
@@ -1314,28 +1371,40 @@ export default function FacultyReservationPage() {
               <Table>
                 <TableHead>
                   <TableRow sx={{ bgcolor: alpha(theme.palette.primary.main, 0.08) }}>
-                    <TableCell><Typography fontWeight="bold">Code</Typography></TableCell>
-                    <TableCell><Typography fontWeight="bold">Subject</Typography></TableCell>
-                    <TableCell><Typography fontWeight="bold">Course</Typography></TableCell>
-                    <TableCell><Typography fontWeight="bold">Schedule</Typography></TableCell>
-                    <TableCell><Typography fontWeight="bold">Status</Typography></TableCell>
-                    <TableCell align="center"><Typography fontWeight="bold">Actions</Typography></TableCell>
+                    <TableCell>
+                      <Typography fontWeight="bold">Code</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography fontWeight="bold">Subject</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography fontWeight="bold">Course</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography fontWeight="bold">Schedule</Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography fontWeight="bold">Status</Typography>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Typography fontWeight="bold">Actions</Typography>
+                    </TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {myReservations.map((reservation) => (
-                    <TableRow 
+                    <TableRow
                       key={reservation._id}
-                      sx={{ 
-                        '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.05) },
-                        borderBottom: '1px solid',
-                        borderColor: 'divider'
+                      sx={{
+                        "&:hover": { bgcolor: alpha(theme.palette.primary.main, 0.05) },
+                        borderBottom: "1px solid",
+                        borderColor: "divider",
                       }}
                     >
                       <TableCell>
-                        <Chip 
-                          label={reservation.reservation_code} 
-                          color="primary" 
+                        <Chip
+                          label={reservation.reservation_code}
+                          color="primary"
                           variant="outlined"
                           size="small"
                         />
@@ -1350,13 +1419,16 @@ export default function FacultyReservationPage() {
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Chip 
+                        <Chip
                           label={reservation.status}
                           color={
-                            reservation.status === 'Pending' ? 'warning' :
-                            reservation.status === 'Assigned' ? 'success' :
-                            reservation.status === 'Rejected' ? 'error' :
-                            'default'
+                            reservation.status === "Pending"
+                              ? "warning"
+                              : reservation.status === "Assigned"
+                              ? "success"
+                              : reservation.status === "Rejected"
+                              ? "error"
+                              : "default"
                           }
                           size="small"
                           variant="filled"
@@ -1364,39 +1436,65 @@ export default function FacultyReservationPage() {
                       </TableCell>
                       <TableCell align="center">
                         <Stack direction="row" spacing={1} justifyContent="center">
-                          <IconButton
-                            size="small"
-                            onClick={() => {
-                              setSelectedReservation(reservation);
-                              setViewDialogOpen(true);
-                            }}
-                            color="primary"
-                          >
-                            <VisibilityIcon />
-                          </IconButton>
+                          <Tooltip title="View Details">
+                            <IconButton
+                              color="default"
+                              onClick={() => {
+                                setSelectedReservation(reservation);
+                                setViewDialogOpen(true);
+                              }}
+                              sx={{
+                                bgcolor: "#ffebee",
+                                "&:hover": { bgcolor: "#484848ff", color: "#fff" },
+                                p: 1,
+                              }}
+                            >
+                              <VisibilityIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
 
                           {/* Chat button with unseen badge */}
-                          <IconButton
-                            size="small"
-                            onClick={() => handleOpenChat(reservation)}
-                            color="info"
-                          >
-                            <Badge
-                              badgeContent={unseenCount(reservation)}
-                              color="error"
-                              invisible={unseenCount(reservation) === 0}
+                          <Tooltip title="Open Chat">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleOpenChat(reservation)}
+                              color="info"
                             >
-                              <ChatBubbleIcon />
-                            </Badge>
-                          </IconButton>
+                              <Badge
+                                badgeContent={unseenCount(reservation)}
+                                color="error"
+                                invisible={unseenCount(reservation) === 0}
+                              >
+                                <ChatBubbleIcon />
+                              </Badge>
+                            </IconButton>
+                          </Tooltip>
 
-                          <IconButton size="small" onClick={() => openEditForm(reservation)} color="primary" title="Edit reservation">
-                            <EditIcon />
-                          </IconButton>
+                          <Tooltip title="Edit Reservation">
+                            <IconButton size="small" onClick={() => openEditForm(reservation)} color="primary">
+                              <EditIcon />
+                            </IconButton>
+                          </Tooltip>
 
-                          <IconButton size="small" onClick={() => openLogs(reservation)} color="default" title="View Edit Logs">
-                            <ListIcon />
-                          </IconButton>
+                          <Tooltip title="View Edit Logs">
+                            <IconButton size="small" onClick={() => openLogs(reservation)} color="default">
+                              <ListIcon />
+                            </IconButton>
+                          </Tooltip>
+
+                          <Tooltip title="Delete Reservation">
+                            <IconButton
+                              color="error"
+                              onClick={() => handleDeleteReservation(reservation)}
+                              sx={{
+                                bgcolor: "#ffebee",
+                                "&:hover": { bgcolor: "#f44336", color: "#fff" },
+                                p: 1,
+                              }}
+                            >
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
                         </Stack>
                       </TableCell>
                     </TableRow>
@@ -1411,7 +1509,7 @@ export default function FacultyReservationPage() {
       {/* Success Dialog */}
       <Dialog open={successDialog} onClose={() => setSuccessDialog(false)}>
         <DialogTitle>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <EventIcon color="success" />
             <Typography variant="h6">Reservation Created Successfully!</Typography>
           </Box>
@@ -1420,12 +1518,12 @@ export default function FacultyReservationPage() {
           <Typography>
             Your reservation has been submitted successfully. Please save your reservation code:
           </Typography>
-          <Box sx={{ textAlign: 'center', my: 2 }}>
-            <Chip 
-              label={reservationCode} 
-              color="primary" 
+          <Box sx={{ textAlign: "center", my: 2 }}>
+            <Chip
+              label={reservationCode}
+              color="primary"
               variant="filled"
-              sx={{ fontSize: '1.2rem', py: 2, px: 3 }}
+              sx={{ fontSize: "1.2rem", py: 2, px: 3 }}
             />
           </Box>
           <Box sx={{ mb: 2 }}>
@@ -1443,7 +1541,7 @@ export default function FacultyReservationPage() {
             </Typography>
           </Box>
           <Typography variant="body2" color="text.secondary">
-            Student assistants will assign actual equipment items to your reservation. 
+            Student assistants will assign actual equipment items to your reservation.
             You can use this code to track your reservation status.
           </Typography>
         </DialogContent>
@@ -1457,9 +1555,11 @@ export default function FacultyReservationPage() {
       {/* View Details Dialog */}
       <Dialog open={viewDialogOpen} onClose={() => setViewDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <VisibilityIcon sx={{ color: brandRed }} />
-            <Typography variant="h6" sx={{ color: brandRed }}>Reservation Details</Typography>
+            <Typography variant="h6" sx={{ color: brandRed }}>
+              Reservation Details
+            </Typography>
           </Box>
         </DialogTitle>
         <DialogContent>
@@ -1470,41 +1570,58 @@ export default function FacultyReservationPage() {
                   Basic Information
                 </Typography>
                 <Stack spacing={2}>
-                  <Box sx={{ display: 'flex', gap: 2 }}>
-                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>Code:</Typography>
+                  <Box sx={{ display: "flex", gap: 2 }}>
+                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>
+                      Code:
+                    </Typography>
                     <Chip label={selectedReservation.reservation_code} size="small" />
                   </Box>
-                  <Box sx={{ display: 'flex', gap: 2 }}>
-                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>Status:</Typography>
-                    <Chip 
+                  <Box sx={{ display: "flex", gap: 2 }}>
+                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>
+                      Status:
+                    </Typography>
+                    <Chip
                       label={selectedReservation.status}
                       color={
-                        selectedReservation.status === 'Pending' ? 'warning' :
-                        selectedReservation.status === 'Assigned' ? 'success' :
-                        selectedReservation.status === 'Rejected' ? 'error' :
-                        'default'
+                        selectedReservation.status === "Pending"
+                          ? "warning"
+                          : selectedReservation.status === "Assigned"
+                          ? "success"
+                          : selectedReservation.status === "Rejected"
+                          ? "error"
+                          : "default"
                       }
                       size="small"
                     />
                   </Box>
-                  <Box sx={{ display: 'flex', gap: 2 }}>
-                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>Subject:</Typography>
+                  <Box sx={{ display: "flex", gap: 2 }}>
+                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>
+                      Subject:
+                    </Typography>
                     <Typography variant="body2">{selectedReservation.subject}</Typography>
                   </Box>
-                  <Box sx={{ display: 'flex', gap: 2 }}>
-                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>Course:</Typography>
+                  <Box sx={{ display: "flex", gap: 2 }}>
+                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>
+                      Course:
+                    </Typography>
                     <Typography variant="body2">{selectedReservation.course}</Typography>
                   </Box>
-                  <Box sx={{ display: 'flex', gap: 2 }}>
-                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>Schedule:</Typography>
+                  <Box sx={{ display: "flex", gap: 2 }}>
+                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>
+                      Schedule:
+                    </Typography>
                     <Typography variant="body2">{selectedReservation.schedule}</Typography>
                   </Box>
-                  <Box sx={{ display: 'flex', gap: 2 }}>
-                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>Room:</Typography>
+                  <Box sx={{ display: "flex", gap: 2 }}>
+                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>
+                      Room:
+                    </Typography>
                     <Typography variant="body2">{selectedReservation.room}</Typography>
                   </Box>
-                  <Box sx={{ display: 'flex', gap: 2 }}>
-                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>Groups:</Typography>
+                  <Box sx={{ display: "flex", gap: 2 }}>
+                    <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>
+                      Groups:
+                    </Typography>
                     <Chip label={selectedReservation.group_count} size="small" />
                   </Box>
                 </Stack>
@@ -1516,21 +1633,23 @@ export default function FacultyReservationPage() {
                 </Typography>
                 <Stack spacing={1}>
                   {selectedReservation.requested_items.map((item, idx) => (
-                    <Box 
+                    <Box
                       key={idx}
-                      sx={{ 
-                        p: 2, 
+                      sx={{
+                        p: 2,
                         bgcolor: alpha(theme.palette.primary.main, 0.05),
                         borderRadius: 1,
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
                       }}
                     >
                       <Box>
-                        <Typography variant="body2" fontWeight="medium">{item.item_name}</Typography>
+                        <Typography variant="body2" fontWeight="medium">
+                          {item.item_name}
+                        </Typography>
                         <Typography variant="caption" color="text.secondary">
-                          {item.item_type === 'consumable' ? '🧪 Consumable' : '🔧 Non-Consumable'}
+                          {item.item_type === "consumable" ? "🧪 Consumable" : "🔧 Non-Consumable"}
                         </Typography>
                       </Box>
                       <Chip label={`${item.quantity} per group`} size="small" />
@@ -1542,14 +1661,16 @@ export default function FacultyReservationPage() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setViewDialogOpen(false)} sx={{ textTransform: 'none' }}>Close</Button>
+          <Button onClick={() => setViewDialogOpen(false)} sx={{ textTransform: "none" }}>
+            Close
+          </Button>
         </DialogActions>
       </Dialog>
 
       {/* Message Chat Dialog */}
       <Dialog open={messageDialogOpen} onClose={() => { setMessageDialogOpen(false); stopChatPolling(); }} maxWidth="sm" fullWidth>
         <DialogTitle>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
             <ChatBubbleIcon sx={{ color: theme.palette.info.main }} />
             <Box>
               <Typography variant="h6" sx={{ color: theme.palette.info.main }}>
@@ -1572,10 +1693,10 @@ export default function FacultyReservationPage() {
                 sx={{
                   p: 2,
                   bgcolor: alpha(theme.palette.info.main, 0.04),
-                  overflowY: 'auto',
+                  overflowY: "auto",
                   maxHeight: 420,
-                  display: 'flex',
-                  flexDirection: 'column',
+                  display: "flex",
+                  flexDirection: "column",
                   gap: 1.5,
                   borderRadius: 3,
                   boxShadow: 1,
@@ -1583,31 +1704,37 @@ export default function FacultyReservationPage() {
               >
                 {selectedReservationForChat.messages && selectedReservationForChat.messages.length > 0 ? (
                   selectedReservationForChat.messages.map((msg, index) => {
-                    const isCurrentUser = msg.sender === JSON.parse(localStorage.getItem('user') || '{}').email;
+                    const isCurrentUser = msg.sender === JSON.parse(localStorage.getItem("user") || "{}").email;
                     return (
-                      <Box key={index} sx={{ display: 'flex', justifyContent: isCurrentUser ? 'flex-end' : 'flex-start' }}>
-                        <Paper sx={{
-                          p: 1.5,
-                          maxWidth: '70%',
-                          bgcolor: isCurrentUser ? alpha(theme.palette.primary.main, 0.15) : alpha(theme.palette.grey[300], 0.5),
-                          borderRadius: 2,
-                          boxShadow: 1
-                        }}>
-                          <Typography variant="subtitle2" fontWeight="bold" sx={{ color: isCurrentUser ? theme.palette.primary.main : theme.palette.text.primary }}>
+                      <Box key={index} sx={{ display: "flex", justifyContent: isCurrentUser ? "flex-end" : "flex-start" }}>
+                        <Paper
+                          sx={{
+                            p: 1.5,
+                            maxWidth: "70%",
+                            bgcolor: isCurrentUser ? alpha(theme.palette.primary.main, 0.15) : alpha(theme.palette.grey[300], 0.5),
+                            borderRadius: 2,
+                            boxShadow: 1,
+                          }}
+                        >
+                          <Typography
+                            variant="subtitle2"
+                            fontWeight="bold"
+                            sx={{ color: isCurrentUser ? theme.palette.primary.main : theme.palette.text.primary }}
+                          >
                             {(msg as any).sender_name || msg.sender}
                           </Typography>
-                          <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
+                          <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: "pre-wrap" }}>
                             {msg.message}
                           </Typography>
-                          <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 0.5 }}>
-                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          <Typography variant="caption" color="textSecondary" sx={{ display: "block", mt: 0.5 }}>
+                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </Typography>
                         </Paper>
                       </Box>
                     );
                   })
                 ) : (
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200 }}>
+                  <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200 }}>
                     <Typography variant="body2" color="textSecondary">No messages yet. Start the conversation!</Typography>
                   </Box>
                 )}
@@ -1616,27 +1743,32 @@ export default function FacultyReservationPage() {
             </Box>
           )}
         </DialogContent>
-        <DialogActions sx={{ flexDirection: 'column', gap: 1, py: 2 }}>
+        <DialogActions sx={{ flexDirection: "column", gap: 1, py: 2 }}>
           {/* Composer fixed below the scrollable messages container */}
-          <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+          <Box sx={{ width: "100%", display: "flex", justifyContent: "center" }}>
             <Paper
               sx={{
-                display: 'flex',
-                alignItems: 'center',
+                display: "flex",
+                alignItems: "center",
                 gap: 1,
                 p: 1,
                 borderRadius: 3,
                 boxShadow: 3,
-                width: { xs: '100%', sm: 520 },
-                maxWidth: '100%',
-                bgcolor: '#fff'
+                width: { xs: "100%", sm: 520 },
+                maxWidth: "100%",
+                bgcolor: "#fff",
               }}
             >
               <TextField
                 placeholder="Type a message..."
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && messageText.trim()) { e.preventDefault(); handleSendMessage(); } }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && messageText.trim()) {
+                    e.preventDefault();
+                    handleSendMessage();
+                  }
+                }}
                 multiline
                 maxRows={4}
                 fullWidth
@@ -1654,19 +1786,18 @@ export default function FacultyReservationPage() {
               </Button>
             </Paper>
           </Box>
-          
-          <Box sx={{ width: '100%', display: 'flex', justifyContent: 'flex-end' }}>
-           <Button
-  onClick={() => {
-    setMessageDialogOpen(false);
-    stopChatPolling();
-    window.location.reload(); // ← reloads the page
-  }}
-  sx={{ textTransform: 'none' }}
->
-  Close
-</Button>
 
+          <Box sx={{ width: "100%", display: "flex", justifyContent: "flex-end" }}>
+            <Button
+              onClick={() => {
+                setMessageDialogOpen(false);
+                stopChatPolling();
+                window.location.reload(); // ← reloads the page
+              }}
+              sx={{ textTransform: "none" }}
+            >
+              Close
+            </Button>
           </Box>
         </DialogActions>
       </Dialog>
@@ -1684,7 +1815,7 @@ export default function FacultyReservationPage() {
                 {log.reason && <Typography variant="caption" color="text.secondary">Reason: {log.reason}</Typography>}
                 <details style={{ marginTop: 8 }}>
                   <summary>View previous snapshot</summary>
-                  <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(log.previous, null, 2)}</pre>
+                  <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>{JSON.stringify(log.previous, null, 2)}</pre>
                 </details>
               </Paper>
             ))

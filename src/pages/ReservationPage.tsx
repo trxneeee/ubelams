@@ -43,6 +43,9 @@ import FilterListIcon from "@mui/icons-material/FilterList";
 import ChatBubbleIcon from "@mui/icons-material/ChatBubble";
 import SendIcon from "@mui/icons-material/Send";
 import CancelIcon from '@mui/icons-material/Cancel';
+import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
+import AddIcon from "@mui/icons-material/Add";
 import axios from 'axios';
 import { alpha, useTheme } from '@mui/material/styles';
 import Checkbox from '@mui/material/Checkbox';
@@ -100,6 +103,10 @@ interface InventoryItem {
 export default function ReservationPage() {
   const theme = useTheme();
   const brandRed = "#b91c1c";
+  // current user role — Student Assistant must not access some actions
+  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const currentRole = currentUser?.role || '';
+  const isStudentAssistant = currentRole === 'Student Assistant';
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
@@ -120,6 +127,15 @@ export default function ReservationPage() {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [chatRefreshInterval, setChatRefreshInterval] = useState<NodeJS.Timeout | null>(null);
   const [selectedReservations, setSelectedReservations] = useState<string[]>([]);
+  // AI / Report state (new)
+  const [aiDialogOpen, setAiDialogOpen] = useState(false);
+  const [question, setQuestion] = useState("");
+  const [reportText, setReportText] = useState("");
+  const [reportTable, setReportTable] = useState<{ columns: string[]; rows: string[][] } | null>(null);
+  const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [availableFields, setAvailableFields] = useState<{ field: string; label: string; type: 'string'|'number'|'date' }[]>([]);
+  const [selectedFields, setSelectedFields] = useState<string[]>([]);
+  const [reportFilters, setReportFilters] = useState<{ field: string; operator: string; value: string }[]>([]);
 
   // ref for messages container to auto-scroll
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -141,17 +157,7 @@ export default function ReservationPage() {
     } catch (e) {}
   };
 
-  useEffect(() => {
-    fetchReservations();
-    fetchInventory();
-  }, []);
-
-  useLayoutEffect(() => {
-    if (messageDialogOpen && selectedReservationForChat) {
-      scrollToBottom();
-    }
-  }, [messageDialogOpen, selectedReservationForChat?.messages?.length]);
-
+  // Fetch reservations from server
   const fetchReservations = async () => {
     setLoading(true);
     try {
@@ -164,6 +170,7 @@ export default function ReservationPage() {
     }
   };
 
+  // Fetch combined inventory
   const fetchInventory = async () => {
     try {
       const response = await axios.get(`${API_BASE_URL}/inventory`);
@@ -172,6 +179,18 @@ export default function ReservationPage() {
       console.error('Fetch inventory error:', error);
     }
   };
+
+  useEffect(() => {
+    fetchReservations();
+    fetchInventory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useLayoutEffect(() => {
+    if (messageDialogOpen && selectedReservationForChat) {
+      scrollToBottom();
+    }
+  }, [messageDialogOpen, selectedReservationForChat?.messages?.length]);
 
   const handleAssign = (reservation: Reservation) => {
     setSelectedReservation(reservation);
@@ -273,17 +292,20 @@ export default function ReservationPage() {
   };
 
   const handleApproveReservation = async (reservation: Reservation) => {
+    // guard by role
+    if (isStudentAssistant) {
+      alert('You are not allowed to approve reservations.');
+      return;
+    }
     if (reservation.status !== 'Pending') {
       alert('Only Pending reservations can be approved');
       return;
     }
-
     setProcessing(true);
     try {
       await axios.post(`${API_BASE_URL}/reservations/${reservation._id}/approve`, {
-        approved_by: JSON.parse(localStorage.getItem('user') || '{}').email || 'Unknown'
+        approved_by: currentUser.email || 'Unknown'
       });
-      
       await fetchReservations();
       alert('Reservation approved successfully');
     } catch (error) {
@@ -295,14 +317,22 @@ export default function ReservationPage() {
   };
 
   const handleRejectReservation = async (reservation: Reservation) => {
+    // role guard + status guard
+    if (isStudentAssistant) {
+      alert('You are not allowed to reject reservations.');
+      return;
+    }
+    if (reservation.status !== 'Pending') {
+      alert('Only Pending reservations can be rejected.');
+      return;
+    }
     const reason = window.prompt('Enter rejection reason (optional):', '');
     if (reason === null) return; // cancelled
     try {
-      const user = JSON.parse(localStorage.getItem('user') || '{}');
       await axios.post(`${API_BASE_URL}/reservations/${reservation._id}/reject`, {
         reason,
-        rejected_by: user.email || user.name || 'Unknown',
-        rejected_name: user.name || user.firstname || user.email
+        rejected_by: currentUser.email || currentUser.name || 'Unknown',
+        rejected_name: currentUser.name || currentUser.firstname || currentUser.email
       });
       await fetchReservations();
       alert('Reservation rejected');
@@ -325,6 +355,10 @@ export default function ReservationPage() {
   };
 
   const handleOpenChat = async (reservation: Reservation) => {
+    if (isStudentAssistant) {
+      alert('You are not allowed to open reservation messages.');
+      return;
+    }
     setSelectedReservationForChat(reservation);
     setMessageDialogOpen(true);
     setMessageText('');
@@ -424,10 +458,13 @@ export default function ReservationPage() {
   };
 
   const handleDeleteReservation = async (reservation: Reservation) => {
+    if (isStudentAssistant) {
+      alert('You are not allowed to delete reservations.');
+      return;
+    }
     if (!window.confirm(`Are you sure you want to delete reservation ${reservation.reservation_code}?`)) {
       return;
     }
-
     try {
       await axios.delete(`${API_BASE_URL}/reservations/${reservation._id}`);
       await fetchReservations();
@@ -526,6 +563,111 @@ export default function ReservationPage() {
   const allVisibleCount = filteredReservations.length;
   const headerChecked = allVisibleCount > 0 && selectedReservations.length === allVisibleCount;
   const headerIndeterminate = selectedReservations.length > 0 && selectedReservations.length < allVisibleCount;
+
+  // Available fields for reservation reports
+  const getAvailableFields = (): { field: string; label: string; type: 'string' | 'number' | 'date' }[] => [
+    { field: 'reservation_code', label: 'Reservation Code', type: 'string' },
+    { field: 'subject', label: 'Subject', type: 'string' },
+    { field: 'instructor', label: 'Instructor', type: 'string' },
+    { field: 'course', label: 'Course', type: 'string' },
+    { field: 'room', label: 'Room', type: 'string' },
+    { field: 'schedule', label: 'Schedule', type: 'string' },
+    { field: 'startTime', label: 'Start Time', type: 'string' },
+    { field: 'endTime', label: 'End Time', type: 'string' },
+    { field: 'status', label: 'Status', type: 'string' },
+    { field: 'date_created', label: 'Date Created', type: 'date' },
+    { field: 'date_approved', label: 'Date Approved', type: 'date' },
+    { field: 'date_assigned', label: 'Date Assigned', type: 'date' },
+    { field: 'date_completed', label: 'Date Completed', type: 'date' },
+    { field: 'group_count', label: 'Group Count', type: 'number' },
+    { field: 'items_count', label: 'Requested Items Count', type: 'number' },
+    { field: 'total_requested_quantity', label: 'Total Requested Quantity', type: 'number' }
+  ];
+ 
+  useEffect(() => {
+    setAvailableFields(getAvailableFields());
+  }, []);
+
+  const handleFieldSelection = (field: string) => {
+    setSelectedFields(prev => prev.includes(field) ? prev.filter(f => f !== field) : [...prev, field]);
+  };
+  const addFilter = () => setReportFilters(prev => [...prev, { field: '', operator: 'equals', value: '' }]);
+  const removeFilter = (i:number) => setReportFilters(prev => prev.filter((_,idx)=>idx!==i));
+  const updateFilter = (i:number, updates: Partial<{ field:string; operator:string; value:string }>) =>
+    setReportFilters(prev => prev.map((f,idx)=> idx===i ? { ...f, ...updates } : f));
+
+  const getOperatorsForField = (type:string) => type === 'number'
+    ? [{value:'equals',label:'Equals'},{value:'greaterThan',label:'Greater Than'},{value:'lessThan',label:'Less Than'}]
+    : [{value:'equals',label:'Equals'},{value:'contains',label:'Contains'}];
+
+  // Generate a custom table from current reservations using selectedFields & reportFilters
+  const generateCustomReport = () => {
+    const data = reservations.map(r => ({
+      ...r,
+      items_count: (r.requested_items||[]).length,
+      total_requested_quantity: (r.requested_items||[]).reduce((s, it) => s + (it.quantity||0), 0)
+    }));
+
+    const filtered = data.filter(rec =>
+      reportFilters.every(filter => {
+        if (!filter.field || !filter.value) return true;
+        const val = String((rec as any)[filter.field] ?? '').toLowerCase();
+        const fval = filter.value.toLowerCase();
+        switch (filter.operator) {
+          case 'equals': return val === fval;
+          case 'contains': return val.includes(fval);
+          case 'greaterThan': return Number((rec as any)[filter.field]||0) > Number(filter.value);
+          case 'lessThan': return Number((rec as any)[filter.field]||0) < Number(filter.value);
+          default: return true;
+        }
+      })
+    );
+
+    const columns = selectedFields.map(f => availableFields.find(a=>a.field===f)?.label || f);
+    const rows = filtered.map(rec => selectedFields.map(f => {
+      const v = (rec as any)[f];
+      return v === null || v === undefined ? '' : String(v);
+    }));
+    setReportTable({ columns, rows });
+    setReportDialogOpen(false);
+    setTimeout(() => handleGeneratePDF(), 400);
+  };
+
+  // AI report (calls server /ai-report)
+  const handleGenerateReport = async () => {
+    if (!question.trim()) { setReportText("Please enter a question."); return; }
+    setLoading(true);
+    setReportText("");
+    setReportTable(null);
+    try {
+      const res = await axios.post(`${API_BASE_URL}/ai-report`, { question, itemType: "Reservation" }, { timeout: 30000 });
+      const data = res.data;
+      if (data.success) {
+        if (typeof data.data === 'string') setReportText(data.data);
+        else if (data.data?.table) { setReportTable({ columns: data.data.table.columns||[], rows: data.data.table.rows||[] }); setReportText(data.data.summary||''); }
+        else if (data.data?.columns && data.data?.rows) setReportTable({ columns: data.data.columns, rows: data.data.rows });
+        else setReportText(JSON.stringify(data.data, null, 2));
+      } else {
+        setReportText(`Error: ${data.error || 'AI failed'}`);
+      }
+    } catch (err:any) {
+      console.error('AI report error', err);
+      if (err.response) setReportText(`Server Error: ${err.response.data?.error || err.response.statusText}`);
+      else if (err.request) setReportText('Network error: no response from server');
+      else setReportText(String(err.message));
+    } finally { setLoading(false); }
+  };
+
+  const handleGeneratePDF = () => {
+    if (!reportTable) return;
+    const html = `
+      <html><head><title>Reservation Report</title><style>body{font-family:Arial;margin:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:8px;text-align:left}th{background:#f2f2f2}</style></head>
+      <body><h1>Reservation Report</h1><p>Generated: ${new Date().toLocaleString()}</p>
+      <table><thead><tr>${reportTable.columns.map(c=>`<th>${c}</th>`).join('')}</tr></thead>
+      <tbody>${reportTable.rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`;
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); w.print(); }
+  };
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
@@ -722,6 +864,28 @@ export default function ReservationPage() {
           >
             Delete Selected ({selectedReservations.length})
           </Button>
+          {!isStudentAssistant && (
+            <Button
+              variant="outlined"
+              color="primary"
+              onClick={() => setAiDialogOpen(true)}
+              sx={{ borderRadius: 2, textTransform: "none", px: 2 }}
+              startIcon={<AutoAwesomeIcon />}
+            >
+              AI Report
+            </Button>
+          )}
+          {!isStudentAssistant && (
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={() => setReportDialogOpen(true)}
+              sx={{ borderRadius: 2, textTransform: "none", px: 2 }}
+              startIcon={<PictureAsPdfIcon />}
+            >
+              Generate Report
+            </Button>
+          )}
         </Stack>
       </Stack>
 
@@ -849,7 +1013,8 @@ export default function ReservationPage() {
                               </IconButton>
                             </Tooltip>
 
-                            {reservation.status === 'Pending' && (
+                            { /* Approve -> only if not Student Assistant */ }
+                            {!isStudentAssistant && reservation.status === 'Pending' && (
                               <Tooltip title="Approve Reservation">
                                 <IconButton
                                   color="success"
@@ -866,7 +1031,7 @@ export default function ReservationPage() {
                             )}
 
                             {/* Reject */}
-                            {reservation.status !== 'Rejected' && (
+                            {!isStudentAssistant && reservation.status === 'Pending' ? (
                               <Tooltip title="Reject">
                                 <IconButton
                                   color="warning"
@@ -879,6 +1044,22 @@ export default function ReservationPage() {
                                 >
                                   <CancelIcon fontSize="small" />
                                 </IconButton>
+                              </Tooltip>
+                            ) : (
+                              <Tooltip title={isStudentAssistant ? 'Not permitted' : (reservation.status === 'Rejected' ? 'Already rejected' : 'Cannot reject once approved or assigned')}>
+                                <span>
+                                  <IconButton
+                                    color="warning"
+                                    disabled
+                                    sx={{
+                                      bgcolor: "#fff6e6",
+                                      p: 1,
+                                      opacity: 0.6
+                                    }}
+                                  >
+                                    <CancelIcon fontSize="small" />
+                                  </IconButton>
+                                </span>
                               </Tooltip>
                             )}
 
@@ -897,39 +1078,77 @@ export default function ReservationPage() {
                               </IconButton>
                             </Tooltip>
 
-                            <Tooltip title="Messages">
-                              <IconButton
-                                color="info"
-                                onClick={() => handleOpenChat(reservation)}
-                                sx={{
-                                  bgcolor: "#e0f2f1",
-                                  "&:hover": { bgcolor: "#4db6ac" },
-                                  p: 1,
-                                }}
-                              >
-                                <Badge
-                                  badgeContent={unseenCount(reservation)}
-                                  color="error"
-                                  invisible={unseenCount(reservation) === 0}
+                            {!isStudentAssistant ? (
+                              <Tooltip title="Messages">
+                                <IconButton
+                                  color="info"
+                                  onClick={() => handleOpenChat(reservation)}
+                                  sx={{
+                                    bgcolor: "#e0f2f1",
+                                    "&:hover": { bgcolor: "#4db6ac" },
+                                    p: 1,
+                                  }}
                                 >
-                                  <ChatBubbleIcon fontSize="small" />
-                                </Badge>
-                              </IconButton>
-                            </Tooltip>
+                                  <Badge
+                                    badgeContent={unseenCount(reservation)}
+                                    color="error"
+                                    invisible={unseenCount(reservation) === 0}
+                                  >
+                                    <ChatBubbleIcon fontSize="small" />
+                                  </Badge>
+                                </IconButton>
+                              </Tooltip>
+                            ) : (
+                              <Tooltip title="Not permitted">
+                                <span>
+                                  <IconButton
+                                    color="info"
+                                    disabled
+                                    sx={{
+                                      bgcolor: "#f0f4f3",
+                                      p: 1,
+                                      opacity: 0.6
+                                    }}
+                                  >
+                                    <Badge badgeContent={0} color="error" invisible>
+                                      <ChatBubbleIcon fontSize="small" />
+                                    </Badge>
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            )}
 
-                            <Tooltip title="Delete">
-                              <IconButton
-                                color="error"
-                                onClick={() => handleDeleteReservation(reservation)}
-                                sx={{
-                                  bgcolor: "#ffebee",
-                                  "&:hover": { bgcolor: "#f44336", color: "#fff" },
-                                  p: 1,
-                                }}
-                              >
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
+                            {!isStudentAssistant ? (
+                              <Tooltip title="Delete">
+                                <IconButton
+                                  color="error"
+                                  onClick={() => handleDeleteReservation(reservation)}
+                                  sx={{
+                                    bgcolor: "#ffebee",
+                                    "&:hover": { bgcolor: "#f44336", color: "#fff" },
+                                    p: 1,
+                                  }}
+                                >
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            ) : (
+                              <Tooltip title="Not permitted">
+                                <span>
+                                  <IconButton
+                                    color="error"
+                                    disabled
+                                    sx={{
+                                      bgcolor: "#fff6f6",
+                                      p: 1,
+                                      opacity: 0.6
+                                    }}
+                                  >
+                                    <DeleteIcon fontSize="small" />
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            )}
                           </Stack>
                         </TableCell>
                       </TableRow>
@@ -1382,6 +1601,93 @@ export default function ReservationPage() {
           <Box sx={{ width: '100%', display: 'flex', justifyContent: 'flex-end' }}>
             <Button onClick={() => { setMessageDialogOpen(false); stopChatPolling(); }} sx={{ textTransform: 'none' }}>Close</Button>
           </Box>
+        </DialogActions>
+      </Dialog>
+
+      {/* AI Dialog */} 
+      <Dialog open={aiDialogOpen} onClose={() => setAiDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <AutoAwesomeIcon color="primary" />
+            <Typography variant="h6">AI Reservation Report</Typography>
+          </Stack>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Ask questions about reservations (e.g., pending, assigned, busiest instructors, etc.).
+          </Typography>
+          <TextField multiline rows={3} fullWidth value={question} onChange={(e)=>setQuestion(e.target.value)} placeholder="e.g., List pending reservations for this week" />
+          <Box sx={{ mt:2 }}>
+            <Button variant="contained" onClick={handleGenerateReport} disabled={loading || !question.trim()} startIcon={loading ? <CircularProgress size={18} /> : <AutoAwesomeIcon />}>
+              {loading ? 'Generating...' : 'Generate'}
+            </Button>
+          </Box>
+          {reportText && <Paper sx={{ p:2, mt:2 }}><Typography variant="body2" whiteSpace="pre-wrap">{reportText}</Typography></Paper>}
+          {reportTable && <Box sx={{ mt:2 }}><Button startIcon={<PictureAsPdfIcon />} onClick={handleGeneratePDF}>Export PDF</Button></Box>}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAiDialogOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+      
+      {/* Custom Report Dialog */} 
+      <Dialog open={reportDialogOpen} onClose={() => setReportDialogOpen(false)} maxWidth="lg" fullWidth>
+        <DialogTitle>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <PictureAsPdfIcon color="secondary" />
+            <Typography variant="h6">Generate Reservation Report</Typography>
+          </Stack>
+        </DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" gutterBottom>
+            Select fields to include and apply filters to generate a custom report.
+          </Typography>
+          <Box sx={{ mb:3 }}>
+            <Typography variant="subtitle1">Select Fields</Typography>
+            <Paper variant="outlined" sx={{ p:2, maxHeight: 200, overflow:'auto' }}>
+              <Stack spacing={1}>
+                {availableFields.map(f=>(
+                  <Box key={f.field} sx={{ display:'flex', alignItems:'center' }}>
+                    <Checkbox checked={selectedFields.includes(f.field)} onChange={() => handleFieldSelection(f.field)} />
+                    <Typography>{f.label} ({f.type})</Typography>
+                  </Box>
+                ))}
+              </Stack>
+            </Paper>
+          </Box>
+
+          <Box sx={{ mb:3 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb:2 }}>
+              <Typography variant="subtitle1">Filters</Typography>
+              <Button variant="outlined" size="small" onClick={addFilter} startIcon={<AddIcon />}>Add Filter</Button>
+            </Stack>
+            <Stack spacing={2}>
+              {reportFilters.map((filter, idx) => (
+                <Paper key={idx} sx={{ p:2 }}>
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    <FormControl size="small" sx={{ minWidth: 160 }}>
+                      <InputLabel>Field</InputLabel>
+                      <Select value={filter.field} label="Field" onChange={(e)=>updateFilter(idx, { field: e.target.value })}>
+                        {availableFields.map(a=> <MenuItem key={a.field} value={a.field}>{a.label}</MenuItem>)}
+                      </Select>
+                    </FormControl>
+                    <FormControl size="small" sx={{ minWidth: 160 }}>
+                      <InputLabel>Operator</InputLabel>
+                      <Select value={filter.operator} label="Operator" onChange={(e)=>updateFilter(idx, { operator: e.target.value })}>
+                        {(filter.field ? getOperatorsForField(availableFields.find(a=>a.field===filter.field)?.type||'string') : [{value:'equals',label:'Equals'}]).map(op=> <MenuItem key={op.value} value={op.value}>{op.label}</MenuItem>)}
+                      </Select>
+                    </FormControl>
+                    <TextField size="small" label="Value" value={filter.value} onChange={(e)=>updateFilter(idx, { value: e.target.value })} sx={{ flex:1 }} />
+                    <IconButton onClick={() => removeFilter(idx)} color="error"><DeleteIcon /></IconButton>
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setReportDialogOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={generateCustomReport} disabled={selectedFields.length===0} startIcon={<PictureAsPdfIcon />}>Generate PDF Report</Button>
         </DialogActions>
       </Dialog>
     </Container>

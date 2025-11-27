@@ -1395,12 +1395,41 @@ const handleGeneratePDF2 = () => {
       } else {
         // Create new record
         await axios.post(`${API_BASE_URL}/borrow-records`, borrowData);
-        
-        // If this was a reservation, mark it as completed
+
+        // Reservation: attempt to mark Completed ONLY if reservation end datetime already passed.
         if (borrowType === 'Reservation' && currentReservation) {
-          await axios.put(`${API_BASE_URL}/reservations/${currentReservation._id}`, {
-            status: 'Completed'
-          });
+          try {
+            const schedText = String(currentReservation.schedule || '').trim();
+            let allowComplete = false;
+
+            if (schedText) {
+              const dateCandidate = new Date(schedText);
+              if (!isNaN(dateCandidate.getTime())) {
+                // merge endTime if available
+                const endTimeStr = String(currentReservation.endTime || '').trim();
+                const endDateTime = new Date(dateCandidate);
+                if (endTimeStr) {
+                  const [eh, em] = endTimeStr.split(':').map(Number);
+                  if (!isNaN(eh)) endDateTime.setHours(eh || 0, em || 0, 0, 0);
+                  else endDateTime.setHours(23, 59, 59, 0);
+                } else {
+                  endDateTime.setHours(23, 59, 59, 0);
+                }
+                if (new Date() >= endDateTime) allowComplete = true;
+              } else {
+                // schedule is not a single parseable date (likely recurring) => do NOT auto-complete
+                allowComplete = false;
+              }
+            }
+
+            if (allowComplete) {
+              // best-effort; failures shouldn't break borrow creation
+              await axios.put(`${API_BASE_URL}/reservations/${currentReservation._id}`, { status: 'Completed' });
+            }
+          } catch (resErr) {
+            // log and continue — don't surface reservation update errors to the user as a fatal error
+            console.warn('Could not update reservation status to Completed (non-fatal):');
+          }
         }
       }
 
@@ -1410,6 +1439,7 @@ const handleGeneratePDF2 = () => {
     } catch (err) {
       console.error("save borrow error:", err);
       setError("Failed to save borrow record.");
+      alert("Failed to save borrow record. See console for details.");
     } finally {
       setSaving(false);
     }
@@ -2014,8 +2044,7 @@ const handleGeneratePDF2 = () => {
                         <SchoolIcon />
                         <Typography>Faculty</Typography>
                       </Stack>
-                    </Button>
-                  </Stack>
+                    </Button>                  </Stack>
                 </>
               )}
 
