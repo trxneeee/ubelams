@@ -49,7 +49,7 @@ import axios from "axios";
 import Snackbar from "@mui/material/Snackbar";
 import Alert from "@mui/material/Alert";
 
-const API_BASE_URL = "http://localhost:5000/api";
+const API_BASE_URL = "https://elams-server.onrender.com/api";
 
 interface RequestedItem {
   item_name: string;

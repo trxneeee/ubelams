@@ -45,7 +45,7 @@ import { useTheme } from "@mui/material/styles";
 import UBLogo from "../assets/ublogo.png"; // Place UB logo at src/assets/ub-logo.png
 import DialogContentText from "@mui/material/DialogContentText";
 
-const API_BASE_URL = "http://localhost:5000/api";
+const API_BASE_URL = "https://elams-server.onrender.com/api";
 
 interface Staff {
   email: string;
@@ -398,7 +398,7 @@ export default function StaffPage() {
     setUserBorrowRecords([]);
     if (!user) return;
     try {
-      const res = await axios.get("http://localhost:5000/api/borrow-records");
+      const res = await axios.get("https://elams-server.onrender.com/api/borrow-records");
       if (res.data && Array.isArray(res.data)) {
         // Match group_leader or borrow_user by name or email
         const name = `${user.firstname || ""} ${user.lastname || ""}`.trim();
@@ -420,7 +420,7 @@ export default function StaffPage() {
     setUserReservationRecords([]);
     if (!user) return;
     try {
-      const res = await axios.get("http://localhost:5000/api/reservations");
+      const res = await axios.get("https://elams-server.onrender.com/api/reservations");
       if (Array.isArray(res.data)) {
         const filtered = res.data.filter(
           (r: any) =>
@@ -439,7 +439,7 @@ export default function StaffPage() {
     setUserBorrowRecords([]);
     if (!user) return;
     try {
-      const res = await axios.get("http://localhost:5000/api/borrow-records");
+      const res = await axios.get("https://elams-server.onrender.com/api/borrow-records");
       if (res.data && Array.isArray(res.data)) {
         // Match managed_by by email or managed_name by name
         const name = `${user.firstname || ""} ${user.lastname || ""}`.trim();

@@ -52,7 +52,7 @@ import { useSearchParams } from "react-router-dom";
 import SearchIcon from "@mui/icons-material/Search";
 import AddIcon from '@mui/icons-material/Add';
 import VisibilityIcon from '@mui/icons-material/Visibility';
-const API_BASE_URL = "http://localhost:5000/api";
+const API_BASE_URL = "https://elams-server.onrender.com/api";
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const userRole = user?.role || "Custodian";
 

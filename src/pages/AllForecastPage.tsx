@@ -33,7 +33,7 @@ import CancelIcon from "@mui/icons-material/Cancel";
 import SearchIcon from "@mui/icons-material/Search";
 import axios from "axios";
 
-const API_BASE_URL = "http://localhost:5000/api";
+const API_BASE_URL = "https://elams-server.onrender.com/api";
 
 type ForecastItem = { item_name: string; quantity: number; notes?: string };
 type ForecastRequest = {

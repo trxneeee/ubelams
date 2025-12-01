@@ -52,7 +52,7 @@ import axios from 'axios';
 import { alpha, useTheme } from '@mui/material/styles';
 import Checkbox from '@mui/material/Checkbox';
 
-const API_BASE_URL = "http://localhost:5000/api";
+const API_BASE_URL = "https://elams-server.onrender.com/api";
 
 interface RequestedItem {
   item_name: string;

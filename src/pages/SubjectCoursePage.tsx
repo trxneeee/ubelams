@@ -4,7 +4,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import UBLogo from "../assets/ublogo.png"; // UB logo
 import axios from "axios";
 
-const API_BASE_URL = "http://localhost:5000/api";
+const API_BASE_URL = "https://elams-server.onrender.com/api";
 const user = JSON.parse(localStorage.getItem("user") || "{}");
 const userRole = user?.role || "Custodian";
 

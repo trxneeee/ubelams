@@ -44,7 +44,7 @@ import Loader from "../components/Loader";
 import NewMaintenanceForm from "../components/NewMaintenanceForm";
 import type { NewMaintenanceItem } from "../components/NewMaintenanceForm";
 
-const API_BASE_URL = "http://localhost:5000/api";
+const API_BASE_URL = "https://elams-server.onrender.com/api";
 
 interface MaintenanceItem {
   num: string;
