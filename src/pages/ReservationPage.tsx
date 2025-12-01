@@ -30,8 +30,10 @@ import {
   InputAdornment,
   Backdrop,
   CircularProgress,
-  Badge
+  Badge,
+  Snackbar
 } from '@mui/material';
+import MuiAlert from '@mui/material/Alert';
 import AssignmentTurnedInIcon from "@mui/icons-material/AssignmentTurnedIn";
 import SearchIcon from "@mui/icons-material/Search";
 import Inventory2Icon from "@mui/icons-material/Inventory2";
@@ -50,7 +52,7 @@ import axios from 'axios';
 import { alpha, useTheme } from '@mui/material/styles';
 import Checkbox from '@mui/material/Checkbox';
 
-const API_BASE_URL = "https://elams-server.onrender.com/api";
+const API_BASE_URL = "http://localhost:5000/api";
 
 interface RequestedItem {
   item_name: string;
@@ -103,6 +105,33 @@ interface InventoryItem {
 export default function ReservationPage() {
   const theme = useTheme();
   const brandRed = "#b91c1c";
+
+  // --- NEW: unified action button styles (neutral grey, UB red on hover) ---
+  const ubRed = "#B71C1C";
+  const actionBtnSx = {
+    minWidth: 0,
+    bgcolor: "grey.100",
+    color: "text.primary",
+    borderRadius: 2,
+    p: 1,
+    transition: "all 180ms ease",
+    boxShadow: "none",
+    "&:hover": {
+      bgcolor: ubRed,
+      color: "#fff",
+      transform: "translateY(-2px)",
+      boxShadow: "0 8px 20px rgba(183,28,28,0.12)",
+    },
+  };
+  const actionIconBtnSx = {
+    ...actionBtnSx,
+    width: 40,
+    height: 40,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  };
+
   // current user role — Student Assistant must not access some actions
   const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
   const currentRole = currentUser?.role || '';
@@ -283,9 +312,9 @@ export default function ReservationPage() {
       setAssignDialogOpen(false);
       setSelectedReservation(null);
       setItemSearch({});
+      setSnackbar({ open: true, message: "Items assigned", severity: "success" });
     } catch (error) {
-      console.error('Assign reservation error:', error);
-      alert('Failed to assign items');
+      setSnackbar({ open: true, message: "Failed to assign items", severity: "error" });
     } finally {
       setProcessing(false);
     }
@@ -307,10 +336,9 @@ export default function ReservationPage() {
         approved_by: currentUser.email || 'Unknown'
       });
       await fetchReservations();
-      alert('Reservation approved successfully');
+      setSnackbar({ open: true, message: "Reservation approved successfully", severity: "success" });
     } catch (error) {
-      console.error('Approve reservation error:', error);
-      alert('Failed to approve reservation');
+      setSnackbar({ open: true, message: "Failed to approve reservation", severity: "error" });
     } finally {
       setProcessing(false);
     }
@@ -335,10 +363,9 @@ export default function ReservationPage() {
         rejected_name: currentUser.name || currentUser.firstname || currentUser.email
       });
       await fetchReservations();
-      alert('Reservation rejected');
+      setSnackbar({ open: true, message: "Reservation rejected", severity: "success" });
     } catch (err) {
-      console.error('Reject error', err);
-      alert('Failed to reject reservation');
+      setSnackbar({ open: true, message: "Failed to reject reservation", severity: "error" });
     }
   };
 
@@ -457,21 +484,45 @@ export default function ReservationPage() {
     }
   };
 
+  // Confirmation modal state
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState("");
+  const [confirmMessage, setConfirmMessage] = useState("");
+  const [onConfirm, setOnConfirm] = useState<(() => void) | null>(null);
+
+  // Snackbar state
+  const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" as "success" | "error" });
+
+  // Helper for confirmation modal
+  const showConfirm = (title: string, message: string, onYes: () => void) => {
+    setConfirmTitle(title);
+    setConfirmMessage(message);
+    setOnConfirm(() => onYes);
+    setConfirmOpen(true);
+  };
+
   const handleDeleteReservation = async (reservation: Reservation) => {
     if (isStudentAssistant) {
-      alert('You are not allowed to delete reservations.');
+      setSnackbar({ open: true, message: "You are not allowed to delete reservations.", severity: "error" });
       return;
     }
-    if (!window.confirm(`Are you sure you want to delete reservation ${reservation.reservation_code}?`)) {
-      return;
-    }
-    try {
-      await axios.delete(`${API_BASE_URL}/reservations/${reservation._id}`);
-      await fetchReservations();
-    } catch (error) {
-      console.error('Delete reservation error:', error);
-      alert('Failed to delete reservation');
-    }
+    showConfirm(
+      "Delete Reservation",
+      `Are you sure you want to delete reservation ${reservation.reservation_code}?`,
+      async () => {
+        setConfirmOpen(false);
+        setProcessing(true);
+        try {
+          await axios.delete(`${API_BASE_URL}/reservations/${reservation._id}`);
+          await fetchReservations();
+          setSnackbar({ open: true, message: "Reservation deleted", severity: "success" });
+        } catch (error) {
+          setSnackbar({ open: true, message: "Failed to delete reservation", severity: "error" });
+        } finally {
+          setProcessing(false);
+        }
+      }
+    );
   };
 
   // Bulk delete handler
@@ -480,18 +531,24 @@ export default function ReservationPage() {
     const codes = selectedReservations
       .map(id => reservations.find(r => r._id === id)?.reservation_code || id)
       .join('\n');
-    if (!window.confirm(`Are you sure you want to delete the following reservations?\n\n${codes}`)) return;
-    setProcessing(true);
-    try {
-      await Promise.all(selectedReservations.map(id => axios.delete(`${API_BASE_URL}/reservations/${id}`)));
-      setSelectedReservations([]);
-      await fetchReservations();
-    } catch (err) {
-      console.error('Failed to delete selected reservations', err);
-      alert('Failed to delete selected reservations');
-    } finally {
-      setProcessing(false);
-    }
+    showConfirm(
+      "Delete Selected Reservations",
+      `Are you sure you want to delete the following reservations?\n\n${codes}`,
+      async () => {
+        setConfirmOpen(false);
+        setProcessing(true);
+        try {
+          await Promise.all(selectedReservations.map(id => axios.delete(`${API_BASE_URL}/reservations/${id}`)));
+          setSelectedReservations([]);
+          await fetchReservations();
+          setSnackbar({ open: true, message: "Selected reservations deleted", severity: "success" });
+        } catch (err) {
+          setSnackbar({ open: true, message: "Failed to delete selected reservations", severity: "error" });
+        } finally {
+          setProcessing(false);
+        }
+      }
+    );
   }
 
   // Filter then sort by date_created descending (newest first)
@@ -869,7 +926,18 @@ export default function ReservationPage() {
               variant="outlined"
               color="primary"
               onClick={() => setAiDialogOpen(true)}
-              sx={{ borderRadius: 2, textTransform: "none", px: 2 }}
+              sx={{
+                borderRadius: 2,
+                textTransform: "none",
+                px: 3,
+                fontWeight: "bold",
+                borderColor: "#1976d2",
+                color: "#1976d2",
+                "&:hover": {
+                  borderColor: "#1565c0",
+                  bgcolor: "rgba(25, 118, 210, 0.04)"
+                }
+              }}
               startIcon={<AutoAwesomeIcon />}
             >
               AI Report
@@ -880,7 +948,18 @@ export default function ReservationPage() {
               variant="outlined"
               color="secondary"
               onClick={() => setReportDialogOpen(true)}
-              sx={{ borderRadius: 2, textTransform: "none", px: 2 }}
+              sx={{
+        borderRadius: 2,
+        textTransform: "none",
+        px: 3,
+        fontWeight: "bold",
+        borderColor: theme.palette.secondary.main,
+        color: theme.palette.secondary.main,
+        "&:hover": {
+          borderColor: theme.palette.secondary.dark,
+          bgcolor: alpha(theme.palette.secondary.main, 0.04)
+        }
+      }}
               startIcon={<PictureAsPdfIcon />}
             >
               Generate Report
@@ -932,8 +1011,6 @@ export default function ReservationPage() {
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Reservation Code</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Subject</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Instructor</TableCell>
-                    <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Course</TableCell>
-                    <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Groups</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Status</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Date Created</TableCell>
                     <TableCell align="center" sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Actions</TableCell>
@@ -964,19 +1041,6 @@ export default function ReservationPage() {
                         </TableCell>
                         <TableCell>{reservation.subject}</TableCell>
                         <TableCell>{reservation.instructor}</TableCell>
-                        <TableCell>{reservation.course}</TableCell>
-                        <TableCell>
-                          <Chip
-                            label={reservation.group_count}
-                            size="small"
-                            variant="outlined"
-                            sx={{
-                              borderColor: brandRed,
-                              color: brandRed,
-                              fontWeight: 'bold'
-                            }}
-                          />
-                        </TableCell>
                         <TableCell>
                           <Chip
                             label={reservation.status}
@@ -1003,11 +1067,7 @@ export default function ReservationPage() {
                               <IconButton
                                 color="default"
                                 onClick={() => handleView(reservation)}
-                                sx={{
-                                  bgcolor: "#ffebee",
-                                  "&:hover": { bgcolor: "#484848ff", color: "#fff" },
-                                  p: 1,
-                                }}
+                                sx={actionIconBtnSx}
                               >
                                 <VisibilityIcon fontSize="small" />
                               </IconButton>
@@ -1019,11 +1079,7 @@ export default function ReservationPage() {
                                 <IconButton
                                   color="success"
                                   onClick={() => handleApproveReservation(reservation)}
-                                  sx={{
-                                    bgcolor: "#e8f5e9",
-                                    "&:hover": { bgcolor: "#81c784" },
-                                    p: 1,
-                                  }}
+                                  sx={actionIconBtnSx}
                                 >
                                   <CheckCircleIcon fontSize="small" />
                                 </IconButton>
@@ -1036,11 +1092,7 @@ export default function ReservationPage() {
                                 <IconButton
                                   color="warning"
                                   onClick={() => handleRejectReservation(reservation)}
-                                  sx={{
-                                    bgcolor: "#fff6e6",
-                                    "&:hover": { bgcolor: "#ffcc80" },
-                                    p: 1,
-                                  }}
+                                  sx={actionIconBtnSx}
                                 >
                                   <CancelIcon fontSize="small" />
                                 </IconButton>
@@ -1051,11 +1103,7 @@ export default function ReservationPage() {
                                   <IconButton
                                     color="warning"
                                     disabled
-                                    sx={{
-                                      bgcolor: "#fff6e6",
-                                      p: 1,
-                                      opacity: 0.6
-                                    }}
+                                    sx={{ ...actionIconBtnSx, opacity: 0.6 }}
                                   >
                                     <CancelIcon fontSize="small" />
                                   </IconButton>
@@ -1068,11 +1116,7 @@ export default function ReservationPage() {
                                 color="primary"
                                 onClick={() => handleAssign(reservation)}
                                 disabled={reservation.status !== 'Approved'}
-                                sx={{
-                                  bgcolor: "#e3f2fd",
-                                  "&:hover": { bgcolor: reservation.status === 'Approved' ? "#90caf9" : "inherit" },
-                                  p: 1,
-                                }}
+                                sx={actionIconBtnSx}
                               >
                                 <AssignmentTurnedInIcon fontSize="small" />
                               </IconButton>
@@ -1083,11 +1127,7 @@ export default function ReservationPage() {
                                 <IconButton
                                   color="info"
                                   onClick={() => handleOpenChat(reservation)}
-                                  sx={{
-                                    bgcolor: "#e0f2f1",
-                                    "&:hover": { bgcolor: "#4db6ac" },
-                                    p: 1,
-                                  }}
+                                  sx={actionIconBtnSx}
                                 >
                                   <Badge
                                     badgeContent={unseenCount(reservation)}
@@ -1104,11 +1144,7 @@ export default function ReservationPage() {
                                   <IconButton
                                     color="info"
                                     disabled
-                                    sx={{
-                                      bgcolor: "#f0f4f3",
-                                      p: 1,
-                                      opacity: 0.6
-                                    }}
+                                    sx={{ ...actionIconBtnSx, opacity: 0.6 }}
                                   >
                                     <Badge badgeContent={0} color="error" invisible>
                                       <ChatBubbleIcon fontSize="small" />
@@ -1123,11 +1159,7 @@ export default function ReservationPage() {
                                 <IconButton
                                   color="error"
                                   onClick={() => handleDeleteReservation(reservation)}
-                                  sx={{
-                                    bgcolor: "#ffebee",
-                                    "&:hover": { bgcolor: "#f44336", color: "#fff" },
-                                    p: 1,
-                                  }}
+                                  sx={actionIconBtnSx}
                                 >
                                   <DeleteIcon fontSize="small" />
                                 </IconButton>
@@ -1138,11 +1170,7 @@ export default function ReservationPage() {
                                   <IconButton
                                     color="error"
                                     disabled
-                                    sx={{
-                                      bgcolor: "#fff6f6",
-                                      p: 1,
-                                      opacity: 0.6
-                                    }}
+                                    sx={{ ...actionIconBtnSx, opacity: 0.6 }}
                                   >
                                     <DeleteIcon fontSize="small" />
                                   </IconButton>
@@ -1690,6 +1718,46 @@ export default function ReservationPage() {
           <Button variant="contained" onClick={generateCustomReport} disabled={selectedFields.length===0} startIcon={<PictureAsPdfIcon />}>Generate PDF Report</Button>
         </DialogActions>
       </Dialog>
+
+      {/* Confirmation Modal */}
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
+        <DialogTitle>{confirmTitle}</DialogTitle>
+        <DialogContent>
+          <Typography>{confirmMessage}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmOpen(false)} color="inherit">
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              if (onConfirm) onConfirm();
+            }}
+            color="error"
+            variant="contained"
+          >
+            Yes, Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar for alerts */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={3500}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <MuiAlert
+          elevation={6}
+          variant="filled"
+          severity={snackbar.severity}
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          sx={{ borderRadius: 2, fontWeight: "medium" }}
+        >
+          {snackbar.message}
+        </MuiAlert>
+      </Snackbar>
     </Container>
   );
 }

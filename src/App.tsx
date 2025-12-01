@@ -24,7 +24,8 @@ import ReservationPage from "./pages/ReservationPage";
 import StudentPrepPage from "./pages/StudentPrepPage";
 import SubjectCoursePage from "./pages/SubjectCoursePage";
 import { Dialog, IconButton, ToggleButton, ToggleButtonGroup } from "@mui/material";
-
+import ForecastPage from "./pages/ForecastPage";
+import AllForecastPage from "./pages/AllForecastPage";
 interface CalendarEvent {
   id: string;
   title: string;
@@ -58,7 +59,7 @@ interface Notification {
 // } 
 
 // Replace Google Sheets handlers with server-backed implementations
-const SERVER_API = "https://elams-server.onrender.com/api";
+const SERVER_API = "http://localhost:5000/api";
 
 /* CalendarPanel: shows Approved/Assigned reservations with recurring expansion */
 function CalendarPanel() {
@@ -779,6 +780,36 @@ function App() {
             <Protected allowedRoles={["Student Assistant", "Custodian", "Admin"]}>
               <AppLayout>
                 <HomePage />
+              </AppLayout>
+            </Protected>
+          }
+        />
+                <Route
+          path="/studentprep"
+          element={
+            <Protected allowedRoles={["Student"]}>
+              <AppLayout>
+                <StudentPrepPage />
+              </AppLayout>
+            </Protected>
+          }
+        />
+        <Route
+          path="/forecast"
+          element={
+            <Protected allowedRoles={["Program Chair", "Custodian", "Admin"]}>
+              <AppLayout>
+                <ForecastPage />
+              </AppLayout>
+            </Protected>
+          }
+        />
+                <Route
+          path="/allforecast"
+          element={
+            <Protected allowedRoles={["Custodian", "Admin"]}>
+              <AppLayout>
+                <AllForecastPage />
               </AppLayout>
             </Protected>
           }

@@ -51,7 +51,8 @@ import Loader from "../components/Loader";
 import { useSearchParams } from "react-router-dom";
 import SearchIcon from "@mui/icons-material/Search";
 import AddIcon from '@mui/icons-material/Add';
-const API_BASE_URL = "https://elams-server.onrender.com/api";
+import VisibilityIcon from '@mui/icons-material/Visibility';
+const API_BASE_URL = "http://localhost:5000/api";
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const userRole = user?.role || "Custodian";
 
@@ -613,6 +614,33 @@ const filteredCInventory = cinventory
     );
     setForm((prev) => ({ ...prev, statuses: newStatuses }));
   }, [form.total_qty]);
+
+      // --- NEW: unified action button styles (neutral grey, UB red on hover) ---
+    const ubRed = "#B71C1C";
+    const actionBtnSx = {
+      minWidth: 0,
+      bgcolor: "grey.100",
+      color: "text.primary",
+      borderRadius: 2,
+      p: 1,
+      transition: "all 180ms ease",
+      boxShadow: "none",
+      "&:hover": {
+        bgcolor: ubRed,
+        color: "#fff",
+        transform: "translateY(-2px)",
+        boxShadow: "0 8px 20px rgba(183,28,28,0.12)",
+      },
+    };
+    const actionIconBtnSx = {
+      ...actionBtnSx,
+      width: 40,
+      height: 40,
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+    };
+  
 
   const fetchInventory = async () => {
   setLoading(true);
@@ -1455,11 +1483,7 @@ await Promise.all(
   <IconButton
     color="default"
     onClick={() => handleViewClick(item)}
-   sx={{
-        bgcolor: "#ffebee",
-        "&:hover": { bgcolor: "#484848ff", color: "#fff" },
-        p: 1,
-      }}
+   sx={actionIconBtnSx}
   >
     <Inventory2Icon fontSize="small" />
   </IconButton>
@@ -1469,11 +1493,7 @@ await Promise.all(
     <IconButton
       color="primary"
        onClick={() => handleEditClick(item)}
-      sx={{
-        bgcolor: "#e3f2fd",
-        "&:hover": { bgcolor: "#90caf9" },
-        p: 1,
-      }}
+      sx={actionIconBtnSx}
     >
       <EditIcon fontSize="small" />
     </IconButton>
@@ -1486,11 +1506,7 @@ await Promise.all(
     <IconButton
       color="error"
       onClick={() => handleDelete(item)}
-      sx={{
-        bgcolor: "#ffebee",
-        "&:hover": { bgcolor: "#f44336", color: "#fff" },
-        p: 1,
-      }}
+     sx={actionIconBtnSx}
     >
       <DeleteIcon fontSize="small" />
     </IconButton>
@@ -2368,24 +2384,16 @@ onClick={() => {
   <IconButton
     color="default"
     onClick={() => handleViewClick(row)}
-   sx={{
-        bgcolor: "#ffebee",
-        "&:hover": { bgcolor: "#484848ff", color: "#fff" },
-        p: 1,
-      }}
+  sx={actionIconBtnSx}
   >
-    <Inventory2Icon fontSize="small" />
+     <VisibilityIcon fontSize="small" />
   </IconButton>
 </Tooltip>
                    <Tooltip title="Update">
     <IconButton
       color="primary"
        onClick={() => handleEditClick(row)}
-      sx={{
-        bgcolor: "#e3f2fd",
-        "&:hover": { bgcolor: "#90caf9" },
-        p: 1,
-      }}
+      sx={actionIconBtnSx}
     >
       <EditIcon fontSize="small" />
     </IconButton>
@@ -2395,11 +2403,7 @@ onClick={() => {
     <IconButton
       color="error"
       onClick={() => handleDelete(row)}
-      sx={{
-        bgcolor: "#ffebee",
-        "&:hover": { bgcolor: "#f44336", color: "#fff" },
-        p: 1,
-      }}
+     sx={actionIconBtnSx}
     >
       <DeleteIcon fontSize="small" />
     </IconButton>

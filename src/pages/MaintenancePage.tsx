@@ -31,13 +31,20 @@ import {
   Backdrop,
   TablePagination,
   ToggleButton,
-  ToggleButtonGroup
+  ToggleButtonGroup,
+  Snackbar,
+  Alert,
+  MenuItem,
+  FormControlLabel,
+  Checkbox
 } from "@mui/material";
 import axios from "axios";
 import { useEffect, useState } from "react";
 import Loader from "../components/Loader";
+import NewMaintenanceForm from "../components/NewMaintenanceForm";
+import type { NewMaintenanceItem } from "../components/NewMaintenanceForm";
 
-const API_BASE_URL = "https://elams-server.onrender.com/api";
+const API_BASE_URL = "http://localhost:5000/api";
 
 interface MaintenanceItem {
   num: string;
@@ -49,6 +56,8 @@ interface MaintenanceItem {
   month: string;
   date_accomplished: string;
   accomplished_by: string;
+  scheduledYear?: number;
+  notes?: string; // optional raw notes JSON/string from server
 }
 
 const MaintenancePage = () => {
@@ -57,6 +66,8 @@ const MaintenancePage = () => {
   const [loading, setLoading] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [open, setOpen] = useState(false);
+  // New record dialog state
+  const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -65,6 +76,52 @@ const MaintenancePage = () => {
   const [form, setForm] = useState({
     num: "",
     accomplished_by: ""
+  });
+  // mark-as-done richer form (prefilled on edit)
+  const initialMarkForm: NewMaintenanceItem = {
+    timestamp: new Date().toISOString(),
+    reporterName: "",
+    labRoom: "",
+    subject: "",
+    brandModel: "",
+    serialNumber: "",
+    inventoryNumber: "",
+    maintenanceType: "",
+    problemDescription: "",
+    actionTaken: "",
+    result: "",
+    conclusions: "",
+    routineCleaning: false,
+    partsAssessment: false,
+    visualInspection: false,
+    calibrationLink: ""
+  };
+  const [markForm, setMarkForm] = useState<NewMaintenanceItem>({
+    timestamp: new Date().toISOString(),
+    reporterName: "",
+    labRoom: "",
+    subject: "",
+    brandModel: "",
+    serialNumber: "",
+    inventoryNumber: "",
+    maintenanceType: "",
+    problemDescription: "",
+    actionTaken: "",
+    result: "",
+    conclusions: "",
+    routineCleaning: false,
+    partsAssessment: false,
+    visualInspection: false,
+    calibrationLink: ""
+  });
+  // viewing mode: true when dialog opened to view an already-completed maintenance record
+  const [isViewing, setIsViewing] = useState(false);
+
+  // snackbar for user messages (used by handleNewRecordSubmit etc.)
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: "success" | "error" }>({
+    open: false,
+    message: "",
+    severity: "success",
   });
 
   const handleChangePage = (_: unknown, newPage: number) => {
@@ -133,7 +190,9 @@ const MaintenancePage = () => {
           identifier_number: it.identifier_number ?? "",
           month: it.month ?? "",
           date_accomplished: it.date_accomplished ? new Date(it.date_accomplished).toISOString() : "",
-          accomplished_by: it.accomplished_by ?? ""
+          accomplished_by: it.accomplished_by ?? "",
+          notes: typeof it.notes === "string" ? it.notes : (it.notes ? JSON.stringify(it.notes) : ""),
+          scheduledYear: typeof it.scheduledYear === "number" ? it.scheduledYear : (it.scheduledYear ? Number(it.scheduledYear) : (new Date()).getFullYear())
         }));
         setMaintenance(parsed);
       } else {
@@ -154,11 +213,27 @@ const MaintenancePage = () => {
     setProcessing(true);
     try {
       // call server to update maintenance row by maintenance_num (num)
+      // include extra mark-as-done details inside notes (JSON) so server can persist them if supported
+      const notesPayload = {
+        problemDescription: markForm.problemDescription,
+        actionTaken: markForm.actionTaken,
+        result: markForm.result,
+        conclusions: markForm.conclusions,
+        routineCleaning: markForm.routineCleaning,
+        partsAssessment: markForm.partsAssessment,
+        visualInspection: markForm.visualInspection,
+        calibrationLink: markForm.calibrationLink,
+        brandModel: markForm.brandModel,
+        subject: markForm.subject,
+        serialNumber: markForm.serialNumber,
+        inventoryNumber: markForm.inventoryNumber
+      };
+
       await axios.post(`${API_BASE_URL}/maintenance`, {
         action: "update",
         num: form.num,
-        accomplished_by: form.accomplished_by
-        // server will set date_accomplished automatically in handler
+        accomplished_by: form.accomplished_by,
+        notes: JSON.stringify(notesPayload)
       });
 
       setForm({
@@ -166,6 +241,9 @@ const MaintenancePage = () => {
         accomplished_by: ""
       });
 
+      // if we updated, clear viewing flag
+      setIsViewing(false);
+      setSnackbar({ open: true, message: "Maintenance saved", severity: "success" });
       await fetchMaintenance();
       setOpen(false);
     } catch (err) {
@@ -177,10 +255,43 @@ const MaintenancePage = () => {
   };
 
   const handleEditClick = (item: MaintenanceItem) => {
-    setForm({ 
+    // prefill simple update form
+    setForm({
       num: item.num,
       accomplished_by: item.accomplished_by || ""
     });
+    
+    // Determine if this record is already accomplished
+    const alreadyDone = !!item.date_accomplished;
+    setIsViewing(alreadyDone);
+
+    // Parse notes (may be JSON) and prefill markForm fields when available
+    let notesObj: any = null;
+    if (item.notes) {
+      try {
+        notesObj = JSON.parse(item.notes);
+      } catch (e) {
+        // not JSON — ignore
+      }
+    }
+
+    setMarkForm({
+      ...initialMarkForm,
+      timestamp: new Date().toISOString(),
+      subject: item.equipment_name || "",
+      brandModel: item.brand_model || "",
+      serialNumber: item.identifier_number || "",
+      inventoryNumber: item.equipment_num || "",
+      problemDescription: notesObj?.problemDescription || notesObj?.problem_description || "",
+      actionTaken: notesObj?.actionTaken || notesObj?.action_taken || "",
+      result: notesObj?.result || "",
+      conclusions: notesObj?.conclusions || "",
+      routineCleaning: !!notesObj?.routineCleaning,
+      partsAssessment: !!notesObj?.partsAssessment,
+      visualInspection: !!notesObj?.visualInspection,
+      calibrationLink: notesObj?.calibrationLink || ""
+    });
+
     setOpen(true);
   };
 
@@ -189,20 +300,32 @@ const MaintenancePage = () => {
       num: "",
       accomplished_by: ""
     });
+    setIsViewing(false);
+    setMarkForm(initialMarkForm);
   };
 
   // Check if maintenance is done for current year
-  const isDoneThisYear = (dateString: string) => {
-    if (!dateString) return false;
-    const date = new Date(dateString);
-    return date.getFullYear() === currentYear;
+  const isDoneThisYear = (item: MaintenanceItem) => {
+    if (!item.date_accomplished) return false;
+    try {
+      const date = new Date(item.date_accomplished);
+      const scheduled = item.scheduledYear ?? currentYear;
+      return date.getFullYear() === Number(scheduled);
+    } catch (e) {
+      return false;
+    }
   };
 
   // Check if maintenance is done for current month
-  const checkDoneThisMonth = (dateString: string) => {
-    if (!dateString) return false;
-    const date = new Date(dateString);
-    return date.getFullYear() === currentYear && date.getMonth() === currentMonthNumber;
+  const checkDoneThisMonth = (item: MaintenanceItem) => {
+    if (!item.date_accomplished) return false;
+    try {
+      const date = new Date(item.date_accomplished);
+      const scheduled = item.scheduledYear ?? currentYear;
+      return date.getFullYear() === Number(scheduled) && date.getMonth() === currentMonthNumber;
+    } catch (e) {
+      return false;
+    }
   };
 
   // Filter maintenance items based on search query
@@ -212,11 +335,55 @@ const MaintenancePage = () => {
   );
 
   // Filter for current month items
-  const currentMonthItems = filteredMaintenance.filter(item => item.month === currentMonth);
+  const currentMonthItems = filteredMaintenance.filter(item => item.month === currentMonth && (item.scheduledYear ?? currentYear) === currentYear);
 
   // Calculate statistics
-  const completedThisMonth = maintenance.filter(item => checkDoneThisMonth(item.date_accomplished)).length;
-  const pendingThisMonth = currentMonthItems.filter(item => !checkDoneThisMonth(item.date_accomplished)).length;
+  const completedThisMonth = maintenance.filter(item => checkDoneThisMonth(item)).length;
+  const pendingThisMonth = currentMonthItems.filter(item => !checkDoneThisMonth(item)).length;
+
+  // submit handler for new maintenance record
+  const handleNewRecordSubmit = async (data: NewMaintenanceItem) => {
+    setProcessing(true);
+    try {
+      // map NewMaintenanceItem -> server fields expected by /api/maintenance?action=create
+      const payload = {
+        action: "create",
+        equipment_num: data.inventoryNumber || undefined,
+        equipment_name: data.subject || data.brandModel || "Unknown",
+        brand_model: data.brandModel,
+        identifier_type: data.serialNumber ? "Serial Number" : "None",
+        identifier_number: data.serialNumber || "",
+        month: new Date().toLocaleString("en-US", { month: "short" }).toUpperCase(),
+        // keep additional metadata under 'notes' if server schema allows (not required)
+        notes: JSON.stringify({
+          reporterName: data.reporterName,
+          labRoom: data.labRoom,
+          problemDescription: data.problemDescription,
+          actionTaken: data.actionTaken,
+          result: data.result,
+          conclusions: data.conclusions,
+          routineCleaning: data.routineCleaning,
+          partsAssessment: data.partsAssessment,
+          visualInspection: data.visualInspection,
+          calibrationLink: data.calibrationLink,
+        }),
+      };
+
+      const res = await axios.post(`${API_BASE_URL}/maintenance`, payload);
+      if (res.data && res.data.success) {
+        setSnackbar({ open: true, message: "Maintenance record created", severity: "success" });
+        setNewDialogOpen(false);
+        await fetchMaintenance();
+      } else {
+        setSnackbar({ open: true, message: res.data?.error || "Create failed", severity: "error" });
+      }
+    } catch (err) {
+      console.error("Create maintenance error", err);
+      setSnackbar({ open: true, message: "Failed to create maintenance record", severity: "error" });
+    } finally {
+      setProcessing(false);
+    }
+  };
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
@@ -411,8 +578,22 @@ const MaintenancePage = () => {
             All Records
           </ToggleButton>
         </ToggleButtonGroup>
-      </Stack>
+        {/* +NewRecord removed — marking done is handled via Edit/Mark-as-done dialog */}
+       </Stack>
 
+      {/* New Maintenance Form Dialog */}
+      <Dialog open={newDialogOpen} onClose={() => setNewDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>
+          <Typography variant="h6" sx={{ color: "#b91c1c", fontWeight: "bold" }}>New Maintenance Record</Typography>
+        </DialogTitle>
+        <DialogContent dividers>
+          <NewMaintenanceForm
+            onClose={() => setNewDialogOpen(false)}
+            onSubmit={handleNewRecordSubmit}
+          />
+        </DialogContent>
+      </Dialog>
+      
       {/* Current Month Table */}
       <Typography variant="h5" sx={{ mt: 3, mb: 2, color: "#b91c1c" }}>
         {currentMonth} {currentYear} - Maintenance Schedule
@@ -445,7 +626,6 @@ const MaintenancePage = () => {
                   <TableRow>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Equipment Name</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Brand/Model</TableCell>
-                    <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Identifier Type</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Identifier Number</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Last Date Accomplished</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Accomplished By</TableCell>
@@ -457,8 +637,8 @@ const MaintenancePage = () => {
                   {currentMonthItems
                     .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                     .map((item) => {
-                      const isDone = isDoneThisYear(item.date_accomplished);
-                      const doneThisMonth = checkDoneThisMonth(item.date_accomplished);
+                      const isDone = isDoneThisYear(item);
+                      const doneThisMonth = checkDoneThisMonth(item);
                       return (
                         <TableRow key={item.num} hover>
                           <TableCell>
@@ -467,7 +647,6 @@ const MaintenancePage = () => {
                             </Typography>
                           </TableCell>
                           <TableCell>{item.brand_model}</TableCell>
-                          <TableCell>{item.identifier_type}</TableCell>
                           <TableCell>{item.identifier_number}</TableCell>
                           <TableCell>{formatDateDisplay(item.date_accomplished) || "-"}</TableCell>
                           <TableCell>{item.accomplished_by || "-"}</TableCell>
@@ -564,8 +743,8 @@ const MaintenancePage = () => {
                       {filteredMaintenance
                         .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                         .map((item) => {
-                          const isDone = isDoneThisYear(item.date_accomplished);
-                          const doneThisMonth = checkDoneThisMonth(item.date_accomplished);
+                          const isDone = isDoneThisYear(item);
+                          const doneThisMonth = checkDoneThisMonth(item);
                           return (
                             <TableRow key={item.num} hover>
                               <TableCell>
@@ -650,7 +829,7 @@ const MaintenancePage = () => {
             borderColor: "divider",
           }}
         >
-          Mark Maintenance as Done
+          {isViewing ? "Maintenance Details" : "Mark Maintenance as Done"}
           <Button
             onClick={() => {
               setOpen(false);
@@ -663,43 +842,140 @@ const MaintenancePage = () => {
               "&:hover": { bgcolor: "rgba(25,118,210,0.08)" },
             }}
           >
-            Cancel
+            {isViewing ? "Close" : "Cancel"}
           </Button>
         </DialogTitle>
         
-        <DialogContent sx={{ mt: 2 }}>
-          <Typography variant="body2" sx={{ mb: 2 }}>
-            This will mark the maintenance as completed for {currentYear} and record today's date.
-          </Typography>
-          
-          <TextField
-            label="Accomplished By"
-            value={form.accomplished_by}
-            onChange={(e) => setForm({ ...form, accomplished_by: e.target.value })}
-            fullWidth
-            size="small"
-            sx={{ mb: 2 }}
-            placeholder="Enter your name"
-            disabled={processing}
-          />
-          
-          <Button
-            onClick={handleUpdateItem}
-            variant="contained"
-            disabled={!form.accomplished_by.trim() || processing}
-            fullWidth
-            sx={{
-              textTransform: "none",
-              fontWeight: "bold",
-              bgcolor: "#b91c1c",
-              "&:hover": { bgcolor: "#b91c1c" },
-              "&:disabled": { bgcolor: "grey.300" },
-            }}
-          >
-            {processing ? <CircularProgress size={24} sx={{ color: "white" }} /> : "Confirm Completion"}
-          </Button>
+        <DialogContent dividers>
+          {/* Read-only item info */}
+          <Stack spacing={2}>
+            <Box>
+              <Typography variant="subtitle2">Equipment</Typography>
+              <Typography fontWeight="bold">{markForm.subject || "—"}</Typography>
+              <Typography variant="caption" color="text.secondary">{markForm.brandModel || ""} • {markForm.serialNumber || "—"}</Typography>
+            </Box>
+
+            <Box>
+              <Typography variant="subtitle2">Completion Details</Typography>
+              <TextField
+                label="Accomplished By"
+                value={form.accomplished_by}
+                onChange={(e) => setForm({ ...form, accomplished_by: e.target.value })}
+                fullWidth
+                size="small"
+                sx={{ mb: 1 }}
+                placeholder="Enter your name"
+                disabled={processing || isViewing}
+              />
+
+              <TextField
+                label="Problem Description"
+                value={markForm.problemDescription}
+                onChange={(e) => setMarkForm({ ...markForm, problemDescription: e.target.value })}
+                multiline
+                minRows={2}
+                fullWidth
+                size="small"
+                sx={{ mb: 1 }}
+                disabled={isViewing}
+              />
+
+              <TextField
+                label="Action Taken"
+                value={markForm.actionTaken}
+                onChange={(e) => setMarkForm({ ...markForm, actionTaken: e.target.value })}
+                multiline
+                minRows={2}
+                fullWidth
+                size="small"
+                sx={{ mb: 1 }}
+                disabled={isViewing}
+              />
+
+              <TextField
+                label="Conclusions / Recommendations (optional)"
+                value={markForm.conclusions}
+                onChange={(e) => setMarkForm({ ...markForm, conclusions: e.target.value })}
+                multiline
+                minRows={2}
+                fullWidth
+                size="small"
+                sx={{ mb: 1 }}
+                disabled={isViewing}
+              />
+
+              <TextField
+                select
+                label="Result"
+                value={markForm.result}
+                onChange={(e) => setMarkForm({ ...markForm, result: e.target.value as any })}
+                fullWidth
+                size="small"
+                sx={{ mb: 1 }}
+                disabled={isViewing}
+              >
+                <MenuItem value=""><em>Choose result</em></MenuItem>
+                <MenuItem value="FIXED">FIXED</MenuItem>
+                <MenuItem value="Defective">Defective</MenuItem>
+                <MenuItem value="Repair Pending">Repair Pending</MenuItem>
+                <MenuItem value="Requires External Service">Requires External Service</MenuItem>
+              </TextField>
+
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
+                <FormControlLabel control={<Checkbox checked={markForm.routineCleaning} onChange={(e)=>setMarkForm({...markForm, routineCleaning: e.target.checked})} />} label="Routine Cleaning" />
+                <FormControlLabel control={<Checkbox checked={markForm.partsAssessment} onChange={(e)=>setMarkForm({...markForm, partsAssessment: e.target.checked})} />} label="Parts Assessment" />
+                <FormControlLabel control={<Checkbox checked={markForm.visualInspection} onChange={(e)=>setMarkForm({...markForm, visualInspection: e.target.checked})} />} label="Visual Inspection" />
+              </Stack>
+
+              <TextField
+                label="Link to Calibration Worksheet (optional)"
+                value={markForm.calibrationLink}
+                onChange={(e) => setMarkForm({ ...markForm, calibrationLink: e.target.value })}
+                fullWidth
+                size="small"
+                sx={{ mt: 1 }}
+                disabled={isViewing}
+              />
+            </Box>
+          </Stack>
+
+          <Box sx={{ mt: 2 }}>
+            {/* Only show Confirm when NOT viewing an already-completed record */}
+            {!isViewing && (
+              <Button
+                onClick={handleUpdateItem}
+                variant="contained"
+                disabled={!form.accomplished_by.trim() || processing}
+                fullWidth
+                sx={{
+                  textTransform: "none",
+                  fontWeight: "bold",
+                  bgcolor: "#b91c1c",
+                  "&:hover": { bgcolor: "#b91c1c" },
+                }}
+              >
+                {processing ? <CircularProgress size={24} sx={{ color: "white" }} /> : "Confirm Completion & Save Details"}
+              </Button>
+            )}
+          </Box>
         </DialogContent>
       </Dialog>
+
+      {/* Snackbar for user feedback */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={3500}
+        onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert
+          onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
+          severity={snackbar.severity}
+          sx={{ width: "100%" }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 };

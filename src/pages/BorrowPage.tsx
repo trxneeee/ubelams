@@ -58,8 +58,8 @@ import {
 import axios from "axios";
 import { useEffect, useMemo, useState, useRef } from "react";
 import Loader from "../components/Loader";
-
-const API_BASE_URL = "https://elams-server.onrender.com/api";
+import VisibilityIcon from '@mui/icons-material/Visibility';
+const API_BASE_URL = "http://localhost:5000/api";
 const user = JSON.parse(localStorage.getItem("user") || "{}");
 const userRole = user?.role || "";
 
@@ -219,6 +219,32 @@ export default function BorrowPage() {
   const [reservationLoading, setReservationLoading] = useState(false);
   const [currentReservation, setCurrentReservation] = useState<Reservation | null>(null);
   const steps = ["Select Type", "Borrower Info", "Select Item(s)", "Confirmation"];
+  
+    // --- NEW: unified action button styles (neutral grey, UB red on hover) ---
+    const ubRed = "#B71C1C";
+    const actionBtnSx = {
+      minWidth: 0,
+      bgcolor: "grey.100",
+      color: "text.primary",
+      borderRadius: 2,
+      p: 1,
+      transition: "all 180ms ease",
+      boxShadow: "none",
+      "&:hover": {
+        bgcolor: ubRed,
+        color: "#fff",
+        transform: "translateY(-2px)",
+        boxShadow: "0 8px 20px rgba(183,28,28,0.12)",
+      },
+    };
+    const actionIconBtnSx = {
+      ...actionBtnSx,
+      width: 40,
+      height: 40,
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+    };
   
   
   
@@ -1852,12 +1878,9 @@ const handleGeneratePDF2 = () => {
       <IconButton
         color="info"
         onClick={() => handleViewBorrow(r)}
-        sx={{
-          bgcolor: "info.light",
-          "&:hover": { bgcolor: "info.main", color: "#fff" },
-        }}
+        sx={actionIconBtnSx}
       >
-        <EventIcon fontSize="small" />
+         <VisibilityIcon fontSize="small" />
       </IconButton>
     </Tooltip>
 
@@ -1867,11 +1890,7 @@ const handleGeneratePDF2 = () => {
         <IconButton
           color="primary"
           onClick={() => handleUpdateBorrow(r)}
-          sx={{
-            bgcolor: "#e3f2fd",
-            "&:hover": { bgcolor: "#90caf9" },
-            p: 1,
-          }}
+          sx={actionIconBtnSx}
         >
           <EditIcon fontSize="small" />
         </IconButton>
@@ -1884,11 +1903,7 @@ const handleGeneratePDF2 = () => {
         <IconButton
           color="success"
           onClick={() => handleInitiateReturn(r)}
-          sx={{
-            bgcolor: "success.light",
-            "&:hover": { bgcolor: "success.main", color: "#fff" },
-            p: 1,
-          }}
+           sx={actionIconBtnSx}
         >
           <CheckCircleIcon fontSize="small" />
         </IconButton>
@@ -1900,11 +1915,7 @@ const handleGeneratePDF2 = () => {
         <IconButton
           color="error"
           onClick={() => handleDeleteBorrow(r._id!)}
-          sx={{
-            bgcolor: "#ffebee",
-            "&:hover": { bgcolor: "#f44336", color: "#fff" },
-            p: 1,
-          }}
+           sx={actionIconBtnSx}
         >
           <DeleteIcon fontSize="small" />
         </IconButton>

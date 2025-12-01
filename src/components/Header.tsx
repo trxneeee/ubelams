@@ -40,7 +40,9 @@ import {
   AiFillTool,
   AiOutlineSetting,
   AiOutlineSecurityScan,
-  AiOutlineDatabase
+  AiOutlineDatabase,
+  AiOutlineGold,
+  AiFillGold
 } from "react-icons/ai";
 import { AiFillDatabase } from "react-icons/ai";
 import { AiOutlineBook, AiFillBook } from "react-icons/ai";
@@ -68,12 +70,19 @@ const Header = () => {
   let tabIcons = [];
   const staffAllowed = ["Student Assistant", "Custodian", "Admin"];
 
-  if (userRoles === "Instructor" || userRoles === "Program Chair") {
+  if (userRoles === "Instructor") {
     // Instructors / Program Chairs: only faculty reservation tab
     tabIcons = [
       { to: "/facultyreserve", label: "Instructor Reservations", icon: <AiOutlineBook size={24} />, active: <AiFillBook size={24} /> }
     ];
-  } else if (userRoles === "Student") {
+  } else if (userRoles === "Program Chair") {
+    // Students: direct to student flow only
+    tabIcons = [
+      { to: "/facultyreserve", label: "Instructor Reservations", icon: <AiOutlineBook size={24} />, active: <AiFillBook size={24} /> },
+      { to: "/forecast", label: "Forecast", icon: <AiOutlineGold size={24} />, active: <AiFillGold size={24} /> }
+    ];
+  }
+  else if (userRoles === "Student") {
     // Students: direct to student flow only
     tabIcons = [
       { to: "/studentelams", label: "Student", icon: <AiOutlineBook size={24} />, active: <AiFillBook size={24} /> }
@@ -85,6 +94,7 @@ const Header = () => {
       ...(userRoles === "Custodian" || userRoles === "Admin" ? [{ to: "/staff", label: "Staff", icon: <AiOutlineUser size={24} />, active: <MdPerson size={24} /> }] : []),
       // Subjects & Courses management (Custodian/Admin only)
       ...(userRoles === "Custodian" || userRoles === "Admin" ? [{ to: "/subjects-courses", label: "Subjects & Courses", icon: <AiOutlineDatabase size={24} />, active: <AiFillDatabase size={24} /> }] : []),
+      ...(userRoles === "Custodian" || userRoles === "Admin" ? [{ to: "/allforecast", label: "Forecast", icon: <AiOutlineGold size={24} />, active: <AiFillGold size={24} /> }] : []),
       { to: "/reservation", label: "Reservation", icon: <AiOutlineBook size={24} />, active: <AiFillBook size={24} /> },
       { to: "/borrow", label: "Borrow", icon: <AiOutlineFileSearch size={24} />, active: <MdEditDocument size={24} /> },
       { to: "/inventory", label: "Inventory", icon: <AiOutlineAppstore size={24} />, active: <AiFillAppstore size={24} /> },

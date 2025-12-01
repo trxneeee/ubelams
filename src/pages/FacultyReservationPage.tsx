@@ -28,6 +28,10 @@ import {
   Tab,
   CircularProgress,
   Backdrop,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
   Badge,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
@@ -42,9 +46,10 @@ import SendIcon from "@mui/icons-material/Send";
 import EditIcon from "@mui/icons-material/Edit";
 import ListIcon from "@mui/icons-material/List";
 import axios from "axios";
-import { FormControl, InputLabel, Select, MenuItem } from "@mui/material";
+import Snackbar from "@mui/material/Snackbar";
+import Alert from "@mui/material/Alert";
 
-const API_BASE_URL = "https://elams-server.onrender.com/api";
+const API_BASE_URL = "http://localhost:5000/api";
 
 interface RequestedItem {
   item_name: string;
@@ -100,6 +105,25 @@ export default function FacultyReservationPage() {
   const brandRed = "#b91c1c";
   const [currentTab, setCurrentTab] = useState(0);
   const [facultyName, setFacultyName] = useState("");
+
+  // --- ADD: Confirmation modal + Snackbar state/helper ---
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState("");
+  const [confirmMessage, setConfirmMessage] = useState("");
+  const [onConfirm, setOnConfirm] = useState<(() => void) | null>(null);
+
+  const [snackbar, setSnackbar] = useState<{
+    open: boolean;
+    message: string;
+    severity: "success" | "error" | "info";
+  }>({ open: false, message: "", severity: "success" });
+
+  const showConfirm = (title: string, message: string, onYes: () => void) => {
+    setConfirmTitle(title);
+    setConfirmMessage(message);
+    setOnConfirm(() => onYes);
+    setConfirmOpen(true);
+  };
 
   // Reservation Form State
   const [reservationForm, setReservationForm] = useState<ReservationForm>({
@@ -180,8 +204,10 @@ export default function FacultyReservationPage() {
   }[]>([]);
 
   // Subjects and Courses state
-  const [subjects, setSubjects] = useState<{ _id: string; name: string }[]>([]);
-  const [courses, setCourses] = useState<{ _id: string; name: string }[]>([]);
+  const [subjects, setSubjects] = useState<{ _id: string; name: string; code?: string; courses?: string[] }[]>([]);
+  const [courses, setCourses] = useState<{ _id: string; name: string; code?: string }[]>([]);
+  const [selectedSubject, setSelectedSubject] = useState<string>("");
+  const [selectedCourse, setSelectedCourse] = useState<string>("");
 
   // ref to the messages container for automatic scrolling
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -605,7 +631,6 @@ export default function FacultyReservationPage() {
       const userIdentifier = currentUser.email || currentUser.name || "Unknown";
       const userName = currentUser.name || userIdentifier;
 
-      // use server response (should return updated reservation)
       const resp = await axios.post(`${API_BASE_URL}/reservations/${selectedReservationForChat._id}/message`, {
         sender: userIdentifier,
         sender_name: userName,
@@ -614,7 +639,6 @@ export default function FacultyReservationPage() {
 
       const updated = resp.data as Reservation;
 
-      // mark messages as seen for this user (best-effort, server emits updates)
       try {
         await axios.post(`${API_BASE_URL}/reservations/${selectedReservationForChat._id}/messages-seen`, {
           user_email: userIdentifier,
@@ -623,12 +647,8 @@ export default function FacultyReservationPage() {
         // non-fatal
       }
 
-      // update local state immediately from response
       setSelectedReservationForChat(updated);
-      // ensure polling remains active for near real-time
       startChatPolling(updated._id);
-
-      // clear input then scroll to bottom after DOM paints
       setMessageText("");
       setTimeout(() => {
         try {
@@ -637,7 +657,7 @@ export default function FacultyReservationPage() {
       }, 50);
     } catch (error) {
       console.error("Send message error:", error);
-      alert("Failed to send message");
+      setSnackbar({ open: true, message: "Failed to send message", severity: "error" });
     } finally {
       setSendingMessage(false);
     }
@@ -722,27 +742,42 @@ export default function FacultyReservationPage() {
 
   // --- FIX: delete handler uses fetchReservations ---
   const handleDeleteReservation = async (reservation: any) => {
-    // reuse role guard if defined elsewhere in this file; fall back to local check
     const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
     const isStudentAssistant = (currentUser?.role || "") === "Student Assistant";
     if (isStudentAssistant) {
-      alert("You are not allowed to delete reservations.");
+      setSnackbar({ open: true, message: "You are not allowed to delete reservations.", severity: "error" });
       return;
     }
 
-    if (!window.confirm(`Are you sure you want to delete reservation ${reservation.reservation_code}?`)) {
-      return;
-    }
-
-    try {
-      await axios.delete(`${API_BASE_URL}/reservations/${reservation._id}`);
-      // Always refresh reservations after delete
-      await fetchMyReservations();
-    } catch (error) {
-      console.error("Delete reservation error:", error);
-      alert("Failed to delete reservation");
-    }
+    showConfirm(
+      "Delete Reservation",
+      `Are you sure you want to delete reservation ${reservation.reservation_code}?`,
+      async () => {
+        setConfirmOpen(false);
+        try {
+          await axios.delete(`${API_BASE_URL}/reservations/${reservation._id}`);
+          await fetchMyReservations();
+          setSnackbar({ open: true, message: "Reservation deleted", severity: "success" });
+        } catch (error) {
+          console.error("Delete reservation error:", error);
+          setSnackbar({ open: true, message: "Failed to delete reservation", severity: "error" });
+        }
+      }
+    );
   };
+
+  // Filter subjects based on selected course
+  const filteredSubjects = selectedCourse
+    ? subjects.filter(s => (s.courses || []).includes(selectedCourse))
+    : subjects;
+
+  // Filter courses based on selected subject
+  const filteredCourses = selectedSubject
+    ? courses.filter(c => {
+        const subj = subjects.find(s => s._id === selectedSubject);
+        return subj?.courses?.includes(c._id);
+      })
+    : courses;
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
@@ -764,6 +799,7 @@ export default function FacultyReservationPage() {
           {facultyName ? `Welcome, ${facultyName}` : "Create and manage equipment reservations"}
         </Typography>
       </Box>
+      
 
       {/* Tabs */}
       <Card sx={{ mb: 3 }}>
@@ -817,29 +853,41 @@ export default function FacultyReservationPage() {
               </Typography>
               <Stack spacing={2}>
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                  {/* Subject Select: only show subjects connected to selected course */}
                   <FormControl fullWidth size="small">
                     <InputLabel>Subject</InputLabel>
                     <Select
                       label="Subject"
-                      value={reservationForm.subject}
-                      onChange={(e) => setReservationForm((prev) => ({ ...(prev || {}), subject: String(e.target.value) }))}
+                      value={selectedSubject}
+                      onChange={(e) => {
+                        setSelectedSubject(e.target.value);
+                        // Set subject name in reservationForm
+                        const subj = subjects.find(s => s._id === e.target.value);
+                        setReservationForm((prev) => ({ ...prev, subject: subj ? subj.name : "" }));
+                      }}
                     >
-                      {subjects.map((s) => (
-                        <MenuItem key={s._id} value={s.name}>
+                      {filteredSubjects.map((s) => (
+                        <MenuItem key={s._id} value={s._id}>
                           {s.name}
                         </MenuItem>
                       ))}
                     </Select>
                   </FormControl>
+                  {/* Course Select: only show courses connected to selected subject */}
                   <FormControl fullWidth size="small">
-                    <InputLabel>Course</InputLabel>
+                    <InputLabel>Program</InputLabel>
                     <Select
-                      label="Course"
-                      value={reservationForm.course}
-                      onChange={(e) => setReservationForm((prev) => ({ ...(prev || {}), course: String(e.target.value) }))}
+                      label="Program"
+                      value={selectedCourse}
+                      onChange={(e) => {
+                        setSelectedCourse(e.target.value);
+                        // Set course name in reservationForm
+                        const course = courses.find(c => c._id === e.target.value);
+                        setReservationForm((prev) => ({ ...prev, course: course ? course.name : "" }));
+                      }}
                     >
-                      {courses.map((c) => (
-                        <MenuItem key={c._id} value={c.name}>
+                      {filteredCourses.map((c) => (
+                        <MenuItem key={c._id} value={c._id}>
                           {c.name}
                         </MenuItem>
                       ))}
@@ -1378,7 +1426,7 @@ export default function FacultyReservationPage() {
                       <Typography fontWeight="bold">Subject</Typography>
                     </TableCell>
                     <TableCell>
-                      <Typography fontWeight="bold">Course</Typography>
+                      <Typography fontWeight="bold">Program</Typography>
                     </TableCell>
                     <TableCell>
                       <Typography fontWeight="bold">Schedule</Typography>
@@ -1602,7 +1650,7 @@ export default function FacultyReservationPage() {
                   </Box>
                   <Box sx={{ display: "flex", gap: 2 }}>
                     <Typography variant="body2" fontWeight="bold" sx={{ minWidth: 120 }}>
-                      Course:
+                      Program:
                     </Typography>
                     <Typography variant="body2">{selectedReservation.course}</Typography>
                   </Box>
@@ -1825,6 +1873,36 @@ export default function FacultyReservationPage() {
           <Button onClick={() => setLogsOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
+
+      {/* Confirmation Modal */}
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
+        <DialogTitle>{confirmTitle}</DialogTitle>
+        <DialogContent>
+          <Typography>{confirmMessage}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmOpen(false)} color="inherit">Cancel</Button>
+          <Button
+            onClick={() => { if (onConfirm) onConfirm(); }}
+            color="error"
+            variant="contained"
+          >
+            Yes, Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={3500}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} sx={{ width: '100%' }}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 }

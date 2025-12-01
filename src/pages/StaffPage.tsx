@@ -29,6 +29,7 @@ import {
   Chip,
   Card,
   InputAdornment,
+  TablePagination,
   Tabs,
   Tab,
 } from "@mui/material";
@@ -39,9 +40,12 @@ import { useNavigate } from "react-router-dom";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import SearchIcon from "@mui/icons-material/Search";
 import VisibilityIcon from "@mui/icons-material/Visibility";
+import PersonIcon from "@mui/icons-material/Person";
 import { useTheme } from "@mui/material/styles";
+import UBLogo from "../assets/ublogo.png"; // Place UB logo at src/assets/ub-logo.png
+import DialogContentText from "@mui/material/DialogContentText";
 
-const API_BASE_URL = "https://elams-server.onrender.com/api";
+const API_BASE_URL = "http://localhost:5000/api";
 
 interface Staff {
   email: string;
@@ -83,6 +87,52 @@ export default function StaffPage() {
   const [userReservationRecords, setUserReservationRecords] = useState<any[]>([]);
   const navigate = useNavigate();
   const theme = useTheme();
+
+  // --- NEW: unified action button styles (neutral grey, UB red on hover) ---
+  const ubRed = "#B71C1C";
+  const actionBtnSx = {
+    minWidth: 0,
+    bgcolor: "grey.100",
+    color: "text.primary",
+    borderRadius: 2,
+    p: 1,
+    transition: "all 180ms ease",
+    boxShadow: "none",
+    "&:hover": {
+      bgcolor: ubRed,
+      color: "#fff",
+      transform: "translateY(-2px)",
+      boxShadow: "0 8px 20px rgba(183,28,28,0.12)",
+    },
+  };
+
+
+  // --- NEW: pagination for main staff table (max 10 rows per page) ---
+  const [staffPage, setStaffPage] = useState(0);
+  const [staffRowsPerPage] = useState<number>(10); // fixed to 10
+
+  // --- NEW: viewing dialog search + pagination for borrow & reservation records ---
+  const [viewBorrowSearch, setViewBorrowSearch] = useState("");
+  const [viewBorrowPage, setViewBorrowPage] = useState(0);
+  const [viewBorrowRowsPerPage] = useState<number>(10);
+
+  const [viewResSearch, setViewResSearch] = useState("");
+  const [viewResPage, setViewResPage] = useState(0);
+  const [viewResRowsPerPage] = useState<number>(10);
+
+  // --- Confirmation Modal State ---
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState("");
+  const [confirmMessage, setConfirmMessage] = useState("");
+  const [onConfirm, setOnConfirm] = useState<(() => void) | null>(null);
+
+  // Add showConfirm helper
+  const showConfirm = (title: string, message: string, onYes: () => void) => {
+    setConfirmTitle(title);
+    setConfirmMessage(message);
+    setOnConfirm(() => onYes);
+    setConfirmOpen(true);
+  };
 
   const fetchStaffs = async () => {
     setLoading(true);
@@ -149,7 +199,7 @@ export default function StaffPage() {
       fetchStaffs();
     } catch (err: any) {
       console.error("Failed to create staff(s)", err);
-      setSnackbar({ open: true, message: "Failed to add staff member(s)", severity: "error" });
+      setSnackbar({ open: true, message: "Failed to add account(s)", severity: "error" });
     } finally {
       setProcessing(false);
     }
@@ -187,46 +237,58 @@ export default function StaffPage() {
   };
 
   const handleDelete = async (email: string) => {
-    if (!window.confirm("Are you sure you want to delete this staff member?")) return;
-    setProcessing(true);
-    try {
-      await axios.post(`${API_BASE_URL}/users`, {
-        action: "delete",
-        email: email
-      });
-      setSnackbar({ open: true, message: "Staff member deleted successfully", severity: "success" });
-      fetchStaffs();
-    } catch (err: any) {
-      console.error("Failed to delete staff", err);
-      const errorMessage = err.response?.data?.error || "Failed to delete staff member";
-      setSnackbar({ open: true, message: errorMessage, severity: "error" });
-    } finally {
-      setProcessing(false);
-    }
+    showConfirm(
+      "Delete account",
+      "Are you sure you want to delete this account?",
+      async () => {
+        setConfirmOpen(false);
+        setProcessing(true);
+        try {
+          await axios.post(`${API_BASE_URL}/users`, {
+            action: "delete",
+            email: email
+          });
+          setSnackbar({ open: true, message: "Account deleted successfully", severity: "success" });
+          fetchStaffs();
+        } catch (err: any) {
+          console.error("Failed to delete staff", err);
+          const errorMessage = err.response?.data?.error || "Failed to delete account";
+          setSnackbar({ open: true, message: errorMessage, severity: "error" });
+        } finally {
+          setProcessing(false);
+        }
+      }
+    );
   };
 
   const handleBulkDelete = async () => {
-    if (!window.confirm("Are you sure you want to delete selected staff members?")) return;
-    setProcessing(true);
-    try {
-      await Promise.all(
-        selectedStaffs.map(email =>
-          axios.post(`${API_BASE_URL}/users`, { 
-            action: "delete", 
-            email: email 
-          })
-        )
-      );
-      setSelectedStaffs([]);
-      setSnackbar({ open: true, message: "Selected staff members deleted successfully", severity: "success" });
-      fetchStaffs();
-    } catch (err: any) {
-      console.error("Failed to delete selected staff", err);
-      const errorMessage = err.response?.data?.error || "Failed to delete selected staff members";
-      setSnackbar({ open: true, message: errorMessage, severity: "error" });
-    } finally {
-      setProcessing(false);
-    }
+    showConfirm(
+      "Delete Selected Accounts",
+      "Are you sure you want to delete selected accounts?",
+      async () => {
+        setConfirmOpen(false);
+        setProcessing(true);
+        try {
+          await Promise.all(
+            selectedStaffs.map(email =>
+              axios.post(`${API_BASE_URL}/users`, { 
+                action: "delete", 
+                email: email 
+              })
+            )
+          );
+          setSelectedStaffs([]);
+          setSnackbar({ open: true, message: "Selected account deleted successfully", severity: "success" });
+          fetchStaffs();
+        } catch (err: any) {
+          console.error("Failed to delete selected staff", err);
+          const errorMessage = err.response?.data?.error || "Failed to delete selected account";
+          setSnackbar({ open: true, message: errorMessage, severity: "error" });
+        } finally {
+          setProcessing(false);
+        }
+      }
+    );
   };
 
   // Get available roles based on current user's role
@@ -251,13 +313,47 @@ export default function StaffPage() {
   const getTabRoles = () => {
     if (!user) return [];
     if (user.role === "Admin") {
-      return ["All", "Custodian", "Program Chair", "Instructor", "Student Assistant", "Student"];
+      return ["All", "Custodian", "Student Assistant", "Program Chair", "Instructor", "Student"];
     }
     if (user.role === "Custodian") {
       return ["All", "Program Chair", "Instructor", "Student Assistant", "Student"];
     }
     return [];
   };
+
+  // Reset page when filteredStaffs changes (avoid out-of-range page)
+  useEffect(() => {
+    setStaffPage(0);
+  }, [selectedTab, searchQuery]);
+
+  // Reset record pages when viewUser changes or search changes
+  useEffect(() => {
+    setViewBorrowPage(0);
+    setViewResPage(0);
+    setViewBorrowSearch("");
+    setViewResSearch("");
+  }, [viewUser, viewUserOpen]);
+
+  useEffect(() => {
+    const storedUser = localStorage.getItem("user");
+    if (!storedUser) {
+      navigate("/"); // redirect to login if not logged in
+    } else {
+      const userData = JSON.parse(storedUser);
+      setUser(userData);
+      // Default tab is "All" for all users
+      setSelectedTab("All");
+      if (userData.role !== "Custodian" && userData.role !== "Admin") {
+        navigate("/dashboard");
+      }
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    if (user) {
+      fetchStaffs();
+    }
+  }, [user]);
 
   // Filtered staffs for current tab, with search
   const filteredStaffs = staffs
@@ -269,12 +365,40 @@ export default function StaffPage() {
       staff.email.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
+  // --- NEW: compute paginated slice for staff table ---
+  const paginatedStaffs = filteredStaffs.slice(staffPage * staffRowsPerPage, staffPage * staffRowsPerPage + staffRowsPerPage);
+
+  // --- NEW: filtered + paginated borrow & reservation records for view dialog ---
+  const filteredBorrowRecords = userBorrowRecords
+    .filter((r: any) => {
+      if (!viewBorrowSearch.trim()) return true;
+      const q = viewBorrowSearch.toLowerCase();
+      return String(r.borrow_id || "").toLowerCase().includes(q) ||
+             String(r.course || "").toLowerCase().includes(q) ||
+             String(r.borrow_user || "").toLowerCase().includes(q) ||
+             String(r.group_leader || "").toLowerCase().includes(q);
+    });
+
+  const paginatedBorrowRecords = filteredBorrowRecords.slice(viewBorrowPage * viewBorrowRowsPerPage, viewBorrowPage * viewBorrowRowsPerPage + viewBorrowRowsPerPage);
+
+  const filteredReservationRecords = userReservationRecords
+    .filter((r: any) => {
+      if (!viewResSearch.trim()) return true;
+      const q = viewResSearch.toLowerCase();
+      return String(r.reservation_code || "").toLowerCase().includes(q) ||
+             String(r.subject || "").toLowerCase().includes(q) ||
+             String(r.course || "").toLowerCase().includes(q) ||
+             String(r.instructor || "").toLowerCase().includes(q);
+    });
+
+  const paginatedReservationRecords = filteredReservationRecords.slice(viewResPage * viewResRowsPerPage, viewResPage * viewResRowsPerPage + viewResRowsPerPage);
+
   // Fetch borrow records for student
   const fetchBorrowRecords = async (user: Staff) => {
     setUserBorrowRecords([]);
     if (!user) return;
     try {
-      const res = await axios.get("https://elams-server.onrender.com/api/borrow-records");
+      const res = await axios.get("http://localhost:5000/api/borrow-records");
       if (res.data && Array.isArray(res.data)) {
         // Match group_leader or borrow_user by name or email
         const name = `${user.firstname || ""} ${user.lastname || ""}`.trim();
@@ -296,7 +420,7 @@ export default function StaffPage() {
     setUserReservationRecords([]);
     if (!user) return;
     try {
-      const res = await axios.get("https://elams-server.onrender.com/api/reservations");
+      const res = await axios.get("http://localhost:5000/api/reservations");
       if (Array.isArray(res.data)) {
         const filtered = res.data.filter(
           (r: any) =>
@@ -315,7 +439,7 @@ export default function StaffPage() {
     setUserBorrowRecords([]);
     if (!user) return;
     try {
-      const res = await axios.get("https://elams-server.onrender.com/api/borrow-records");
+      const res = await axios.get("http://localhost:5000/api/borrow-records");
       if (res.data && Array.isArray(res.data)) {
         // Match managed_by by email or managed_name by name
         const name = `${user.firstname || ""} ${user.lastname || ""}`.trim();
@@ -347,101 +471,176 @@ export default function StaffPage() {
     }
   };
 
-  useEffect(() => {
-    const storedUser = localStorage.getItem("user");
-    if (!storedUser) {
-      navigate("/"); // redirect to login if not logged in
-    } else {
-      const userData = JSON.parse(storedUser);
-      setUser(userData);
-      // Default tab is "All" for all users
-      setSelectedTab("All");
-      if (userData.role !== "Custodian" && userData.role !== "Admin") {
-        navigate("/dashboard");
-      }
-    }
-  }, [navigate]);
+  // UB color palette
+  const ubGold = "#F8A41A";
+  const ubWhite = "#FFFFFF";
+  const ubGreen = "#2E7D32";
+  const ubBlue = "#3B82F6";
 
-  useEffect(() => {
-    if (user) {
-      fetchStaffs();
+  // Helper: get color for role
+  const getRoleColor = (role: string) => {
+    switch (role) {
+      case "Custodian": return "#B71C1C"; // UB Red
+      case "Program Chair": return "#2E7D32"; // Green
+      case "Instructor": return "#3B82F6"; // Blue
+      case "Student Assistant": return "#F8A41A"; // Gold
+      case "Student": return "#757575"; // Grey for students
+      default: return "#757575";
     }
-  }, [user]);
+  };
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Backdrop
-        sx={{ color: "#fff", zIndex: (theme) => theme.zIndex.drawer + 1 }}
+        sx={{ color: ubWhite, zIndex: (theme) => theme.zIndex.drawer + 1 }}
         open={processing}
       >
         <Stack alignItems="center" spacing={2}>
-          <CircularProgress size={60} thickness={4} sx={{ color: "#f8a41a" }} />
-          <Typography variant="h6" sx={{ color: "#fff" }}>
+          <CircularProgress size={60} thickness={4} sx={{ color: ubGold }} />
+          <Typography variant="h6" sx={{ color: ubWhite }}>
             Processing...
           </Typography>
         </Stack>
       </Backdrop>
 
-      {/* Page header + summary cards */}
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h4" sx={{ fontWeight: "bold", color: "#B71C1C" }}>
-          Account Management
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Manage user accounts and roles
-        </Typography>
+      {/* UB Branding Header */}
+      <Box sx={{ mb: 3, display: "flex", alignItems: "center", gap: 2 }}>
+        <img src={UBLogo} alt="University of Baguio" style={{ height: 56, borderRadius: 12, background: ubWhite, boxShadow: "0 2px 8px rgba(183,28,28,0.08)" }} />
+        <Box>
+          <Typography variant="h4" sx={{ fontWeight: "bold", color: ubRed }}>
+            Account Management
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Manage user accounts and roles
+          </Typography>
+        </Box>
       </Box>
+
+      {/* Summary Cards with UB colors and logo */}
       <Stack direction={{ xs: "column", md: "row" }} spacing={3} mb={3}>
-        <Card sx={{ flex: 1, p: 3, borderRadius: 3, display: "flex", alignItems: "center", gap: 2, background: `linear-gradient(135deg, rgba(185,28,28,0.06) 0%, rgba(185,28,28,0.12) 100%)` }}>
-          <Box sx={{ p: 1.5, borderRadius: "50%", bgcolor: "rgba(185,28,28,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <CheckCircleIcon sx={{ fontSize: 28, color: "#B71C1C" }} />
+        <Card sx={{
+          flex: 1,
+          p: 3,
+          borderRadius: 3,
+          display: "flex",
+          alignItems: "center",
+          gap: 2,
+          background: `linear-gradient(135deg, ${ubRed}11 0%, ${ubRed}22 100%)`,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.08)"
+        }}>
+          <Box sx={{
+            p: 1.5,
+            borderRadius: "50%",
+            bgcolor: `${ubRed}18`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+          }}>
+            <img src={UBLogo} alt="UB" style={{ height: 32, borderRadius: "50%" }} />
           </Box>
           <Box>
             <Typography variant="caption" color="text.secondary">Total Accounts</Typography>
-            <Typography variant="h4" sx={{ fontWeight: "bold", color: "#B71C1C" }}>{staffs.length}</Typography>
+            <Typography variant="h4" sx={{ fontWeight: "bold", color: ubRed }}>{staffs.length}</Typography>
           </Box>
         </Card>
-
-        <Card sx={{ flex: 1, p: 3, borderRadius: 3, display: "flex", alignItems: "center", gap: 2, background: `linear-gradient(135deg, rgba(248,164,26,0.06) 0%, rgba(248,164,26,0.12) 100%)` }}>
-          <Box sx={{ p: 1.5, borderRadius: "50%", bgcolor: "rgba(248,164,26,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Typography sx={{ fontWeight: "bold", color: "#f8a41a" }}>SA</Typography>
+        <Card sx={{
+          flex: 1,
+          p: 3,
+          borderRadius: 3,
+          display: "flex",
+          alignItems: "center",
+          gap: 2,
+          background: `linear-gradient(135deg, ${ubGold}11 0%, ${ubGold}22 100%)`,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.08)"
+        }}>
+          <Box sx={{
+            p: 1.5,
+            borderRadius: "50%",
+            bgcolor: `${ubGold}18`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+          }}>
+            <Typography sx={{ fontWeight: "bold", color: ubGold }}>SA</Typography>
           </Box>
           <Box>
             <Typography variant="caption" color="text.secondary">Student Assistants</Typography>
-            <Typography variant="h4" sx={{ fontWeight: "bold", color: "#f8a41a" }}>{staffs.filter(s => s.role === "Student Assistant").length}</Typography>
+            <Typography variant="h4" sx={{ fontWeight: "bold", color: ubGold }}>{staffs.filter(s => s.role === "Student Assistant").length}</Typography>
           </Box>
         </Card>
-
-        {/* Program Chair card */}
-        <Card sx={{ flex: 1, p: 3, borderRadius: 3, display: "flex", alignItems: "center", gap: 2, background: `linear-gradient(135deg, rgba(46,125,50,0.06) 0%, rgba(46,125,50,0.12) 100%)` }}>
-          <Box sx={{ p: 1.5, borderRadius: "50%", bgcolor: "rgba(46,125,50,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Typography sx={{ fontWeight: "bold", color: "#2E7D32" }}>PC</Typography>
+        <Card sx={{
+          flex: 1,
+          p: 3,
+          borderRadius: 3,
+          display: "flex",
+          alignItems: "center",
+          gap: 2,
+          background: `linear-gradient(135deg, ${ubGreen}11 0%, ${ubGreen}22 100%)`,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.08)"
+        }}>
+          <Box sx={{
+            p: 1.5,
+            borderRadius: "50%",
+            bgcolor: `${ubGreen}18`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+          }}>
+            <Typography sx={{ fontWeight: "bold", color: ubGreen }}>PC</Typography>
           </Box>
           <Box>
             <Typography variant="caption" color="text.secondary">Program Chairs</Typography>
-            <Typography variant="h4" sx={{ fontWeight: "bold", color: "#2E7D32" }}>{staffs.filter(s => s.role === "Program Chair").length}</Typography>
+            <Typography variant="h4" sx={{ fontWeight: "bold", color: ubGreen }}>{staffs.filter(s => s.role === "Program Chair").length}</Typography>
           </Box>
         </Card>
-
-        {/* Instructor card */}
-        <Card sx={{ flex: 1, p: 3, borderRadius: 3, display: "flex", alignItems: "center", gap: 2, background: `linear-gradient(135deg, rgba(59,130,246,0.06) 0%, rgba(59,130,246,0.12) 100%)` }}>
-          <Box sx={{ p: 1.5, borderRadius: "50%", bgcolor: "rgba(59,130,246,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Typography sx={{ fontWeight: "bold", color: "#3B82F6" }}>I</Typography>
+        <Card sx={{
+          flex: 1,
+          p: 3,
+          borderRadius: 3,
+          display: "flex",
+          alignItems: "center",
+          gap: 2,
+          background: `linear-gradient(135deg, ${ubBlue}11 0%, ${ubBlue}22 100%)`,
+          boxShadow: "0 4px 20px rgba(0,0,0,0.08)"
+        }}>
+          <Box sx={{
+            p: 1.5,
+            borderRadius: "50%",
+            bgcolor: `${ubBlue}18`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+          }}>
+            <Typography sx={{ fontWeight: "bold", color: ubBlue }}>I</Typography>
           </Box>
           <Box>
             <Typography variant="caption" color="text.secondary">Instructor</Typography>
-            <Typography variant="h4" sx={{ fontWeight: "bold", color: "#3B82F6" }}>{staffs.filter(s => s.role === "Instructor").length}</Typography>
+            <Typography variant="h4" sx={{ fontWeight: "bold", color: ubBlue }}>{staffs.filter(s => s.role === "Instructor").length}</Typography>
           </Box>
         </Card>
-
-        {/* Student card */}
-        <Card sx={{ flex: 1, p: 3, borderRadius: 3, display: "flex", alignItems: "center", gap: 2, background: `linear-gradient(135deg, rgba(33,150,243,0.06) 0%, rgba(33,150,243,0.12) 100%)` }}>
-          <Box sx={{ p: 1.5, borderRadius: "50%", bgcolor: "rgba(33,150,243,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <Typography sx={{ fontWeight: "bold", color: "#2196F3" }}>S</Typography>
+        <Card sx={{
+          flex: 1,
+          p: 3,
+          borderRadius: 3,
+          display: "flex",
+          alignItems: "center",
+          gap: 2,
+          background: `linear-gradient(135deg, #75757511 0%, #75757522 100%)`, // Use grey for students
+          boxShadow: "0 4px 20px rgba(0,0,0,0.08)"
+        }}>
+          <Box sx={{
+            p: 1.5,
+            borderRadius: "50%",
+            bgcolor: "#75757518",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center"
+          }}>
+            <Typography sx={{ fontWeight: "bold", color: "#757575" }}>S</Typography>
           </Box>
           <Box>
             <Typography variant="caption" color="text.secondary">Students</Typography>
-            <Typography variant="h4" sx={{ fontWeight: "bold", color: "#2196F3" }}>{staffs.filter(s => s.role === "Student").length}</Typography>
+            <Typography variant="h4" sx={{ fontWeight: "bold", color: "#757575" }}>{staffs.filter(s => s.role === "Student").length}</Typography>
           </Box>
         </Card>
       </Stack>
@@ -531,7 +730,7 @@ export default function StaffPage() {
           <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: 280 }}>
             <Loader />
           </Box>
-        ) : filteredStaffs.length === 0 ? (
+        ) : paginatedStaffs.length === 0 ? (
           // ...existing no data design...
           <Box
             sx={{
@@ -587,12 +786,12 @@ export default function StaffPage() {
                   >
                     <Checkbox
                       indeterminate={
-                        selectedStaffs.length > 0 && selectedStaffs.length < filteredStaffs.length
+                        selectedStaffs.length > 0 && selectedStaffs.length < paginatedStaffs.length
                       }
-                      checked={filteredStaffs.length > 0 && selectedStaffs.length === filteredStaffs.length}
+                      checked={paginatedStaffs.length > 0 && selectedStaffs.length === paginatedStaffs.length}
                       onChange={(e) => {
                         if (e.target.checked) {
-                          setSelectedStaffs(filteredStaffs.map(staff => staff.email));
+                          setSelectedStaffs(paginatedStaffs.map(staff => staff.email));
                         } else {
                           setSelectedStaffs([]);
                         }
@@ -620,14 +819,7 @@ export default function StaffPage() {
                   }}>
                     Email
                   </TableCell>
-                  <TableCell sx={{
-                    bgcolor: "grey.50",
-                    fontWeight: "bold",
-                    color: "#b91c1c",
-                    borderBottom: "2px solid #b91c1c"
-                  }}>
-                    Role
-                  </TableCell>
+                  {/* REMOVE Role column */}
                   <TableCell sx={{
                     bgcolor: "grey.50",
                     fontWeight: "bold",
@@ -639,7 +831,7 @@ export default function StaffPage() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {filteredStaffs.map((staff) => (
+                {paginatedStaffs.map((staff) => (
                   <TableRow key={staff.email} hover sx={{ '&:last-child td, &:last-child th': { border: 0 } }}>
                     <TableCell padding="checkbox">
                       <Checkbox
@@ -654,12 +846,15 @@ export default function StaffPage() {
                       />
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body1" fontWeight="medium">
-                        {staff.firstname && staff.lastname 
-                          ? `${staff.firstname} ${staff.lastname}`
-                          : "Not yet logged in"
-                        }
-                      </Typography>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <PersonIcon sx={{ color: getRoleColor(staff.role), fontSize: 22 }} />
+                        <Typography variant="body1" fontWeight="medium">
+                          {staff.firstname && staff.lastname 
+                            ? `${staff.firstname} ${staff.lastname}`
+                            : "Not yet logged in"
+                          }
+                        </Typography>
+                      </Box>
                       {!(staff.firstname && staff.lastname) && (
                         <Typography variant="caption" color="text.secondary">
                           Name will be filled after first login
@@ -667,57 +862,23 @@ export default function StaffPage() {
                       )}
                     </TableCell>
                     <TableCell>{staff.email}</TableCell>
-                    <TableCell>
-                      <Box
-                        component="span"
-                        sx={{
-                          px: 2,
-                          py: 1,
-                          borderRadius: 3,
-                          fontSize: "0.75rem",
-                          fontWeight: "bold",
-                          bgcolor: staff.role === "Custodian" ? "#B71C1C" :
-                                   staff.role === "Program Chair" ? "#2E7D32" :
-                                   staff.role === "Instructor" ? "#3B82F6" :
-                                   staff.role === "Student Assistant" ? "#f8a41a" : "#757575",
-                          color: "white",
-                        }}
-                      >
-                        {staff.role}
-                      </Box>
-                    </TableCell>
+                    {/* REMOVE Role cell */}
                     <TableCell>
                       <Stack direction="row" spacing={1}>
                         {/* Only show Records/View icon for non-Custodian roles */}
                         {staff.role !== "Custodian" && (
                           <Button
                             size="small"
-                            sx={{
-                              minWidth: 0,
-                              bgcolor: "#e3f2fd",
-                              color: "#1976d2",
-                              borderRadius: 2,
-                              p: 1,
-                              boxShadow: "0 2px 8px rgba(25,118,210,0.08)",
-                              "&:hover": { bgcolor: "#90caf9", color: "#1565c0" }
-                            }}
                             onClick={() => handleViewUser(staff)}
+                            sx={actionBtnSx} // <- replaced inline styles
                           >
                             <VisibilityIcon fontSize="small" />
                           </Button>
                         )}
                         <Button
                           size="small"
-                          sx={{
-                            minWidth: 0,
-                            bgcolor: "#ffebee",
-                            color: "#d32f2f",
-                            borderRadius: 2,
-                            p: 1,
-                            boxShadow: "0 2px 8px rgba(183,28,28,0.08)",
-                            "&:hover": { bgcolor: "#f44336", color: "#fff" }
-                          }}
                           onClick={() => handleDelete(staff.email)}
+                          sx={actionBtnSx} // <- replaced inline styles
                         >
                           <DeleteIcon fontSize="small" />
                         </Button>
@@ -730,6 +891,20 @@ export default function StaffPage() {
           </TableContainer>
         )}
       </Card>
+
+      {/* --- NEW: TablePagination for main staff table (fixed options => 10) --- */}
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', px: 2, py: 1 }}>
+        <TablePagination
+          component="div"
+          count={filteredStaffs.length}
+          page={staffPage}
+          onPageChange={(_, newPage) => setStaffPage(newPage)}
+          rowsPerPage={staffRowsPerPage}
+          rowsPerPageOptions={[10]}
+          onRowsPerPageChange={() => {}}
+          labelRowsPerPage="Rows"
+        />
+      </Box>
 
       {/* View User Modal */}
       <Dialog
@@ -770,48 +945,74 @@ export default function StaffPage() {
                   <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
                     Borrow Records
                   </Typography>
+
+                  <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
+                    <TextField
+                      size="small"
+                      placeholder="Search borrow id, course, borrower..."
+                      value={viewBorrowSearch}
+                      onChange={(e) => { setViewBorrowSearch(e.target.value); setViewBorrowPage(0); }}
+                      fullWidth
+                      InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment> }}
+                    />
+                  </Box>
+
                   <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.info.main, 0.04), maxHeight: 250, overflowY: 'auto' }}>
-                    {userBorrowRecords.length === 0 ? (
+                    {filteredBorrowRecords.length === 0 ? (
                       <Typography variant="body2" color="text.secondary">
-                        No borrow records found for this student.
+                        No borrow records found.
                       </Typography>
                     ) : (
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: "bold" }}>Borrow ID</TableCell>
-                            <TableCell sx={{ fontWeight: "bold" }}>Course</TableCell>
-                            <TableCell sx={{ fontWeight: "bold" }}>Group Leader</TableCell>
-                            <TableCell sx={{ fontWeight: "bold" }}>Date Borrowed</TableCell>
-                            <TableCell sx={{ fontWeight: "bold" }}>Status</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {userBorrowRecords.map((rec, idx) => (
-                            <TableRow key={idx}>
-                              <TableCell>{rec.borrow_id}</TableCell>
-                              <TableCell>{rec.course}</TableCell>
-                              <TableCell>{rec.group_leader}</TableCell>
-                              <TableCell>{rec.date_borrowed ? new Date(rec.date_borrowed).toLocaleDateString() : ""}</TableCell>
-                              <TableCell>
-                                <Chip
-                                  label={rec.status}
-                                  size="small"
-                                  sx={{
-                                    bgcolor: rec.status === "Returned" ? alpha(theme.palette.success.main, 0.08) :
-                                            rec.status === "Borrowed" ? alpha(theme.palette.warning.main, 0.08) :
-                                            alpha(theme.palette.error.main, 0.08),
-                                    color: rec.status === "Returned" ? theme.palette.success.main :
-                                           rec.status === "Borrowed" ? theme.palette.warning.main :
-                                           theme.palette.error.main,
-                                    fontWeight: 'bold'
-                                  }}
-                                />
-                              </TableCell>
+                      <>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: "bold" }}>Borrow ID</TableCell>
+                              <TableCell sx={{ fontWeight: "bold" }}>Course</TableCell>
+                              <TableCell sx={{ fontWeight: "bold" }}>Group Leader</TableCell>
+                              <TableCell sx={{ fontWeight: "bold" }}>Date Borrowed</TableCell>
+                              <TableCell sx={{ fontWeight: "bold" }}>Status</TableCell>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                          </TableHead>
+                          <TableBody>
+                            {paginatedBorrowRecords.map((rec, idx) => (
+                              <TableRow key={idx}>
+                                <TableCell>{rec.borrow_id}</TableCell>
+                                <TableCell>{rec.course}</TableCell>
+                                <TableCell>{rec.group_leader}</TableCell>
+                                <TableCell>{rec.date_borrowed ? new Date(rec.date_borrowed).toLocaleDateString() : ""}</TableCell>
+                                <TableCell>
+                                  <Chip
+                                    label={rec.status}
+                                    size="small"
+                                    sx={{
+                                      bgcolor: rec.status === "Returned" ? alpha(theme.palette.success.main, 0.08) :
+                                              rec.status === "Borrowed" ? alpha(theme.palette.warning.main, 0.08) :
+                                              alpha(theme.palette.error.main, 0.08),
+                                      color: rec.status === "Returned" ? theme.palette.success.main :
+                                             rec.status === "Borrowed" ? theme.palette.warning.main :
+                                             theme.palette.error.main,
+                                      fontWeight: 'bold'
+                                    }}
+                                  />
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+
+                        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
+                          <TablePagination
+                            component="div"
+                            count={filteredBorrowRecords.length}
+                            page={viewBorrowPage}
+                            onPageChange={(_, newPage) => setViewBorrowPage(newPage)}
+                            rowsPerPage={viewBorrowRowsPerPage}
+                            rowsPerPageOptions={[10]}
+                            onRowsPerPageChange={() => {}}
+                          />
+                        </Box>
+                      </>
                     )}
                   </Paper>
                 </Box>
@@ -822,48 +1023,74 @@ export default function StaffPage() {
                   <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
                     Managed Borrow Records
                   </Typography>
+
+                  <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
+                    <TextField
+                      size="small"
+                      placeholder="Search borrow id, course, borrower..."
+                      value={viewBorrowSearch}
+                      onChange={(e) => { setViewBorrowSearch(e.target.value); setViewBorrowPage(0); }}
+                      fullWidth
+                      InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment> }}
+                    />
+                  </Box>
+
                   <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.info.main, 0.04), maxHeight: 250, overflowY: 'auto' }}>
-                    {userBorrowRecords.length === 0 ? (
+                    {filteredBorrowRecords.length === 0 ? (
                       <Typography variant="body2" color="text.secondary">
                         No borrow records managed by this Student Assistant.
                       </Typography>
                     ) : (
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: "bold" }}>Borrow ID</TableCell>
-                            <TableCell sx={{ fontWeight: "bold" }}>Course</TableCell>
-                            <TableCell sx={{ fontWeight: "bold" }}>Borrower</TableCell>
-                            <TableCell sx={{ fontWeight: "bold" }}>Date Borrowed</TableCell>
-                            <TableCell sx={{ fontWeight: "bold" }}>Status</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {userBorrowRecords.map((rec, idx) => (
-                            <TableRow key={idx}>
-                              <TableCell>{rec.borrow_id}</TableCell>
-                              <TableCell>{rec.course}</TableCell>
-                              <TableCell>{rec.borrow_user}</TableCell>
-                              <TableCell>{rec.date_borrowed ? new Date(rec.date_borrowed).toLocaleDateString() : ""}</TableCell>
-                              <TableCell>
-                                <Chip
-                                  label={rec.status}
-                                  size="small"
-                                  sx={{
-                                    bgcolor: rec.status === "Returned" ? alpha(theme.palette.success.main, 0.08) :
-                                            rec.status === "Borrowed" ? alpha(theme.palette.warning.main, 0.08) :
-                                            alpha(theme.palette.error.main, 0.08),
-                                    color: rec.status === "Returned" ? theme.palette.success.main :
-                                           rec.status === "Borrowed" ? theme.palette.warning.main :
-                                           theme.palette.error.main,
-                                    fontWeight: 'bold'
-                                  }}
-                                />
-                              </TableCell>
+                      <>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: "bold" }}>Borrow ID</TableCell>
+                              <TableCell sx={{ fontWeight: "bold" }}>Course</TableCell>
+                              <TableCell sx={{ fontWeight: "bold" }}>Borrower</TableCell>
+                              <TableCell sx={{ fontWeight: "bold" }}>Date Borrowed</TableCell>
+                              <TableCell sx={{ fontWeight: "bold" }}>Status</TableCell>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                          </TableHead>
+                          <TableBody>
+                            {paginatedBorrowRecords.map((rec, idx) => (
+                              <TableRow key={idx}>
+                                <TableCell>{rec.borrow_id}</TableCell>
+                                <TableCell>{rec.course}</TableCell>
+                                <TableCell>{rec.borrow_user}</TableCell>
+                                <TableCell>{rec.date_borrowed ? new Date(rec.date_borrowed).toLocaleDateString() : ""}</TableCell>
+                                <TableCell>
+                                  <Chip
+                                    label={rec.status}
+                                    size="small"
+                                    sx={{
+                                      bgcolor: rec.status === "Returned" ? alpha(theme.palette.success.main, 0.08) :
+                                              rec.status === "Borrowed" ? alpha(theme.palette.warning.main, 0.08) :
+                                              alpha(theme.palette.error.main, 0.08),
+                                      color: rec.status === "Returned" ? theme.palette.success.main :
+                                             rec.status === "Borrowed" ? theme.palette.warning.main :
+                                             theme.palette.error.main,
+                                      fontWeight: 'bold'
+                                    }}
+                                  />
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+
+                        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
+                          <TablePagination
+                            component="div"
+                            count={filteredBorrowRecords.length}
+                            page={viewBorrowPage}
+                            onPageChange={(_, newPage) => setViewBorrowPage(newPage)}
+                            rowsPerPage={viewBorrowRowsPerPage}
+                            rowsPerPageOptions={[10]}
+                            onRowsPerPageChange={() => {}}
+                          />
+                        </Box>
+                      </>
                     )}
                   </Paper>
                 </Box>
@@ -874,48 +1101,74 @@ export default function StaffPage() {
                   <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
                     Reservation Records
                   </Typography>
+
+                  <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
+                    <TextField
+                      size="small"
+                      placeholder="Search code, subject, course..."
+                      value={viewResSearch}
+                      onChange={(e) => { setViewResSearch(e.target.value); setViewResPage(0); }}
+                      fullWidth
+                      InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment> }}
+                    />
+                  </Box>
+
                   <Paper sx={{ p: 2, bgcolor: alpha(theme.palette.info.main, 0.04), maxHeight: 250, overflowY: 'auto' }}>
-                    {userReservationRecords.length === 0 ? (
+                    {filteredReservationRecords.length === 0 ? (
                       <Typography variant="body2" color="text.secondary">
                         No reservation records found for this faculty.
                       </Typography>
                     ) : (
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: "bold" }}>Reservation Code</TableCell>
-                            <TableCell sx={{ fontWeight: "bold" }}>Subject</TableCell>
-                            <TableCell sx={{ fontWeight: "bold" }}>Course</TableCell>
-                            <TableCell sx={{ fontWeight: "bold" }}>Date Created</TableCell>
-                            <TableCell sx={{ fontWeight: "bold" }}>Status</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {userReservationRecords.map((rec, idx) => (
-                            <TableRow key={idx}>
-                              <TableCell>{rec.reservation_code}</TableCell>
-                              <TableCell>{rec.subject}</TableCell>
-                              <TableCell>{rec.course}</TableCell>
-                              <TableCell>{rec.date_created ? new Date(rec.date_created).toLocaleDateString() : ""}</TableCell>
-                              <TableCell>
-                                <Chip
-                                  label={rec.status}
-                                  size="small"
-                                  sx={{
-                                    bgcolor: rec.status === "Rejected" ? alpha(theme.palette.error.main, 0.08) :
-                                            rec.status === "Pending" ? alpha(theme.palette.warning.main, 0.08) :
-                                            alpha(theme.palette.success.main, 0.08),
-                                    color: rec.status === "Rejected" ? theme.palette.error.main :
-                                           rec.status === "Pending" ? theme.palette.warning.main :
-                                           theme.palette.success.main,
-                                    fontWeight: 'bold'
-                                  }}
-                                />
-                              </TableCell>
+                      <>
+                        <Table size="small">
+                          <TableHead>
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: "bold" }}>Reservation Code</TableCell>
+                              <TableCell sx={{ fontWeight: "bold" }}>Subject</TableCell>
+                              <TableCell sx={{ fontWeight: "bold" }}>Course</TableCell>
+                              <TableCell sx={{ fontWeight: "bold" }}>Date Created</TableCell>
+                              <TableCell sx={{ fontWeight: "bold" }}>Status</TableCell>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                          </TableHead>
+                          <TableBody>
+                            {paginatedReservationRecords.map((rec, idx) => (
+                              <TableRow key={idx}>
+                                <TableCell>{rec.reservation_code}</TableCell>
+                                <TableCell>{rec.subject}</TableCell>
+                                <TableCell>{rec.course}</TableCell>
+                                <TableCell>{rec.date_created ? new Date(rec.date_created).toLocaleDateString() : ""}</TableCell>
+                                <TableCell>
+                                  <Chip
+                                    label={rec.status}
+                                    size="small"
+                                    sx={{
+                                      bgcolor: rec.status === "Rejected" ? alpha(theme.palette.error.main, 0.08) :
+                                              rec.status === "Pending" ? alpha(theme.palette.warning.main, 0.08) :
+                                              alpha(theme.palette.success.main, 0.08),
+                                      color: rec.status === "Rejected" ? theme.palette.error.main :
+                                             rec.status === "Pending" ? theme.palette.warning.main :
+                                             theme.palette.success.main,
+                                      fontWeight: 'bold'
+                                    }}
+                                  />
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+
+                        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
+                          <TablePagination
+                            component="div"
+                            count={filteredReservationRecords.length}
+                            page={viewResPage}
+                            onPageChange={(_, newPage) => setViewResPage(newPage)}
+                            rowsPerPage={viewResRowsPerPage}
+                            rowsPerPageOptions={[10]}
+                            onRowsPerPageChange={() => {}}
+                          />
+                        </Box>
+                      </>
                     )}
                   </Paper>
                 </Box>
@@ -924,16 +1177,7 @@ export default function StaffPage() {
           )}
         </DialogContent>
         <DialogActions sx={{ p: 2, bgcolor: "#f5f5f5" }}>
-          <Button
-            onClick={() => setViewUserOpen(false)}
-            sx={{
-              textTransform: "none",
-              color: "#B71C1C",
-              fontWeight: "bold",
-              borderRadius: 2,
-              px: 3
-            }}
-          >
+          <Button onClick={() => setViewUserOpen(false)} sx={{ textTransform: "none", color: "#B71C1C", fontWeight: "bold", borderRadius: 2, px: 3 }}>
             Close
           </Button>
         </DialogActions>
@@ -1045,6 +1289,28 @@ export default function StaffPage() {
         </DialogActions>
       </Dialog>
 
+      {/* --- Confirmation Modal --- */}
+      <Dialog open={confirmOpen} onClose={() => setConfirmOpen(false)}>
+        <DialogTitle>{confirmTitle}</DialogTitle>
+        <DialogContent>
+          <DialogContentText>{confirmMessage}</DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmOpen(false)} color="inherit">
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              if (onConfirm) onConfirm();
+            }}
+            color="error"
+            variant="contained"
+          >
+            Yes, Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Snackbar 
         open={snackbar.open} 
         autoHideDuration={4000} 
@@ -1067,3 +1333,5 @@ export default function StaffPage() {
     </Container>
   );
 }
+
+// Principle used: University of Baguio branding, official colors, logo, rounded corners, consistent spacing, clear role color accents.
