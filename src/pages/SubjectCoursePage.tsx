@@ -133,7 +133,7 @@ export default function SubjectCoursePage() {
 
   const createSubject = async () => {
     if (!newSubject.name.trim()) {
-      setSnackbar({ open: true, message: "Subject name required", severity: "error" });
+      setSnackbar({ open: true, message: "Course Name required", severity: "error" });
       return;
     }
     setLoading(true);
@@ -416,7 +416,7 @@ export default function SubjectCoursePage() {
                 Courses & Programs
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Manage academic subjects, program offerings, and required items per subject
+                Manage courses, program offerings, and required items per courses
               </Typography>
             </Box>
           </Box>
@@ -445,7 +445,7 @@ export default function SubjectCoursePage() {
                 <BookIcon sx={{ fontSize: 32, color: "#B71C1C" }} />
               </Box>
               <Box>
-                <Typography variant="caption" color="text.secondary">Total Subjects</Typography>
+                <Typography variant="caption" color="text.secondary">Total Courses</Typography>
                 <Typography variant="h3" sx={{ fontWeight: "bold", color: "#B71C1C" }}>{subjects.length}</Typography>
               </Box>
             </Stack>
@@ -506,7 +506,7 @@ export default function SubjectCoursePage() {
                 </Typography>
                 <Stack direction="row" spacing={2} sx={{ width: { xs: "100%", sm: "auto" } }}>
                   <TextField
-                    placeholder="Search subjects..."
+                    placeholder="Search courses..."
                     size="small"
                     value={searchSubject}
                     onChange={(e) => { setSearchSubject(e.target.value); setSubjectPage(0); }}
@@ -523,7 +523,7 @@ export default function SubjectCoursePage() {
                       disabled={!newSubject.name.trim()}
                       sx={{ bgcolor: "#B71C1C", "&:hover": { bgcolor: "#9f1515" }, textTransform: "none", fontWeight: "bold" }}
                     >
-                      Add Subject
+                      Add Course
                     </Button>
                   )}
                 </Stack>
@@ -532,7 +532,7 @@ export default function SubjectCoursePage() {
               {canEdit && (
                 <Stack direction="row" spacing={2} mt={2}>
                   <TextField
-                    label="Subject Name"
+                    label="Course Name"
                     value={newSubject.name}
                     onChange={(e) => setNewSubject(s => ({ ...s, name: e.target.value }))}
                     size="small"
@@ -540,7 +540,7 @@ export default function SubjectCoursePage() {
                     placeholder="e.g., Mathematics"
                   />
                   <TextField
-                    label="Subject Code (Optional)"
+                    label="Course Code (Optional)"
                     value={newSubject.code}
                     onChange={(e) => setNewSubject(s => ({ ...s, code: e.target.value }))}
                     size="small"
@@ -556,7 +556,7 @@ export default function SubjectCoursePage() {
               <Table>
                 <TableHead>
                   <TableRow sx={{ bgcolor: alphaColor("#B71C1C", 0.05) }}>
-                    <TableCell sx={{ fontWeight: "bold", color: "#B71C1C" }}>Subject Name</TableCell>
+                    <TableCell sx={{ fontWeight: "bold", color: "#B71C1C" }}>Course Name</TableCell>
                     <TableCell sx={{ fontWeight: "bold", color: "#B71C1C" }}>Code</TableCell>
                     <TableCell sx={{ fontWeight: "bold", color: "#B71C1C" }}>Linked Programs</TableCell>
                     <TableCell sx={{ fontWeight: "bold", color: "#B71C1C" }} align="center">Required Items</TableCell>
