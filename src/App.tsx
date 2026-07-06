@@ -26,6 +26,8 @@ import SubjectCoursePage from "./pages/SubjectCoursePage";
 import { Dialog, IconButton, ToggleButton, ToggleButtonGroup } from "@mui/material";
 import ForecastPage from "./pages/ForecastPage";
 import AllForecastPage from "./pages/AllForecastPage";
+import { AiOutlineTool } from "react-icons/ai";
+import { useTheme } from "@mui/material/styles";
 interface CalendarEvent {
   id: string;
   title: string;
@@ -39,7 +41,7 @@ interface CalendarEvent {
 interface Notification {
   id: number;
   text: React.ReactNode;
-  type: "info" | "warning" | "success";
+  type: "info" | "warning" | "success" | "maintenance";
   onClick?: () => void; // optional click handler
 }
 
@@ -406,6 +408,7 @@ function CalendarPanel() {
 
 /* NotificationPanel: stock alerts, pending reservations, unread messages */
 function NotificationPanel() {
+    const theme = useTheme();
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
@@ -419,12 +422,14 @@ function NotificationPanel() {
     notifControllerRef.current = ctrl;
     if (initial) setLoading(true);
     try {
-      const [resReservations, resInventory] = await Promise.all([
+      const [resReservations, resInventory, resMaintenance] = await Promise.all([
         axios.get(`${SERVER_API}/reservations`, { signal: ctrl.signal }),
-        axios.get(`${SERVER_API}/inventory`, { signal: ctrl.signal })
+        axios.get(`${SERVER_API}/inventory`, { signal: ctrl.signal }),
+        axios.post(`${SERVER_API}/maintenance`, { action: "read" }, { signal: ctrl.signal })
       ]);
       const reservations = Array.isArray(resReservations.data) ? resReservations.data : [];
       const inventory = Array.isArray(resInventory.data) ? resInventory.data : [];
+      const maintenanceList = Array.isArray(resMaintenance.data?.data) ? resMaintenance.data.data : [];
 
       // If Instructor/Program Chair -> restrict reservations to their own
       const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
@@ -439,7 +444,10 @@ function NotificationPanel() {
 
       const pendingCount = visibleReservations.filter((r: any) => r.status === "Pending").length;
       // low stock is a global concern; per request we omit low-stock notifications for Instructor/Program Chair
-      const lowStockItems = inventory.filter((it: any) => it.is_consumable && (it.available ?? 0) <= 5);
+      const lowStockItems = inventory.filter((it: any) =>
+        // use the same rule as InventoryPage: consider "low" when opened quantity <= stock_alert
+        it.is_consumable && (Number(it.quantity_opened || 0) <= Number(it.stock_alert ?? 5))
+      );
       const lowStockCount = (currentRole === "Instructor" || currentRole === "Program Chair") ? 0 : lowStockItems.length;
 
       const userEmail = currentEmail;
@@ -462,11 +470,28 @@ function NotificationPanel() {
         generated.push({ id: 2, text: <>You have <strong style={{ color: 'orange' }}>{pendingCount}</strong> pending reservation(s)</>, type: "warning", onClick: () => navigate('/reservation?status=Pending') });
       } else if (lowStockCount > 0) {
         // non-instructors still get low-stock global notice
-        generated.push({ id: 1, text: <>You have <strong style={{ color: 'red' }}>{lowStockCount} low-stock consumable item(s)</strong></>, type: "warning", onClick: () => navigate('/inventory?stock=Alert') });
+        generated.push({ id: 1, text: <>You have <strong style={{ color: 'red' }}>{lowStockCount} low-stock consumable item(s)</strong>. Please restock soon</>, type: "warning", onClick: () => navigate('/inventory?stock=Alert') });
       }
       if (totalUnread > 0) {
         generated.push({ id: 3, text: <>You have <strong style={{ color: '#b71c1c' }}>{totalUnread}</strong> unread message(s) across <strong>{perResUnread.length}</strong> reservation(s)</>, type: "info", onClick: () => navigate('/reservation') });
         perResUnread.slice(0,5).forEach(({ res, unread }: any, idx: number) => generated.push({ id: 100 + idx, text: <>Reservation <strong>{res.reservation_code}</strong> • {res.subject} — {unread} unread</>, type: "info", onClick: () => navigate(`/reservation?openChat=${res._id}`) }));
+      }
+
+      // Scheduled maintenance notification
+      const now = new Date();
+      const monthStr = now.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+      const yearNum = now.getFullYear();
+      const scheduledMaint = maintenanceList.filter((m: any) =>
+        String(m.month || '').toUpperCase() === monthStr &&
+        Number(m.scheduledYear || yearNum) === yearNum
+      );
+      if (scheduledMaint.length > 0) {
+        generated.push({
+          id: 200,
+          text: <>You have <strong style={{ color: '#b71c1c' }}>{scheduledMaint.length}</strong> scheduled maintenance{scheduledMaint.length > 1 ? 's' : ''} this month.</>,
+          type: "maintenance",
+          onClick: () => navigate('/maintenance')
+        });
       }
 
       const newJson = JSON.stringify(generated);
@@ -495,6 +520,7 @@ function NotificationPanel() {
   const getIcon = (type: string) => {
     switch (type) {
       case "info": return <InfoIcon sx={{ color: "#0056b3" }} />;
+      case "maintenance": return <AiOutlineTool style={{ color: theme.palette.warning.main,  fontSize: 22 }} />;
       case "warning": return <WarningAmberIcon sx={{ color: "#b36b00" }} />;
       case "success": return <CheckCircleIcon sx={{ color: "#137333" }} />;
       default: return <Inventory2Icon />;

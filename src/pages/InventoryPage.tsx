@@ -8,6 +8,7 @@ import { keyframes } from "@mui/system";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import FilterListIcon from "@mui/icons-material/FilterList";
+import XLSX from 'xlsx-js-style';
 import {
   Box,
   Button,
@@ -66,7 +67,9 @@ interface InventoryItem {
   brand_model: string;
   total_qty: string;
   borrowed: string;
-  location: string;
+  // structured location
+  room?: string;
+  shelf_no?: string;
   soft_hard: string;
   e_location: string;
   bat_type: string;
@@ -119,6 +122,9 @@ interface ReportFilter {
 }
 
 const InventoryPage = () => {
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+const [premadeReportDialogOpen, setPremadeReportDialogOpen] = useState(false);
+const [selectedReportTemplate, setSelectedReportTemplate] = useState("");
   const theme = useTheme();
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
 const [selectedFields, setSelectedFields] = useState<string[]>([]);
@@ -183,7 +189,9 @@ const formatDate = (d?: string | Date | null) => {
     brand_model: "",
     total_qty: "1",
     borrowed: "0",
-    location: "",
+    // structured location
+    room: "",
+    shelf_no: "",
     soft_hard: "N/A",
     e_location: "",
     bat_type: "",
@@ -201,7 +209,8 @@ const formatDate = (d?: string | Date | null) => {
       { field: 'equipment_name', label: 'Equipment Name', type: 'string' },
       { field: 'brand_model', label: 'Brand/Model', type: 'string' },
       { field: 'facility', label: 'Facility', type: 'string' },
-      { field: 'location', label: 'Location', type: 'string' },
+      { field: 'room', label: 'Room', type: 'string' },
+      { field: 'shelf_no', label: 'Shelf No.', type: 'string' },
       { field: 'total_qty', label: 'Total Quantity', type: 'number' },
       { field: 'borrowed', label: 'Borrowed', type: 'number' },
       { field: 'soft_hard', label: 'Manual Type', type: 'string' },
@@ -263,8 +272,123 @@ const updateFilter = (index: number, updates: Partial<ReportFilter>) => {
   ));
 };
 
-// Add this function to generate the custom report
-const generateCustomReport = () => {
+
+
+
+const excelReportTemplates = {
+  availability: {
+    name: "Availability of Items Report",
+    generate: (data: any[], itemType: string) => {
+      if (itemType === "Non-Consumable") {
+        const headers = ["Equipment Name", "Total Quantity", "Borrowed", "Available", "Status"];
+        const rows = data.map(item => {
+          const total = parseInt(item.total_qty) || 0;
+          const borrowed = parseInt(item.borrowed) || 0;
+          const available = total - borrowed;
+          const status = available === 0 ? "All Borrowed" : available === total ? "All Available" : "Partially Available";
+          return [item.equipment_name, total, borrowed, available, status];
+        });
+        return { headers, rows };
+      } else {
+        const headers = ["Description", "Quantity Opened", "Quantity Unopened", "Total Stock", "Status"];
+        const rows = data.map(item => {
+          const opened = parseInt(item.quantity_opened) || 0;
+          const unopened = parseInt(item.quantity_unopened) || 0;
+          const total = opened + unopened;
+          const status = opened === 0 ? "Unopened Only" : total > 0 ? "In Stock" : "Out of Stock";
+          return [item.description, opened, unopened, total, status];
+        });
+        return { headers, rows };
+      }
+    }
+  },
+  maintenance: {
+    name: "Maintenance Schedule Report",
+    generate: (data: any[]) => {
+      const headers = ["Equipment Name", "Brand/Model", "Maintenance Type", "Service Type", "Maintenance Month", "Status"];
+      const rows = data
+        .filter(item => item.yes_or_no === "YES")
+        .map(item => [
+          item.equipment_name,
+          item.brand_model,
+          item.preventive_or_calibration || "N/A",
+          item.inhouse_outsourced || "N/A",
+          item.month || "N/A",
+          "Pending"
+        ]);
+      return { headers, rows };
+    }
+  },
+  lowstock: {
+    name: "Low Stock Alert Report",
+    generate: (data: any[], itemType: string) => {
+      if (itemType === "Consumable") {
+        const headers = ["Description", "Location", "Current Stock", "Alert Level", "Status"];
+        const rows = data
+          .filter(item => {
+            const alert = parseInt(item.stock_alert) || 5;
+            const stock = parseInt(item.quantity_opened) || 0;
+            return stock <= alert;
+          })
+          .map(item => [
+            item.description,
+            item.location,
+            parseInt(item.quantity_opened) || 0,
+            parseInt(item.stock_alert) || 5,
+            "⚠️ Low Stock"
+          ]);
+        return { headers, rows };
+      } else {
+        const headers = ["Equipment Name", "Total Quantity", "Borrowed", "Status"];
+        const rows = data
+          .filter(item => {
+            const total = parseInt(item.total_qty) || 0;
+            const borrowed = parseInt(item.borrowed) || 0;
+            return borrowed >= total;
+          })
+          .map(item => [
+            item.equipment_name,
+            parseInt(item.total_qty) || 0,
+            parseInt(item.borrowed) || 0,
+            "⚠️ All Borrowed"
+          ]);
+        return { headers, rows };
+      }
+    }
+  },
+  fullinventory: {
+    name: "Full Inventory Report",
+    generate: (data: any[], itemType: string) => {
+      if (itemType === "Non-Consumable") {
+        const headers = ["Equipment Name", "Brand/Model", "Location", "Total Quantity", "Borrowed", "Facility", "Identifier Type"];
+        const rows = data.map(item => [
+          item.equipment_name,
+          item.brand_model,
+          item.location,
+          parseInt(item.total_qty) || 0,
+          parseInt(item.borrowed) || 0,
+          item.facility,
+          item.identifier_type
+        ]);
+        return { headers, rows };
+      } else {
+        const headers = ["Description", "Location", "Opened", "Unopened", "On Order", "Remarks", "Stock Alert"];
+        const rows = data.map(item => [
+          item.description,
+          item.location,
+          parseInt(item.quantity_opened) || 0,
+          parseInt(item.quantity_unopened) || 0,
+          parseInt(item.quantity_on_order) || 0,
+          item.remarks,
+          parseInt(item.stock_alert) || 5
+        ]);
+        return { headers, rows };
+      }
+    }
+  }
+};
+
+const generateCustomExcelReport = () => {
   const data = itemType === "Non-Consumable" ? inventory : cinventory;
   
   // Apply filters
@@ -298,7 +422,7 @@ const generateCustomReport = () => {
   });
 
   // Select only chosen fields
-  const columns = selectedFields.map(field => {
+  const headers = selectedFields.map(field => {
     const fieldInfo = availableFields.find(f => f.field === field);
     return fieldInfo?.label || field;
   });
@@ -310,14 +434,184 @@ const generateCustomReport = () => {
     })
   );
 
-  setReportTable({ columns, rows });
+  const reportTitle = `Custom Report - ${itemType} Inventory`;
+  generateExcelWithHeader(headers, rows, "Custom_Report", reportTitle);
   setReportDialogOpen(false);
-  
-  // Generate PDF automatically
-  setTimeout(() => {
-    handleGeneratePDF();
-  }, 500);
 };
+
+// Add function for AI Report Excel generation
+const generateAIExcelReport = (columns: string[], rows: string[][]) => {
+ const reportTitle = `AI Generated Report - ${itemType} Inventory`;
+  generateExcelWithHeader(columns, rows, "AI_Report", reportTitle);
+};
+
+const generateExcelWithHeader = (headers: string[], rows: any[][], sheetName: string, reportTitle?: string) => {
+  const currentYear = new Date().getFullYear();
+  const schoolYear = `${currentYear}-${currentYear + 1}`;
+  
+  const title = reportTitle || "Availability of Required Laboratory Materials for each Laboratory Course and Related Learning Experience";
+  
+  // Create the data array
+  const allData = [
+    [""], // Row 1: Will use IMAGE formula for logo
+    ["Central Supply Room"],
+    ["General Luna Road, Baguio City, Philippines 2600"],
+    [""],
+    [title],
+    ["BS-Electronics-Engineering Program"],
+    [`SCHOOL YEAR ${schoolYear}`],
+    [""],
+    [""],
+    headers,
+    ...rows
+  ];
+  
+  const ws = XLSX.utils.aoa_to_sheet(allData);
+  const lastColIndex = headers.length - 1;
+  
+  // Merge cells
+  ws['!merges'] = [];
+  // Row 0 (Logo) - merge across all columns
+  ws['!merges'].push({ s: { r: 0, c: 0 }, e: { r: 0, c: lastColIndex } });
+  // Rows 1-6 - merge across all columns
+  for (let i = 1; i <= 6; i++) {
+    ws['!merges'].push({ s: { r: i, c: 0 }, e: { r: i, c: lastColIndex } });
+  }
+  
+  // Add IMAGE formula for logo in row 1 (index 0) centered across all columns
+  const logoCell = XLSX.utils.encode_cell({ r: 0, c: 0 });
+  ws[logoCell] = { t: 'n', v: '', f: 'IMAGE("https://ubaguio.edu/wp-content/uploads/2023/07/LOGO-NAME_for-light-BG.png", 1)' };
+  
+  // Set row height for logo
+  ws['!rows'] = [];
+  ws['!rows'][0] = { hpt: 42 };
+  
+  // Set column widths
+  ws['!cols'] = [{ wch: 35 }, ...Array(lastColIndex).fill({ wch: 15 })];
+  
+  // Page setup for portrait orientation
+  ws['!pageSetup'] = {
+    orientation: 'portrait',
+    fitToWidth: 1,
+    fitToHeight: 0,
+    paperSize: 9,
+    scale: 85,
+  };
+  
+  // Apply styles
+  for (let R = 0; R < allData.length; R++) {
+    for (let C = 0; C <= lastColIndex; C++) {
+      const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+      if (!ws[cellAddress]) {
+        ws[cellAddress] = { t: 's', v: '' };
+      }
+      
+      if (R === 0) {
+        ws[cellAddress].s = {
+          alignment: { horizontal: "center", vertical: "center" }
+        };
+      } else if (R === 1) {
+        ws[cellAddress].s = {
+          alignment: { horizontal: "center", vertical: "center" },
+          font: { bold: true, sz: 14 }
+        };
+      } else if (R === 2) {
+        ws[cellAddress].s = {
+          alignment: { horizontal: "center", vertical: "center" },
+          font: { sz: 10 }
+        };
+      } else if (R === 3) {
+        ws[cellAddress].s = {
+          alignment: { horizontal: "center", vertical: "center" }
+        };
+      } else if (R === 4) {
+        ws[cellAddress].s = {
+          alignment: { horizontal: "center", vertical: "center", wrapText: true },
+          font: { bold: true, sz: 11 }
+        };
+      } else if (R === 5) {
+        ws[cellAddress].s = {
+          alignment: { horizontal: "center", vertical: "center" },
+          font: { bold: true, sz: 11 }
+        };
+      } else if (R === 6) {
+        ws[cellAddress].s = {
+          alignment: { horizontal: "center", vertical: "center" },
+          font: { bold: true, sz: 11 }
+        };
+      } else if (R === 7 || R === 8) {
+        ws[cellAddress].s = {
+          alignment: { horizontal: "center", vertical: "center" }
+        };
+      } else if (R === 9) {
+        ws[cellAddress].s = {
+          alignment: { horizontal: "center", vertical: "center" },
+          font: { bold: true, color: { rgb: "FFFFFF" }, sz: 10 },
+          fill: { fgColor: { rgb: "B71C1C" } },
+          border: {
+            top: { style: "thin" },
+            bottom: { style: "thin" },
+            left: { style: "thin" },
+            right: { style: "thin" }
+          }
+        };
+      } else if (R >= 10) {
+        ws[cellAddress].s = {
+          alignment: { horizontal: "left", vertical: "center" },
+          font: { sz: 9 },
+          border: {
+            top: { style: "thin" },
+            bottom: { style: "thin" },
+            left: { style: "thin" },
+            right: { style: "thin" }
+          }
+        };
+      }
+    }
+  }
+  
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  
+  const date = new Date().toISOString().split('T')[0];
+  const filename = `${sheetName.replace(/ /g, '_')}_${date}.xlsx`;
+  XLSX.writeFile(wb, filename);
+};
+
+
+const handleGeneratePremadeExcel = () => {
+  if (!selectedReportTemplate) return;
+  
+  const template = excelReportTemplates[selectedReportTemplate as keyof typeof excelReportTemplates];
+  if (!template) return;
+  
+  const data = itemType === "Non-Consumable" ? inventory : cinventory;
+  const { headers, rows } = template.generate(data, itemType);
+  
+  let reportTitle = "";
+  switch(selectedReportTemplate) {
+    case "availability":
+      reportTitle = "Availability of Required Laboratory Materials for each Laboratory Course and Related Learning Experience";
+      break;
+    case "maintenance":
+      reportTitle = "Maintenance Schedule Report";
+      break;
+    case "lowstock":
+      reportTitle = "Low Stock Alert Report";
+      break;
+    case "fullinventory":
+      reportTitle = "Full Inventory Report";
+      break;
+    default:
+      reportTitle = template.name;
+  }
+  
+  generateExcelWithHeader(headers, rows, template.name, reportTitle);
+  
+  setPremadeReportDialogOpen(false);
+  setSelectedReportTemplate("");
+};
+
 
 // Add this function to get operators for a field type
 const getOperatorsForField = (fieldType: string) => {
@@ -362,7 +656,9 @@ const getOperatorsForField = (fieldType: string) => {
     brand_model: "",
     total_qty: "1",
     borrowed: "0",
-    location: "",
+    // structured location
+    room: "",
+    shelf_no: "",
     soft_hard: "N/A",
     e_location: "",
     bat_type: "",
@@ -464,55 +760,13 @@ const handleGenerateReport = async () => {
     setLoading(false);
   }
 };
-const handleGeneratePDF = () => {
-  if (!reportTable) return;
-  
-  // Create a printable version of the table
-  const printContent = `
-    <html>
-      <head>
-        <title>Inventory Report</title>
-        <style>
-          body { font-family: Arial, sans-serif; margin: 20px; }
-          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-          th { background-color: #f2f2f2; }
-          h1 { color: #b91c1c; }
-        </style>
-      </head>
-      <body>
-        <h1>Inventory Report</h1>
-        <p>Generated on: ${new Date().toLocaleString()}</p>
-        <table>
-          <thead>
-            <tr>
-              ${reportTable.columns.map(col => `<th>${col}</th>`).join('')}
-            </tr>
-          </thead>
-          <tbody>
-            ${reportTable.rows.map(row => `
-              <tr>
-                ${row.map(cell => `<td>${cell}</td>`).join('')}
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      </body>
-    </html>
-  `;
-
-  const printWindow = window.open('', '_blank');
-  if (printWindow) {
-    printWindow.document.write(printContent);
-    printWindow.document.close();
-    printWindow.print();
-  }
-};
 
   const handleEditClick = (item: InventoryItem | CInventoryItem) => {
+      resetForm();
     if (itemType === "Non-Consumable") {
       const nc = item as InventoryItem;
-      setForm({ ...nc });
+      // prefer server-provided room/shelf_no; fallback to legacy location
+      setForm({ ...nc, room: (nc.room || (nc as any).location || ""), shelf_no: (nc.shelf_no || (nc as any).shelfNo || "") });
 
       if (nc.bat_type || nc.bat_qty) {
         setBattery("With Battery");
@@ -523,6 +777,8 @@ const handleGeneratePDF = () => {
       const c = item as CInventoryItem;
       setForm2({ ...c });
     }
+    setOpen(false);
+    setViewing(false);
 
     setEditing(true);
     setViewing(false);
@@ -542,7 +798,7 @@ const handleGeneratePDF = () => {
 
 const filteredInventory = inventory
   .filter((item) =>
-    [item.equipment_name, item.location, item.brand_model].some((field) =>
+    [item.equipment_name, item.room, item.shelf_no, item.brand_model].some((field) =>
       String(field || "").toLowerCase().includes(searchQuery.toLowerCase())
     )
   )
@@ -581,7 +837,8 @@ const filteredCInventory = cinventory
 
   const handleViewClick = (item: InventoryItem | CInventoryItem) => {
     if (itemType === "Non-Consumable") {
-      setForm(item as InventoryItem);
+      const nc = item as InventoryItem;
+      setForm({ ...nc, room: (nc.room || (nc as any).location || ""), shelf_no: (nc.shelf_no || (nc as any).shelfNo || "") });
 
       if ((item as InventoryItem).bat_type || (item as InventoryItem).bat_qty) {
         setBattery("With Battery");
@@ -609,8 +866,8 @@ const filteredCInventory = cinventory
 
   useEffect(() => {
     const qty = Number(form.total_qty) || 0;
-    const newStatuses = Array.from({ length: qty }, (_, i) => 
-      form.statuses?.[i] || "working"
+    const newStatuses = Array.from({ length: qty }, (_, i) =>
+      form.statuses?.[i] || "good"
     );
     setForm((prev) => ({ ...prev, statuses: newStatuses }));
   }, [form.total_qty]);
@@ -672,7 +929,9 @@ const filteredCInventory = cinventory
           identifier_type: item.identifier_type,
           identifiers: item.identifiers || [],
           statuses: item.statuses || [],
-          location: item.location,
+          // read structured room/shelf_no when available, fallback to legacy `location`
+          room: item.room || item.location || "",
+          shelf_no: item.shelf_no || item.shelfNo || "",
           soft_hard: item.soft_hard,
           e_location: item.e_location,
           bat_type: item.bat_type,
@@ -740,9 +999,11 @@ const handleCreate = async () => {
         total_qty: Number(form.total_qty) || 1,
         borrowed: Number(form.borrowed) || 0,
         identifier_type: form.identifier_type,
-        identifiers: identifiers, // Send as array directly, no join needed
-        statuses: form.statuses, // Send as array directly, no join needed
-        location: form.location,
+        identifiers: identifiers,
+        statuses: form.statuses,
+        // structured location
+        room: form.room || "",
+        shelf_no: form.shelf_no || "",
         soft_hard: form.soft_hard,
         e_location: form.e_location,
         bat_type: form.bat_type,
@@ -848,9 +1109,11 @@ const handleUpdateItem = async () => {
         total_qty: Number(form.total_qty) || 1,
         borrowed: Number(form.borrowed) || 0,
         identifier_type: form.identifier_type,
-        identifiers: trimmedIdentifiers, // Send as array directly, no join needed
-        statuses: form.statuses, // Send as array directly, no join needed
-        location: form.location,
+        identifiers: trimmedIdentifiers,
+        statuses: form.statuses,
+        // structured location
+        room: form.room || "",
+        shelf_no: form.shelf_no || "",
         soft_hard: form.soft_hard,
         e_location: form.e_location,
         bat_type: form.bat_type,
@@ -1239,121 +1502,100 @@ useEffect(() => {
     </TextField>
   </Stack>
         
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-           {(userRole === "Custodian" || userRole === "Admin") && (
-          <Button
-            variant="contained"
-            onClick={() => {
-              setOpen(true);
-              resetForm();
-            }}
-            sx={{
-              bgcolor: "#b91c1c",
-              "&:hover": { bgcolor: "#b91c1c" },
-              borderRadius: 2,
-              textTransform: "none",
-              px: 3,
-              fontWeight: "bold",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
-            }}
-          >
-            + Add Item
-          </Button>
-           )}
+       <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+  {(userRole === "Custodian" || userRole === "Admin") && (
+    <Button
+      variant="contained"
+      onClick={() => {
+        setOpen(true);
+        resetForm();
+      }}
+      sx={{
+        bgcolor: "#b91c1c",
+        "&:hover": { bgcolor: "#b91c1c" },
+        borderRadius: 2,
+        textTransform: "none",
+        px: 3,
+        fontWeight: "bold",
+        boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
+      }}
+    >
+      + Add Item
+    </Button>
+  )}
 
-{(userRole === "Custodian" || userRole === "Admin") && (
-          <Button
-            variant="outlined"
-            color="error"
-            sx={{
-              borderRadius: 2,
-              textTransform: "none",
-              px: 3,
-              fontWeight: "bold",
-            }}
-            disabled={selectedItems.length === 0}
-            onClick={async () => {
-              const sheetName = itemType === "Non-Consumable" ? "nc_inventory" : "c_inventory";
-              const names = selectedItems
-                .map((num) => {
-                  const item = itemType === "Non-Consumable"
-                    ? inventory.find((i) => i.num === num)
-                    : cinventory.find((i) => i.num === num);
-                  return item
-                    ? itemType === "Non-Consumable"
-                      ? (item as InventoryItem).equipment_name
-                      : (item as CInventoryItem).description
-                    : null;
-                })
-                .filter(Boolean);
-
-              if (!window.confirm(`Are you sure you want to delete the following items?\n\n${names.join("\n")}`))
-                return;
-
-              try {
-await Promise.all(
-  selectedItems.map((num) =>
-    axios.post(`${API_BASE_URL}/${sheetName === "nc_inventory" ? "nc-inventory" : "c-inventory"}`, {
-      action: "delete",
-      num: Number(num),
-    })
-  )
-);
-                setSelectedItems([]);
-                fetchInventory();
-              } catch (err) {
-                console.error("Failed to delete selected items", err);
-              }
-            }}
-          >
-            Delete Selected ({selectedItems.length})
-          </Button> )}
-           {/* Add this AI Button */}
-           {(userRole === "Custodian" || userRole === "Admin") && (
-  <Button
-    variant="outlined"
-    color="primary"
-    onClick={() => setAiDialogOpen(true)}
-    sx={{
-      borderRadius: 2,
-      textTransform: "none",
-      px: 3,
-      fontWeight: "bold",
-      borderColor: "#1976d2",
-      color: "#1976d2",
-      "&:hover": {
-        borderColor: "#1565c0",
-        bgcolor: "rgba(25, 118, 210, 0.04)"
-      }
-    }}
-    startIcon={<AutoAwesomeIcon />} // You'll need to import this icon
-  >
-    AI Report
-  </Button> )}
-   {/* NEW: Generate Report Button */}
   {(userRole === "Custodian" || userRole === "Admin") && (
     <Button
       variant="outlined"
-      color="secondary"
-      onClick={() => setReportDialogOpen(true)}
+      color="error"
       sx={{
         borderRadius: 2,
         textTransform: "none",
         px: 3,
         fontWeight: "bold",
-        borderColor: theme.palette.secondary.main,
-        color: theme.palette.secondary.main,
+      }}
+      disabled={selectedItems.length === 0}
+      onClick={async () => {
+        const sheetName = itemType === "Non-Consumable" ? "nc_inventory" : "c_inventory";
+        const names = selectedItems
+          .map((num) => {
+            const item = itemType === "Non-Consumable"
+              ? inventory.find((i) => i.num === num)
+              : cinventory.find((i) => i.num === num);
+            return item
+              ? itemType === "Non-Consumable"
+                ? (item as InventoryItem).equipment_name
+                : (item as CInventoryItem).description
+              : null;
+          })
+          .filter(Boolean);
+
+        if (!window.confirm(`Are you sure you want to delete the following items?\n\n${names.join("\n")}`))
+          return;
+
+        try {
+          await Promise.all(
+            selectedItems.map((num) =>
+              axios.post(`${API_BASE_URL}/${sheetName === "nc_inventory" ? "nc-inventory" : "c-inventory"}`, {
+                action: "delete",
+                num: Number(num),
+              })
+            )
+          );
+          setSelectedItems([]);
+          fetchInventory();
+        } catch (err) {
+          console.error("Failed to delete selected items", err);
+        }
+      }}
+    >
+      Delete Selected ({selectedItems.length})
+    </Button>
+  )}
+  
+  {/* Single Report Button that opens modal */}
+  {(userRole === "Custodian" || userRole === "Admin") && (
+    <Button
+      variant="outlined"
+      onClick={() => setReportModalOpen(true)}
+      sx={{
+        borderRadius: 2,
+        textTransform: "none",
+        px: 3,
+        fontWeight: "bold",
+        borderColor: "#1976d2",
+        color: "#1976d2",
         "&:hover": {
-          borderColor: theme.palette.secondary.dark,
-          bgcolor: alpha(theme.palette.secondary.main, 0.04)
+          borderColor: "#1565c0",
+          bgcolor: "rgba(25, 118, 210, 0.04)"
         }
       }}
       startIcon={<PictureAsPdfIcon />}
     >
-      Generate Report
+      Reports
     </Button>
   )}
-        </Stack>
+</Stack>
       </Stack>
 
 
@@ -1451,8 +1693,8 @@ await Promise.all(
                                 {(item as InventoryItem).equipment_name}
                               </Typography>
                             </TableCell>
-                            <TableCell>{(item as InventoryItem).location}</TableCell>
-                            <TableCell>{(item as InventoryItem).brand_model}</TableCell>
+                            <TableCell>{(item as InventoryItem).room || '-'}</TableCell>
+                            <TableCell>{(item as InventoryItem).brand_model || '-'}</TableCell>
                             <TableCell align="center">{(item as InventoryItem).total_qty}</TableCell>
                             <TableCell align="center">{(item as InventoryItem).borrowed}</TableCell>
                             <TableCell>{(item as InventoryItem).facility}</TableCell>
@@ -1485,7 +1727,7 @@ await Promise.all(
     onClick={() => handleViewClick(item)}
    sx={actionIconBtnSx}
   >
-    <Inventory2Icon fontSize="small" />
+   <VisibilityIcon fontSize="small" />
   </IconButton>
 </Tooltip>
 {(userRole === "Custodian" || userRole === "Admin") && (
@@ -1555,6 +1797,19 @@ await Promise.all(
     {viewing ? (
       <Box sx={{ display: 'flex', gap: 1 }}>
     {/* View Utilization - only enabled for non-consumable items with identifiers or usage logs */}
+        <Button
+      onClick={() => handleEditClick(form)}
+      sx={{
+        textTransform: "none",
+        fontWeight: "bold",
+        color: "#444",
+        borderColor: alpha('#000', 0.06),
+        "&:hover": { bgcolor: "rgba(0,0,0,0.04)" },
+      }}
+    >
+      Edit
+    </Button>
+
     <Button
       onClick={() => setUtilDialogOpen(true)}
       disabled={!(form?.identifiers && form.identifiers.length > 0) && !(form?.usage_logs && form.usage_logs.length > 0)}
@@ -1703,10 +1958,20 @@ onClick={() => {
           disabled={viewing}
           sx={fieldStyle}
         />
+      </Stack>
+      <Stack spacing={2} direction="row">
         <TextField
-          label="Location (Room & Shelf No.)"
-          value={form.location}
-          onChange={(e) => setForm({ ...form, location: e.target.value })}
+          label="Room"
+          value={form.room || ""}
+          onChange={(e) => setForm({ ...form, room: e.target.value })}
+          fullWidth
+          disabled={viewing}
+          sx={fieldStyle}
+        />
+        <TextField
+          label="Shelf No."
+          value={form.shelf_no || ""}
+          onChange={(e) => setForm({ ...form, shelf_no: e.target.value })}
           fullWidth
           disabled={viewing}
           sx={fieldStyle}
@@ -2077,6 +2342,7 @@ onClick={() => {
       </Box>
     </Stack>
 
+
     {/* Rows */}
   {Array.from({ length: Number(form.total_qty) || 0 }).map((_, i) => (
   <Stack key={i} direction="row" spacing={1} alignItems="center">
@@ -2093,25 +2359,26 @@ onClick={() => {
       sx={fieldStyle}
     />
 
-    {/* Square status toggle */}
-    <Box
-      onClick={() => {
-        if (viewing) return;
+    {/* REPLACED: status select (text) instead of colored square */}
+    <TextField
+      select
+      size="small"
+      value={form.statuses?.[i] || 'good'}
+      onChange={(e) => {
         const newStatuses = [...(form.statuses || [])];
-        newStatuses[i] =
-          form.statuses?.[i] === "working" ? "not working" : "working";
+        newStatuses[i] = e.target.value;
         setForm({ ...form, statuses: newStatuses });
       }}
-      sx={{
-        width: 24,
-        height: 24,
-        borderRadius: 1,
-        bgcolor: form.statuses?.[i] === "not working" ? "red" : "green",
-        cursor: viewing ? "default" : "pointer",
-        border: "2px solid #333",
-        ml: 1,
-      }}
-    />
+      disabled={viewing}
+      sx={{ width: 160, ml: 1 }}
+      InputLabelProps={{ shrink: false }}
+    >
+      {['good', 'damaged', 'broken', 'lost', 'lacking'].map((s) => (
+        <MenuItem key={s} value={s}>
+          {s.charAt(0).toUpperCase() + s.slice(1)}
+        </MenuItem>
+      ))}
+    </TextField>
 
     {/* Delete button */}
     {!viewing && (
@@ -2467,42 +2734,43 @@ onClick={() => {
     )}
     
     {reportTable && (
-      <Box sx={{ mt: 3 }}>
-        <Button
-          variant="outlined"
-          startIcon={<PictureAsPdfIcon />}
-          onClick={handleGeneratePDF}
-          sx={{ mb: 2 }}
-        >
-          Generate PDF
-        </Button>
-        <Typography variant="subtitle2" gutterBottom>
-          Report Results:
-        </Typography>
-        <TableContainer component={Paper} sx={{ maxHeight: 400 }}>
-          <Table size="small" stickyHeader>
-            <TableHead>
-              <TableRow>
-                {reportTable.columns.map((col, index) => (
-                  <TableCell key={index} sx={{ fontWeight: "bold" }}>
-                    {col}
-                  </TableCell>
-                ))}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {reportTable.rows.map((row, rowIndex) => (
-                <TableRow key={rowIndex}>
-                  {row.map((cell, cellIndex) => (
-                    <TableCell key={cellIndex}>{cell}</TableCell>
-                  ))}
-                </TableRow>
+  <Box sx={{ mt: 3 }}>
+    <Button
+      variant="contained"
+      startIcon={<PictureAsPdfIcon />}
+      onClick={() => generateAIExcelReport(reportTable.columns, reportTable.rows)}
+      sx={{ mb: 2 }}
+      color="success"
+    >
+      Generate Excel Report
+    </Button>
+    <Typography variant="subtitle2" gutterBottom>
+      Report Results:
+    </Typography>
+    <TableContainer component={Paper} sx={{ maxHeight: 400 }}>
+      <Table size="small" stickyHeader>
+        <TableHead>
+          <TableRow>
+            {reportTable.columns.map((col, index) => (
+              <TableCell key={index} sx={{ fontWeight: "bold" }}>
+                {col}
+              </TableCell>
+            ))}
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {reportTable.rows.map((row, rowIndex) => (
+            <TableRow key={rowIndex}>
+              {row.map((cell, cellIndex) => (
+                <TableCell key={cellIndex}>{cell}</TableCell>
               ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      </Box>
-    )}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  </Box>
+)}
   </DialogContent>
 </Dialog>
 <Dialog 
@@ -2537,7 +2805,7 @@ onClick={() => {
                 color="secondary"
               />
               <Typography variant="body2">
-                {field.label} ({field.type})
+                {field.label}
               </Typography>
             </Box>
           ))}
@@ -2626,18 +2894,18 @@ onClick={() => {
     </Box>
   </DialogContent>
   
-  <DialogActions>
-    <Button onClick={() => setReportDialogOpen(false)}>Cancel</Button>
-    <Button 
-      variant="contained" 
-      onClick={generateCustomReport}
-      disabled={selectedFields.length === 0}
-      color="secondary"
-      startIcon={<PictureAsPdfIcon />}
-    >
-      Generate PDF Report
-    </Button>
-  </DialogActions>
+ <DialogActions>
+  <Button onClick={() => setReportDialogOpen(false)}>Cancel</Button>
+  <Button 
+    variant="contained" 
+    onClick={generateCustomExcelReport}
+    disabled={selectedFields.length === 0}
+    color="secondary"
+    startIcon={<PictureAsPdfIcon />}
+  >
+    Generate Excel Report
+  </Button>
+</DialogActions>
 </Dialog>
 
 {/* Utilization Dialog */}
@@ -2748,6 +3016,207 @@ onClick={() => {
   </DialogActions>
 </Dialog>
 
+{/* Main Report Selection Modal */}
+<Dialog 
+  open={reportModalOpen} 
+  onClose={() => setReportModalOpen(false)}
+  maxWidth="sm"
+  fullWidth
+>
+  <DialogTitle sx={{ fontWeight: "bold", color: "#b91c1c" }}>
+    <Stack direction="row" spacing={1} alignItems="center">
+      <PictureAsPdfIcon />
+      <Typography variant="h6">Generate Reports</Typography>
+    </Stack>
+  </DialogTitle>
+  <DialogContent dividers>
+    <Typography variant="body2" color="text.secondary" gutterBottom sx={{ mb: 3 }}>
+      Choose a report type to generate
+    </Typography>
+    
+    <Stack spacing={2}>
+      {/* AI Report Button */}
+      <Button
+        fullWidth
+        variant="outlined"
+        onClick={() => {
+          setReportModalOpen(false);
+          setAiDialogOpen(true);
+        }}
+        sx={{
+          justifyContent: "flex-start",
+          p: 2,
+          borderRadius: 2,  
+          borderColor: "#1976d2",
+          "&:hover": {
+            bgcolor: "rgba(25, 118, 210, 0.04)",
+            borderColor: "#1976d2"
+          }
+        }}
+        startIcon={<AutoAwesomeIcon sx={{ color: "#1976d2" }} />}
+      >
+        <Stack direction="column" alignItems="flex-start" sx={{ ml: 1 }}>
+          <Typography variant="subtitle1" fontWeight="bold">AI Report</Typography>
+          <Typography variant="caption" color="text.secondary">
+            Ask questions about inventory and get AI-powered insights
+          </Typography>
+        </Stack>
+      </Button>
+
+      {/* Generate Report (Premade) Button */}
+      <Button
+        fullWidth
+        variant="outlined"
+        onClick={() => {
+          setReportModalOpen(false);
+          setPremadeReportDialogOpen(true);
+        }}
+        sx={{
+          justifyContent: "flex-start",
+          p: 2,
+          borderRadius: 2,
+          borderColor: "#4caf50",
+          "&:hover": {
+            bgcolor: "rgba(76, 175, 80, 0.04)",
+            borderColor: "#4caf50"
+          }
+        }}
+        startIcon={<PictureAsPdfIcon sx={{ color: "#4caf50" }} />}
+      >
+        <Stack direction="column" alignItems="flex-start" sx={{ ml: 1 }}>
+          <Typography variant="subtitle1" fontWeight="bold">Generate Report</Typography>
+          <Typography variant="caption" color="text.secondary">
+            Select from premade templates (Availability, Maintenance, etc.)
+          </Typography>
+        </Stack>
+      </Button>
+
+      {/* Custom Report Button */}
+      <Button
+        fullWidth
+        variant="outlined"
+        onClick={() => {
+          setReportModalOpen(false);
+          setReportDialogOpen(true);
+        }}
+        sx={{
+          justifyContent: "flex-start",
+          p: 2,
+          borderRadius: 2,
+          borderColor: "#ff9800",
+          "&:hover": {
+            bgcolor: "rgba(255, 152, 0, 0.04)",
+            borderColor: "#ff9800"
+          }
+        }}
+        startIcon={<FilterListIcon sx={{ color: "#ff9800" }} />}
+      >
+        <Stack direction="column" alignItems="flex-start" sx={{ ml: 1 }}>
+          <Typography variant="subtitle1" fontWeight="bold">Custom Report</Typography>
+          <Typography variant="caption" color="text.secondary">
+            Select specific fields and apply filters
+          </Typography>
+        </Stack>
+      </Button>
+    </Stack>
+  </DialogContent>
+  <DialogActions>
+    <Button onClick={() => setReportModalOpen(false)}>Cancel</Button>
+  </DialogActions>
+</Dialog>
+
+
+<Dialog 
+  open={premadeReportDialogOpen} 
+  onClose={() => {
+    setPremadeReportDialogOpen(false);
+    setSelectedReportTemplate("");
+  }}
+  maxWidth="md"
+  fullWidth
+>
+  <DialogTitle>
+    <Stack direction="row" spacing={1} alignItems="center">
+      <PictureAsPdfIcon color="success" />
+      <Typography variant="h6">Generate Excel Report - Select Template</Typography>
+    </Stack>
+  </DialogTitle>
+  <DialogContent dividers>
+    <Typography variant="body2" color="text.secondary" gutterBottom>
+      Choose a report template to generate an Excel file with the official header
+    </Typography>
+    
+    <Stack spacing={2} sx={{ mt: 2 }}>
+      <FormControl fullWidth>
+        <InputLabel>Select Report Type</InputLabel>
+        <Select
+          value={selectedReportTemplate}
+          onChange={(e) => setSelectedReportTemplate(e.target.value)}
+          label="Select Report Type"
+        >
+          <MenuItem value="availability">
+            <Box>
+              <Typography variant="subtitle2">📊 Availability of Items</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Shows which items are available vs borrowed
+              </Typography>
+            </Box>
+          </MenuItem>
+          <MenuItem value="maintenance">
+            <Box>
+              <Typography variant="subtitle2">🔧 Maintenance Schedule</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Equipment requiring maintenance
+              </Typography>
+            </Box>
+          </MenuItem>
+          <MenuItem value="lowstock">
+            <Box>
+              <Typography variant="subtitle2">⚠️ Low Stock Alert</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Items below stock alert level
+              </Typography>
+            </Box>
+          </MenuItem>
+          <MenuItem value="fullinventory">
+            <Box>
+              <Typography variant="subtitle2">📋 Full Inventory Report</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Complete list of all items
+              </Typography>
+            </Box>
+          </MenuItem>
+        </Select>
+      </FormControl>
+      
+      {selectedReportTemplate && (
+        <Paper sx={{ p: 2, bgcolor: "grey.50" }}>
+          <Typography variant="body2">
+            <strong>Preview:</strong> This report will include all {itemType.toLowerCase()} items.
+          </Typography>
+        </Paper>
+      )}
+    </Stack>
+  </DialogContent>
+  
+  <DialogActions>
+    <Button onClick={() => {
+      setPremadeReportDialogOpen(false);
+      setSelectedReportTemplate("");
+    }}>
+      Cancel
+    </Button>
+    <Button 
+      variant="contained" 
+      onClick={handleGeneratePremadeExcel}
+      disabled={!selectedReportTemplate}
+      color="success"
+      startIcon={<PictureAsPdfIcon />}
+    >
+      Generate Excel Report
+    </Button>
+  </DialogActions>
+</Dialog>
     </Container>
   );
 };

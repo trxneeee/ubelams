@@ -388,9 +388,26 @@ export default function BorrowPage() {
           payload.returnedIdentifiers = item.returnedIdentifiers;
         }
 
+        // 1. Update borrow record item status
         updatePromises.push(
           axios.put(`${API_BASE_URL}/borrow-records/${selectedBorrowForReturn._id}/items/${item.itemId}`, payload)
         );
+
+        // 2. For each returned identifier, update inventory status and borrowed count
+        if (item.itemType === 'non-consumable' && item.returnedIdentifiers && item.returnedIdentifiers.length > 0) {
+          for (const identifier of item.returnedIdentifiers) {
+            // Update the status of the identifier in the inventory and decrement borrowed count
+            updatePromises.push(
+              axios.post(`${API_BASE_URL}/nc-inventory`, {
+                action: "update_identifier_status_and_borrowed",
+                identifier: identifier,
+                status: item.condition?.toLowerCase() || "good", // e.g. "good", "damaged", etc.
+                // Optionally, you can pass the item_id or equipment_num if needed for more precise update
+                item_id: item.itemId
+              })
+            );
+          }
+        }
       }
 
       const results = await Promise.allSettled(updatePromises);
@@ -830,6 +847,13 @@ const handleGeneratePDF2 = () => {
       }
 
       if (!resObj) {
+        setCurrentReservation(null);
+        setError("Reservation not found");
+        return null;
+      }
+
+      // --- FIX: Only allow reservations with status "Assigned" ---
+      if (resObj.status !== "Assigned") {
         setCurrentReservation(null);
         setError("Reservation not found");
         return null;
@@ -1400,6 +1424,7 @@ const handleGeneratePDF2 = () => {
 
       const borrowData = {
         ...requestForm,
+        group_leader: requestForm.borrow_user,
         borrow_type: borrowType,
         user_type: userType,
         items: selectedItems.map(item => ({
@@ -1410,7 +1435,8 @@ const handleGeneratePDF2 = () => {
           status: 'Borrowed',
           identifiers: item.selected_identifiers ? item.selected_identifiers.map(id => ({ identifier: id, status: 'Borrowed' })) : []
         })),
-        group_members: groupMembers,
+        // --- FIX: Always include group_members for Group type ---
+        group_members: userType === 'Group' ? groupMembers : [],
         managed_by,
         managed_name
       };
@@ -1552,7 +1578,7 @@ const handleGeneratePDF2 = () => {
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={3} justifyContent="space-between" alignItems="center">
         <Stack direction="row" spacing={1} sx={{ flex: 1, maxWidth: 600 }} alignItems="center">
           <TextField
-            placeholder="Search course, leader, instructor, subject, reservation code..."
+            placeholder="Search program, leader, instructor, subject, reservation code..."
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
@@ -1794,8 +1820,7 @@ const handleGeneratePDF2 = () => {
                     </TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Date</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Type</TableCell>
-                    <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Course</TableCell>
-                    <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Group</TableCell>
+                    <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Program</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Leader</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Instructor</TableCell>
                     <TableCell sx={{ bgcolor: "grey.50", fontWeight: "bold" }}>Schedule</TableCell>
@@ -1848,7 +1873,6 @@ const handleGeneratePDF2 = () => {
                             {r.course}
                           </Typography>
                         </TableCell>
-                        <TableCell>{r.group_number || '-'}</TableCell>
                         <TableCell>
                           <Box>
                             <Typography variant="body2" fontWeight="medium">
@@ -1863,14 +1887,43 @@ const handleGeneratePDF2 = () => {
                         </TableCell>
                         <TableCell>{r.instructor}</TableCell>
                         <TableCell>{r.schedule}</TableCell>
-                        <TableCell>
-                          <Chip 
-                            label={r.status} 
-                            size="small" 
-                            color={r.status === "Returned" ? "success" : "error"} 
-                            variant={r.status === "Returned" ? "filled" : "outlined"} 
-                          />
-                        </TableCell>
+                      <TableCell>
+  {/* Main status */}
+  <Chip 
+    label={r.status} 
+    size="small" 
+    color={r.status === "Returned" ? "success" : "error"} 
+    variant={r.status === "Returned" ? "filled" : "outlined"} 
+  />
+
+  {/* Condition summary as an orange chip */}
+  {(() => {
+    const nonConsumableItems = (r.items || []).filter(it => it.item_type === 'non-consumable');
+
+    const condCount: Record<string, number> = {};
+    nonConsumableItems.forEach(it => {
+      const cond = (it.return_condition || it.status || '').toLowerCase();
+      if (cond && cond !== 'good' && cond !== 'borrowed' && cond !== 'returned') {
+        condCount[cond] = (condCount[cond] || 0) + 1;
+      }
+    });
+
+    const condSummary = Object.entries(condCount)
+      .map(([cond, count]) => `${count} ${cond.charAt(0).toUpperCase() + cond.slice(1)}`)
+      .join(', ');
+
+    return condSummary ? (
+      <Chip
+        label={condSummary}
+        size="small"
+        color="warning"
+        variant="filled"
+        sx={{ mt: 0.5}}
+      />
+    ) : null;
+  })()}
+</TableCell>
+
                        <TableCell>
   <Stack direction="row" spacing={1} justifyContent="center">
     {/* View Button - Only for viewing */}
@@ -1979,7 +2032,7 @@ const handleGeneratePDF2 = () => {
             >
               {steps.map((label) => (
                 <Step key={label}>
-                  <StepLabel>{label}</StepLabel>
+                                                                     <StepLabel>{label}</StepLabel>
                 </Step>
               ))}
             </Stepper>
@@ -2095,7 +2148,7 @@ const handleGeneratePDF2 = () => {
                           ✓ Reservation Found: {currentReservation.reservation_code}
                         </Typography>
                         <Typography variant="body2" color="success.dark">
-                          Course: {currentReservation.course} | Instructor: {currentReservation.instructor}
+                          Program: {currentReservation.course} | Instructor: {currentReservation.instructor}
                         </Typography>
                         <Typography variant="body2" color="success.dark">
                           Items: {currentReservation.assigned_items?.length || 0} assigned items
@@ -2127,7 +2180,7 @@ const handleGeneratePDF2 = () => {
               )}
 
               <TextField
-                label="Course"
+                label="Program"
                 value={requestForm.course}
                 onChange={(e) => setRequestForm({ ...requestForm, course: e.target.value })}
                 fullWidth
@@ -2419,7 +2472,7 @@ const handleGeneratePDF2 = () => {
                     <Typography variant="body2" fontWeight="medium">{requestForm.borrow_user}</Typography>
                   </Box>
                   <Box sx={{ display: "flex" }}>
-                    <Typography variant="body2" sx={{ minWidth: 120 }}>Course:</Typography>
+                    <Typography variant="body2" sx={{ minWidth: 120 }}>Program:</Typography>
                     <Typography variant="body2" fontWeight="medium">{requestForm.course}</Typography>
                   </Box>
                   {userType === 'Group' && (
@@ -2658,7 +2711,7 @@ const handleGeneratePDF2 = () => {
                 Selected ({selectedIdentifiers.length}):
               </Typography>
               <Typography variant="body2">
-                {selectedIdentifiers.join("; ")}
+                {selectedIdentifiers.join('; ')}
               </Typography>
             </Paper>
           )}
@@ -2946,7 +2999,7 @@ What's the average return time for different courses?"
                       <Typography variant="body2">{viewBorrowRecord.borrow_user}</Typography>
                     </Box>
                     <Box sx={{ display: "flex" }}>
-                      <Typography variant="body2" sx={{ minWidth: 120 }}>Course:</Typography>
+                      <Typography variant="body2" sx={{ minWidth: 120 }}>Program:</Typography>
                       <Typography variant="body2">{viewBorrowRecord.course}</Typography>
                     </Box>
                     <Box sx={{ display: "flex" }}>
@@ -2973,6 +3026,7 @@ What's the average return time for different courses?"
                       <Typography variant="body2" sx={{ minWidth: 120 }}>Schedule:</Typography>
                       <Typography variant="body2">{viewBorrowRecord.schedule}</Typography>
                     </Box>
+                    {/* Add return status information */}
                     <Box sx={{ display: "flex" }}>
                       <Typography variant="body2" sx={{ minWidth: 120 }}>Status:</Typography>
                       <Chip 
@@ -2983,12 +3037,6 @@ What's the average return time for different courses?"
                           viewBorrowRecord.status === "Partially Returned" ? "warning" : "error"
                         } 
                       />
-                    </Box>
-                    <Box sx={{ display: "flex" }}>
-                      <Typography variant="body2" sx={{ minWidth: 120 }}>Date Borrowed:</Typography>
-                      <Typography variant="body2">
-                        {viewBorrowRecord.date_borrowed ? new Date(viewBorrowRecord.date_borrowed).toLocaleString() : "-"}
-                      </Typography>
                     </Box>
                     {viewBorrowRecord.date_returned && (
                       <Box sx={{ display: "flex" }}>

@@ -91,9 +91,9 @@ const Header = () => {
     // Student Assistants, Custodian, Admin -> full tabs
     tabIcons = [
       { to: "/dashboard", label: "Home", icon: <AiOutlineHome size={24} />, active: <AiFillHome size={24} /> },
-      ...(userRoles === "Custodian" || userRoles === "Admin" ? [{ to: "/staff", label: "Staff", icon: <AiOutlineUser size={24} />, active: <MdPerson size={24} /> }] : []),
+      ...(userRoles === "Custodian" || userRoles === "Admin" ? [{ to: "/staff", label: "User", icon: <AiOutlineUser size={24} />, active: <MdPerson size={24} /> }] : []),
       // Subjects & Courses management (Custodian/Admin only)
-      ...(userRoles === "Custodian" || userRoles === "Admin" ? [{ to: "/subjects-courses", label: "Subjects & Courses", icon: <AiOutlineDatabase size={24} />, active: <AiFillDatabase size={24} /> }] : []),
+      ...(userRoles === "Custodian" || userRoles === "Admin" ? [{ to: "/subjects-courses", label: "Cour/Prog", icon: <AiOutlineDatabase size={24} />, active: <AiFillDatabase size={24} /> }] : []),
       ...(userRoles === "Custodian" || userRoles === "Admin" ? [{ to: "/allforecast", label: "Forecast", icon: <AiOutlineGold size={24} />, active: <AiFillGold size={24} /> }] : []),
       { to: "/reservation", label: "Reservation", icon: <AiOutlineBook size={24} />, active: <AiFillBook size={24} /> },
       { to: "/borrow", label: "Borrow", icon: <AiOutlineFileSearch size={24} />, active: <MdEditDocument size={24} /> },
@@ -277,7 +277,7 @@ const Header = () => {
           {/* LEFT: Branding - ECE Laboratory Asset Management System / University of Baguio */}
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, mr: 2 }}>
             <Box sx={{ display: { xs: "none", sm: "block" } }}>
-              <Typography variant="h6" sx={{ color: "white", fontWeight: "bold", lineHeight: 1 }}>
+              <Typography sx={{ color: "white", fontWeight: "bold", lineHeight: 1 }}>
                 ECE Laboratory Asset Management System
               </Typography>
               <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.9)" }}>
@@ -326,56 +326,60 @@ const Header = () => {
           {!isMobile && (
             // absolutely center tabs so they remain centered regardless of left/right content width
             <Box
-              sx={{
-                position: "absolute",
-                left: "50%",
-                top: 0,
-                transform: "translateX(-50%)",
-                height: "100%",
-                display: "flex",
-                alignItems: "center",
-                pointerEvents: "auto",
-                zIndex: 1
-              }}
-            >
-              <Tabs
-                value={value}
-                onChange={handleChange}
-                textColor="inherit"
-                TabIndicatorProps={{ style: { display: "none" } }}
-                sx={{
-                  "& .MuiTab-root": {
-                    minWidth: 60,
-                    color: "white",
-                    borderRadius: "12px",
-                    padding: "6px 12px",
-                    transition: "0.3s",
-                    marginLeft: 1,
-                    marginRight: 1,
-                    "&:hover": {
-                      backgroundColor: "white",
-                      color: "#b91c1c",
-                      boxShadow: 2,
-                    },
-                  },
-                  "& .Mui-selected": {
-                    backgroundColor: "white",
-                    color: "#b91c1c",
-                    fontWeight: "bold",
-                    boxShadow: 2,
-                  },
-                }}
-              >
-                {tabIcons.map((tab) => (
-                  <Tab
-                    key={tab.to}
-                    icon={value === pathToIndex[tab.to] ? tab.active : tab.icon}
-                    component={Link}
-                    to={tab.to}
-                  />
-                ))}
-              </Tabs>
-            </Box>
+  sx={{
+    position: "absolute",
+    left: "50%",
+    top: 0,
+    transform: "translateX(-50%)",
+    height: "100%",
+    display: "flex",
+    alignItems: "center",
+    pointerEvents: "auto",
+    zIndex: 1
+  }}
+>
+  <Tabs
+    value={value}
+    onChange={handleChange}
+    textColor="inherit"
+    TabIndicatorProps={{ style: { display: "none" } }}
+    sx={{
+      "& .MuiTab-root": {
+        minWidth: 70,
+        color: "white",
+        borderRadius: "12px",
+        padding: "8px 12px",
+        transition: "0.3s",
+        marginLeft: 1,
+        marginRight: 1,
+        display: "flex",
+        flexDirection: "column",
+        "& .MuiTab-iconWrapper": {
+          marginBottom: "4px",
+        },
+        "&:hover": {
+          backgroundColor: "#f5f6f8",
+          color: "#b91c1c",
+        },
+      },
+      "& .Mui-selected": {
+        backgroundColor: "#f5f6f8",
+        color: "#b91c1c",
+        fontWeight: "bold",
+      },
+    }}
+  >
+    {tabIcons.map((tab) => (
+      <Tab
+        key={tab.to}
+        icon={value === pathToIndex[tab.to] ? tab.active : tab.icon}
+        label={tab.label}
+        component={Link}
+        to={tab.to}
+      />
+    ))}
+  </Tabs>
+</Box>
           )}
 
           {/* Profile Section - right aligned on desktop */}

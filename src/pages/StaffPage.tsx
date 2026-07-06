@@ -32,6 +32,10 @@ import {
   TablePagination,
   Tabs,
   Tab,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import Loader from "../components/Loader";
@@ -41,6 +45,7 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import SearchIcon from "@mui/icons-material/Search";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import PersonIcon from "@mui/icons-material/Person";
+import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettings";
 import { useTheme } from "@mui/material/styles";
 import UBLogo from "../assets/ublogo.png"; // Place UB logo at src/assets/ub-logo.png
 import DialogContentText from "@mui/material/DialogContentText";
@@ -85,6 +90,12 @@ export default function StaffPage() {
   const [viewUser, setViewUser] = useState<Staff | null>(null);
   const [userBorrowRecords, setUserBorrowRecords] = useState<any[]>([]);
   const [userReservationRecords, setUserReservationRecords] = useState<any[]>([]);
+  
+  // Change Role Modal State
+  const [changeRoleOpen, setChangeRoleOpen] = useState(false);
+  const [selectedStaffForRoleChange, setSelectedStaffForRoleChange] = useState<Staff | null>(null);
+  const [newRole, setNewRole] = useState("");
+  
   const navigate = useNavigate();
   const theme = useTheme();
 
@@ -105,7 +116,6 @@ export default function StaffPage() {
       boxShadow: "0 8px 20px rgba(183,28,28,0.12)",
     },
   };
-
 
   // --- NEW: pagination for main staff table (max 10 rows per page) ---
   const [staffPage, setStaffPage] = useState(0);
@@ -291,6 +301,61 @@ export default function StaffPage() {
     );
   };
 
+  // Handle role change
+  const handleChangeRole = async () => {
+    if (!selectedStaffForRoleChange || !newRole) return;
+    
+    setProcessing(true);
+    try {
+      await axios.post(`${API_BASE_URL}/users`, {
+        action: "update",
+        email: selectedStaffForRoleChange.email,
+        role: newRole
+      });
+      setSnackbar({ open: true, message: `Role updated to ${newRole} successfully`, severity: "success" });
+      setChangeRoleOpen(false);
+      setSelectedStaffForRoleChange(null);
+      setNewRole("");
+      fetchStaffs();
+    } catch (err: any) {
+      console.error("Failed to update role", err);
+      const errorMessage = err.response?.data?.error || "Failed to update role";
+      setSnackbar({ open: true, message: errorMessage, severity: "error" });
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // Get available roles for changing based on current user's role and target user's role
+  const getAvailableRolesForChange = (currentRole: string) => {
+    if (!user) return [];
+    
+    // Don't allow changing roles for Admin accounts (except by another Admin maybe)
+    if (currentRole === "Admin" && user.role !== "Admin") {
+      return [];
+    }
+    
+    switch (user.role) {
+      case "Admin":
+        // Admin can change to any role except maybe their own if it's the only Admin
+        return ["Custodian", "Student Assistant", "Program Chair", "Instructor", "Student"];
+      case "Program Chair":
+        // Program Chair can change to Student Assistant and Instructor
+        if (currentRole === "Student Assistant" || currentRole === "Instructor") {
+          return ["Student Assistant", "Instructor"];
+        }
+        return [];
+      case "Custodian":
+        // Custodian can only change to Student Assistant
+        if (currentRole === "Student Assistant") {
+          return ["Student Assistant"];
+        }
+        return [];
+      default:
+        return [];
+    }
+  };
+
   // Get available roles based on current user's role
   const getAvailableRoles = () => {
     if (!user) return ["Student Assistant"];
@@ -469,6 +534,18 @@ export default function StaffPage() {
     } else if (user.role === "Student Assistant") {
       await fetchManagedBorrowRecords(user);
     }
+  };
+
+  // Open change role modal
+  const handleOpenChangeRole = (staff: Staff) => {
+    const availableRoles = getAvailableRolesForChange(staff.role);
+    if (availableRoles.length === 0) {
+      setSnackbar({ open: true, message: "You don't have permission to change this user's role", severity: "error" });
+      return;
+    }
+    setSelectedStaffForRoleChange(staff);
+    setNewRole(staff.role);
+    setChangeRoleOpen(true);
   };
 
   // UB color palette
@@ -671,7 +748,7 @@ export default function StaffPage() {
 
       {/* Action bar inside a card for visual consistency */}
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2} mb={3} justifyContent="space-between" alignItems="center">
-  <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ flex: 1 }}>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" sx={{ flex: 1 }}>
           <Box sx={{ maxWidth: 420, width: "100%" }}>
             <TextField
               placeholder="Search name or email..."
@@ -679,23 +756,23 @@ export default function StaffPage() {
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               fullWidth
-               sx={{
-              flex: 1,
-              bgcolor: "background.paper",
-              borderRadius: 3,
-              "& .MuiOutlinedInput-root": {
+              sx={{
+                flex: 1,
+                bgcolor: "background.paper",
                 borderRadius: 3,
-                "& fieldset": {
+                "& .MuiOutlinedInput-root": {
                   borderRadius: 3,
+                  "& fieldset": {
+                    borderRadius: 3,
+                  },
+                  "&:hover fieldset": {
+                    borderColor: "#b91c1c",
+                  },
+                  "&.Mui-focused fieldset": {
+                    borderColor: "#b91c1c",
+                  },
                 },
-                "&:hover fieldset": {
-                  borderColor: "#b91c1c",
-                },
-                "&.Mui-focused fieldset": {
-                  borderColor: "#b91c1c",
-                },
-              },
-            }}
+              }}
               InputProps={{
                 startAdornment: <InputAdornment position="start"><SearchIcon color="action" /></InputAdornment>,
               }}
@@ -776,7 +853,6 @@ export default function StaffPage() {
             <Table stickyHeader>
               <TableHead>
                 <TableRow>
-                  {/* ...existing header cells... */}
                   <TableCell
                     padding="checkbox"
                     sx={{
@@ -819,7 +895,14 @@ export default function StaffPage() {
                   }}>
                     Email
                   </TableCell>
-                  {/* REMOVE Role column */}
+                  <TableCell sx={{
+                    bgcolor: "grey.50",
+                    fontWeight: "bold",
+                    color: "#b91c1c",
+                    borderBottom: "2px solid #b91c1c"
+                  }}>
+                    Role
+                  </TableCell>
                   <TableCell sx={{
                     bgcolor: "grey.50",
                     fontWeight: "bold",
@@ -862,15 +945,38 @@ export default function StaffPage() {
                       )}
                     </TableCell>
                     <TableCell>{staff.email}</TableCell>
-                    {/* REMOVE Role cell */}
+                    <TableCell>
+                      <Chip
+                        label={staff.role}
+                        size="small"
+                        sx={{
+                          bgcolor: alpha(getRoleColor(staff.role), 0.1),
+                          color: getRoleColor(staff.role),
+                          fontWeight: "bold",
+                          "& .MuiChip-label": { px: 1 }
+                        }}
+                      />
+                    </TableCell>
                     <TableCell>
                       <Stack direction="row" spacing={1}>
+                        {/* Change Role button - shown for non-Custodian roles and based on permissions */}
+                        {getAvailableRolesForChange(staff.role).length > 0 && (
+                          <Button
+                            size="small"
+                            onClick={() => handleOpenChangeRole(staff)}
+                            sx={actionBtnSx}
+                            title="Change Role"
+                          >
+                            <AdminPanelSettingsIcon fontSize="small" />
+                          </Button>
+                        )}
                         {/* Only show Records/View icon for non-Custodian roles */}
                         {staff.role !== "Custodian" && (
                           <Button
                             size="small"
                             onClick={() => handleViewUser(staff)}
-                            sx={actionBtnSx} // <- replaced inline styles
+                            sx={actionBtnSx}
+                            title="View Records"
                           >
                             <VisibilityIcon fontSize="small" />
                           </Button>
@@ -878,7 +984,8 @@ export default function StaffPage() {
                         <Button
                           size="small"
                           onClick={() => handleDelete(staff.email)}
-                          sx={actionBtnSx} // <- replaced inline styles
+                          sx={actionBtnSx}
+                          title="Delete Account"
                         >
                           <DeleteIcon fontSize="small" />
                         </Button>
@@ -1183,10 +1290,98 @@ export default function StaffPage() {
         </DialogActions>
       </Dialog>
 
+      {/* Change Role Modal */}
+      <Dialog open={changeRoleOpen} onClose={() => setChangeRoleOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: "bold", color: "#B71C1C", bgcolor: "#f5f5f5" }}>
+          Change User Role
+        </DialogTitle>
+        <DialogContent dividers sx={{ bgcolor: "#fafafa" }}>
+          {selectedStaffForRoleChange && (
+            <Stack spacing={3}>
+              <Box>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  User: <strong>{selectedStaffForRoleChange.firstname && selectedStaffForRoleChange.lastname 
+                    ? `${selectedStaffForRoleChange.firstname} ${selectedStaffForRoleChange.lastname}`
+                    : selectedStaffForRoleChange.email}</strong>
+                </Typography>
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  Current Role: <Chip 
+                    label={selectedStaffForRoleChange.role} 
+                    size="small"
+                    sx={{
+                      bgcolor: alpha(getRoleColor(selectedStaffForRoleChange.role), 0.1),
+                      color: getRoleColor(selectedStaffForRoleChange.role),
+                      fontWeight: "bold",
+                      ml: 1
+                    }}
+                  />
+                </Typography>
+              </Box>
+              
+              <FormControl fullWidth>
+                <InputLabel>New Role</InputLabel>
+                <Select
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value)}
+                  label="New Role"
+                >
+                  {getAvailableRolesForChange(selectedStaffForRoleChange.role).map((role) => (
+                    <MenuItem key={role} value={role}>
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                        <Box sx={{
+                          width: 10,
+                          height: 10,
+                          borderRadius: "50%",
+                          bgcolor: getRoleColor(role),
+                        }} />
+                        {role}
+                      </Box>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              
+              <Alert severity="info" sx={{ borderRadius: 2 }}>
+                Changing a user's role will update their permissions and access levels in the system.
+              </Alert>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2, bgcolor: "#f5f5f5" }}>
+          <Button 
+            onClick={() => setChangeRoleOpen(false)} 
+            sx={{ 
+              textTransform: "none", 
+              color: "#B71C1C", 
+              fontWeight: "bold",
+              borderRadius: 2,
+              px: 3
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleChangeRole}
+            disabled={!newRole || newRole === selectedStaffForRoleChange?.role}
+            sx={{
+              bgcolor: "#B71C1C",
+              "&:hover": { bgcolor: "#D32F2F" },
+              textTransform: "none",
+              borderRadius: 2,
+              px: 3,
+              fontWeight: "bold"
+            }}
+          >
+            Change Role
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Add Staff Dialog */}
       <Dialog open={open} onClose={() => !processing && setOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ fontWeight: "bold", color: "#B71C1C", bgcolor: "#f5f5f5" }}>
-         Account Details
+          Account Details
         </DialogTitle>
 
         <DialogContent dividers sx={{ bgcolor: "#fafafa" }}>

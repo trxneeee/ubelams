@@ -54,13 +54,35 @@ export default function StudentPrepPage() {
 
   // SVG ref + preview image for the "View saved prep" dialog
   const svgRefView = useRef<SVGSVGElement | null>(null);
+  // SVG ref for the generated barcode (used across effects / rendering)
+  const svgRef = useRef<SVGSVGElement | null>(null);
   const [previewImageView, setPreviewImageView] = useState<string | null>(null);
 
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
-  // SVG ref for JsBarcode rendering
-  const svgRef = useRef<SVGSVGElement | null>(null);
+  // Responsive barcode container refs and measured widths
+  const barcodeContainerRef = useRef<HTMLDivElement | null>(null);
+  const barcodeViewContainerRef = useRef<HTMLDivElement | null>(null);
+  const [barcodeWidth, setBarcodeWidth] = useState<number>(420);
+  const [barcodeViewWidth, setBarcodeViewWidth] = useState<number>(420);
+
+  useEffect(() => {
+    const updateWidths = () => {
+      try {
+        const cW = barcodeContainerRef.current?.clientWidth ?? Math.min(window.innerWidth - 48, 720);
+        const vW = barcodeViewContainerRef.current?.clientWidth ?? Math.min(window.innerWidth - 48, 720);
+        setBarcodeWidth(Math.max(220, Math.min(cW, 720)));
+        setBarcodeViewWidth(Math.max(220, Math.min(vW, 720)));
+      } catch {
+        setBarcodeWidth(420);
+        setBarcodeViewWidth(420);
+      }
+    };
+    updateWidths();
+    window.addEventListener("resize", updateWidths);
+    return () => window.removeEventListener("resize", updateWidths);
+  }, []);
 
   // Add helper to extract user's full name and student id from email
   const getCurrentUserNameAndId = () => {
@@ -189,69 +211,70 @@ export default function StudentPrepPage() {
         const JsBarcode = JsBarcodeModule.default || JsBarcodeModule;
         if (!mounted) return;
         if (svgRef.current) {
-          // Ensure a consistent render size for SVG so the PNG conversion has predictable dimensions
+          // Responsive sizing: use measured container width
+          const width = Math.round(barcodeWidth);
+          const height = Math.max(64, Math.round(width * 0.24));
           svgRef.current.innerHTML = "";
-          // Optionally set explicit width to improve raster quality
-          svgRef.current.setAttribute("width", "420");
-          svgRef.current.setAttribute("height", "100");
+          svgRef.current.setAttribute("width", String(width));
+          svgRef.current.setAttribute("height", String(height));
+          svgRef.current.setAttribute("viewBox", `0 0 ${width} ${height}`);
           JsBarcode(svgRef.current, barcode, {
             format: "CODE128",
             displayValue: true,
-            height: 60,
+            height: Math.max(40, Math.round(height * 0.6)),
             textMargin: 4,
-            fontSize: 14,
-            margin: 10
+            fontSize: Math.max(10, Math.round(width / 36)),
+            margin: Math.max(6, Math.round(width * 0.02))
           });
 
-          // After rendering SVG, convert to PNG data URL for preview/download
-          try {
-            // Serialize SVG to string
-            const serializer = new XMLSerializer();
-            const svgString = serializer.serializeToString(svgRef.current);
-            // Create a Blob and an objectURL for the SVG string
-            const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
-            const url = URL.createObjectURL(svgBlob);
+           // After rendering SVG, convert to PNG data URL for preview/download
+           try {
+             // Serialize SVG to string
+             const serializer = new XMLSerializer();
+             const svgString = serializer.serializeToString(svgRef.current);
+             // Create a Blob and an objectURL for the SVG string
+             const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+             const url = URL.createObjectURL(svgBlob);
 
-            // Create an Image to draw onto canvas
-            const img = new Image();
-            // Ensure crossOrigin to avoid tainting (if served locally this is fine)
-            img.crossOrigin = "anonymous";
-            img.onload = () => {
-              if (!mounted) {
-                URL.revokeObjectURL(url);
-                return;
-              }
-              // Create canvas sized to image natural dimensions (scale for better quality)
-              const canvas = document.createElement("canvas");
-              // scale up for better DPI (2x)
-              const scale = 2;
-              canvas.width = (img.naturalWidth || 420) * scale;
-              canvas.height = (img.naturalHeight || 100) * scale;
-              const ctx = canvas.getContext("2d");
-              if (ctx) {
-                ctx.fillStyle = "#ffffff"; // white background
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                try {
-                  const pngData = canvas.toDataURL("image/png");
-                  setPreviewImage(pngData);
-                } catch (err) {
-                  console.error("Failed to convert canvas to PNG:", err);
-                  setPreviewImage(null);
-                }
-              }
-              URL.revokeObjectURL(url);
-            };
+             // Create an Image to draw onto canvas
+             const img = new Image();
+             // Ensure crossOrigin to avoid tainting (if served locally this is fine)
+             img.crossOrigin = "anonymous";
+             img.onload = () => {
+               if (!mounted) {
+                 URL.revokeObjectURL(url);
+                 return;
+               }
+               // Create canvas sized to measured width/height (scale for better DPI)
+               const scale = 2;
+               const canvas = document.createElement("canvas");
+               canvas.width = width * scale;
+               canvas.height = height * scale;
+               const ctx = canvas.getContext("2d");
+               if (ctx) {
+                 ctx.fillStyle = "#ffffff"; // white background
+                 ctx.fillRect(0, 0, canvas.width, canvas.height);
+                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                 try {
+                   const pngData = canvas.toDataURL("image/png");
+                   setPreviewImage(pngData);
+                 } catch (err) {
+                   console.error("Failed to convert canvas to PNG:", err);
+                   setPreviewImage(null);
+                 }
+               }
+               URL.revokeObjectURL(url);
+             };
             img.onerror = (e) => {
               console.error("Failed to load SVG image for conversion", e);
               URL.revokeObjectURL(url);
               setPreviewImage(null);
             };
             img.src = url;
-          } catch (convErr) {
-            console.error("SVG-to-PNG conversion failed:", convErr);
-            setPreviewImage(null);
-          }
+           } catch (convErr) {
+             console.error("SVG-to-PNG conversion failed:", convErr);
+             setPreviewImage(null);
+           }
         }
       } catch (err) {
         console.error("Failed to render barcode, ensure jsbarcode is installed:", err);
@@ -260,7 +283,7 @@ export default function StudentPrepPage() {
     })();
 
     return () => { mounted = false; };
-  }, [barcode]);
+  }, [barcode, barcodeWidth]);
 
   // Render selectedPrep.group_barcode into SVG + generate PNG preview
   useEffect(() => {
@@ -277,52 +300,55 @@ export default function StudentPrepPage() {
         const JsBarcode = JsBarcodeModule.default || JsBarcodeModule;
         if (!mounted) return;
         if (svgRefView.current) {
+          const width = Math.round(barcodeViewWidth);
+          const height = Math.max(64, Math.round(width * 0.24));
           svgRefView.current.innerHTML = "";
-          svgRefView.current.setAttribute("width", "420");
-          svgRefView.current.setAttribute("height", "100");
+          svgRefView.current.setAttribute("width", String(width));
+          svgRefView.current.setAttribute("height", String(height));
+          svgRefView.current.setAttribute("viewBox", `0 0 ${width} ${height}`);
           JsBarcode(svgRefView.current, String(selectedPrep.group_barcode), {
             format: "CODE128",
             displayValue: true,
-            height: 60,
+            height: Math.max(40, Math.round(height * 0.6)),
             textMargin: 4,
-            fontSize: 14,
-            margin: 10
+            fontSize: Math.max(10, Math.round(width / 36)),
+            margin: Math.max(6, Math.round(width * 0.02))
           });
 
-          // convert SVG -> PNG for preview & download
-          try {
-            const serializer = new XMLSerializer();
-            const svgString = serializer.serializeToString(svgRefView.current);
-            const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
-            const url = URL.createObjectURL(svgBlob);
-            const img = new Image();
-            img.crossOrigin = "anonymous";
-            img.onload = () => {
-              if (!mounted) { URL.revokeObjectURL(url); return; }
-              const canvas = document.createElement("canvas");
-              const scale = 2;
-              canvas.width = (img.naturalWidth || 420) * scale;
-              canvas.height = (img.naturalHeight || 100) * scale;
-              const ctx = canvas.getContext("2d");
-              if (ctx) {
-                ctx.fillStyle = "#ffffff";
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                try {
-                  const pngData = canvas.toDataURL("image/png");
-                  setPreviewImageView(pngData);
-                } catch (err) {
-                  setPreviewImageView(null);
-                }
-              }
-              URL.revokeObjectURL(url);
-            };
-            img.onerror = () => { URL.revokeObjectURL(url); setPreviewImageView(null); };
-            img.src = url;
-          } catch (convErr) {
-            console.error("SVG->PNG (view) failed:", convErr);
-            setPreviewImageView(null);
-          }
+           // convert SVG -> PNG for preview & download
+           try {
+             const serializer = new XMLSerializer();
+             const svgString = serializer.serializeToString(svgRefView.current);
+             const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+             const url = URL.createObjectURL(svgBlob);
+             const img = new Image();
+             img.crossOrigin = "anonymous";
+             img.onload = () => {
+               if (!mounted) { URL.revokeObjectURL(url); return; }
+               const scale = 2;
+               const canvas = document.createElement("canvas");
+               canvas.width = width * scale;
+               canvas.height = height * scale;
+               const ctx = canvas.getContext("2d");
+               if (ctx) {
+                 ctx.fillStyle = "#ffffff";
+                 ctx.fillRect(0, 0, canvas.width, canvas.height);
+                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                 try {
+                   const pngData = canvas.toDataURL("image/png");
+                   setPreviewImageView(pngData);
+                 } catch (err) {
+                   setPreviewImageView(null);
+                 }
+               }
+               URL.revokeObjectURL(url);
+             };
+             img.onerror = () => { URL.revokeObjectURL(url); setPreviewImageView(null); };
+             img.src = url;
+           } catch (convErr) {
+             console.error("SVG->PNG (view) failed:", convErr);
+             setPreviewImageView(null);
+           }
         }
       } catch (err) {
         console.error("JsBarcode import/render failed (view):", err);
@@ -331,7 +357,7 @@ export default function StudentPrepPage() {
     })();
 
     return () => { mounted = false; };
-  }, [selectedPrep]);
+  }, [selectedPrep, barcodeViewWidth]);
 
   const copyBarcode = async () => {
     if (!barcode) return;
@@ -491,8 +517,32 @@ export default function StudentPrepPage() {
                 )}
                 {/* Show PNG preview image if available */}
                 {previewImage && (
-                  <Box sx={{ mt: 1 }}>
-                    <img src={previewImage} alt="barcode preview" style={{ maxWidth: 360, height: "auto", display: "block", marginTop: 8 }} />
+                  <Box
+                    ref={barcodeContainerRef}
+                    sx={{
+                      mt: 1,
+                      width: isMobile ? "100%" : 420,
+                      maxWidth: "100%",
+                      overflowX: "auto",
+                    }}
+                  >
+                    {previewImage ? (
+                      <img
+                        src={previewImage}
+                        alt="barcode preview"
+                        style={{
+                          width: "100%",
+                          maxWidth: 720,
+                          height: "auto",
+                          display: "block",
+                          marginTop: 8,
+                          borderRadius: 6,
+                          background: "#fff"
+                        }}
+                      />
+                    ) : (
+                      <svg ref={svgRef} style={{ width: "100%", height: "auto", display: "block" }} />
+                    )}
                   </Box>
                 )}
               </Box>
@@ -567,10 +617,32 @@ export default function StudentPrepPage() {
               <TextField label="Leader ID" value={selectedPrep.group_leader_id || ''} InputProps={{ readOnly: true }} fullWidth />
 
               {/* Render both PNG preview (if generated) and inline SVG (for crispness / fallback) */}
-              <Box sx={{ mt: 1, display: 'flex', gap: 2, alignItems: 'flex-start', flexDirection: isMobile ? 'column' : 'row' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg ref={svgRefView} style={{ display: previewImageView ? 'block' : 'block', maxWidth: 360 }} />
-                </Box>
+              <Box
+                ref={barcodeViewContainerRef}
+                sx={{
+                  mt: 1,
+                  width: isMobile ? "100%" : 420,
+                  maxWidth: "100%",
+                  overflowX: "auto",
+                }}
+              >
+                {previewImageView ? (
+                  <img
+                    src={previewImageView}
+                    alt="barcode preview"
+                    style={{
+                      width: "100%",
+                      maxWidth: 720,
+                      height: "auto",
+                      display: "block",
+                      marginTop: 8,
+                      borderRadius: 6,
+                      background: "#fff"
+                    }}
+                  />
+                ) : (
+                  <svg ref={svgRefView} style={{ width: "100%", height: "auto", display: "block" }} />
+                )}
               </Box>
               <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
                 <Button size="small" variant="contained" onClick={downloadPrepImage}>Download Image</Button>
@@ -681,8 +753,33 @@ export default function StudentPrepPage() {
                 </Stack>
 
                 {/* SVG barcode rendered by JsBarcode */}
-                <Box sx={{ mt: 2, display: 'flex', justifyContent: isMobile ? 'center' : 'flex-start' }}>
-                  <svg ref={svgRef} />
+                <Box
+                  ref={barcodeContainerRef}
+                  sx={{
+                    mt: 2,
+                    width: isMobile ? "100%" : 420,
+                    maxWidth: "100%",
+                    overflowX: "auto",
+                    display: "flex",
+                    justifyContent: isMobile ? "center" : "flex-start"
+                  }}
+                >
+                  {previewImage ? (
+                    <img
+                      src={previewImage}
+                      alt="barcode preview"
+                      style={{
+                        width: "100%",
+                        maxWidth: 720,
+                        height: "auto",
+                        display: "block",
+                        background: "#fff",
+                        borderRadius: 6
+                      }}
+                    />
+                  ) : (
+                    <svg ref={svgRef} style={{ width: "100%", height: "auto", display: "block" }} />
+                  )}
                 </Box>
 
                 <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
